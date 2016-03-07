@@ -1,0 +1,5 @@
+include confs/*.yaml
+include plugins/slurm/vm-setup.lua
+include helpers/*
+include dist/pkeyd.service
+include LICENSE lib/pcocc/scripts/click/LICENSE

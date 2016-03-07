@@ -1,0 +1,10 @@
+[Unit]
+Description=Partition manager daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/pcocc internal pkeyd
+
+[Install]
+WantedBy=multi-user.target

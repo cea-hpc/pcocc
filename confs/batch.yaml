@@ -1,0 +1,15 @@
+# Batch manager
+type: slurm
+settings:
+ # List of etcd servers
+ etcd-servers:
+   - etcd1
+   - etcd2
+   - etcd3
+ # CA certificate
+ etcd-ca-cert: /etc/etcd/etcd-ca.crt
+ # Client port
+ etcd-client-port: 2379
+ # Protocol
+ etcd-protocol: https
+ etcd-auth-type: munge

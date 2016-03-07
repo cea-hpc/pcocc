@@ -1,0 +1,16 @@
+%if 0%{?rhel} == 6
+Requires: tunctl
+%endif
+
+%if 0%{?rhel} >= 7
+%global _with_systemd 1
+%endif
+
+%if 0%{?_with_systemd}
+%global _unitdir_installopt --unitdir %{_unitdir}
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
+BuildRequires: systemd
+%endif
+

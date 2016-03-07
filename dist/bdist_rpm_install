@@ -1,0 +1,6 @@
+#!/bin/sh
+
+python setup.py install %{_unitdir_installopt} --single-version-externally-managed -O1 --root=$RPM_BUILD_ROOT --record=INSTALLED_FILES
+
+# set no replace on configuration files
+sed -i 's_\(/etc/pcocc/[a-z]*\.yaml\)_%config(noreplace) \1_' INSTALLED_FILES

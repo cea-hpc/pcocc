@@ -1,0 +1,31 @@
+# # This configuration file holds system-wide definitions of templates
+
+# # First template
+# example:
+#   # Disk image directory
+#   image: /path/to/images/myexample
+
+#   # Resources to allocate (as defined in resources.yaml)
+#   resource-set: cluster
+
+#   # Mount points to expose via virtio-9p (default: none)
+#   # mount-points:
+#   #   homedir: /home
+
+#   #  custom-args:
+#   #    - '-cdrom'
+#   #    - /path/to/my-iso
+
+#   #  Qemu executable to use (default: look in $PATH)
+#   #  qemu-bin: /path/to/qemu/bin/qemu-system-x86
+
+#   #  Model of Ethernet cards (default: virtio-net)
+#   #  nic-model: e1000
+
+# # Second template
+# example2:
+#   # Disk image directory
+#   image: /path/to/images/myexample2
+
+#   # Resources to allocate (as defined in resources.yaml)
+#   resource-set: standalone

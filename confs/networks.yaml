@@ -1,0 +1,84 @@
+# This configuration file holds system-wide definitions of networks
+
+# Define an ethernet network NAT'ed to the host network
+# with a reverse NAT for the SSH port
+nat-rssh:
+  # Provides acces to the host network via NAT
+  type: nat
+  settings:
+    # Network for VM packets from the host point of view
+    # Select a free network range from the host side
+    nat-network: "10.255.0.0/16"
+
+    # Network for VM packets from the VMs point of view
+    # Select a free network range from VMs and host side
+    vm-network: "10.254.0.0/16"
+
+    # IP of the default gateway for VMs
+    # Select an IP in the VM network
+    vm-network-gw: "10.254.0.1"
+
+    # IP of VM interface
+    # Select an IP in the VM network
+    vm-ip: "10.254.0.2"
+
+    # MAC addr of the VM interface
+    vm-hwaddr: "52:54:00:44:AE:5E"
+
+    # Name of a bridge which will be created on hosts
+    bridge: "natbr"
+
+    # Prefix for TAP devices created on hosts
+    tap-prefix: "nattap"
+
+    # MTU of the network
+    mtu: 1500
+
+    # Domain name and DNS server to provide to VMs via DHCP
+    domain-name: "domain.name.com"
+    dns-server: "0.0.0.0"
+
+    reverse-nat:
+      # VM port to expose on the host
+      vm-port: 22
+      # Range of free ports on the host to use for reverse NAT
+      min-host-port: 60222
+      max-host-port: 60322
+
+
+# Define a private ethernet network isolated from the host
+pv:
+  # Private ethernet network isolated from the host
+  # Ethernet (Layer 2) inter-VM packets are relayed between hosts
+  # via a Layer 3 tunnel
+  type: pv
+  settings:
+    # Prefix for bridge devices created on the host
+    bridge-prefix: "pvbr"
+    # Prefix for TAP devices created on the host
+    tap-prefix: "pvtap"
+    # Network mtu
+    mtu: 1500
+    # Suffix to append to remote hostnames when tunneling
+    # Ethernet packets
+    host-if-suffix: ""
+
+
+# Define a private ifiniband network
+ib:
+  # Infiniband network based on SRIOV virtual functions
+  type: ib
+  settings:
+    # Host infiniband device
+    host-device: "mlx5_0"
+    # Range of PKeys to allocate for virtual clusters
+    min-pkey: "0x2000"
+    max-pkey: "0x3000"
+    # Resource manager token to request when allocating this network
+    license: "pkey"
+    # Name of opensm process
+    opensm-daemon: "opensm"
+    # Configuration file for opensm partitions
+    opensm-partition-cfg: /etc/opensm/partitions.conf
+    # Template for generating the configuration file for opensm partitions
+    opensm-partition-tpl: /etc/opensm/partitions.conf.tpl

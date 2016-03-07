@@ -1,0 +1,4 @@
+%if 0%{?_with_systemd}
+%systemd_postun_with_restart pkeyd.service
+%endif
+exit 0

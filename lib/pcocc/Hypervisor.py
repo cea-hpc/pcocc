@@ -694,7 +694,11 @@ class Qemu(object):
                     console_log_file.write(data)
 
                 elif s is client_sock:
-                    data = client_sock.recv(4096)
+                    try:
+                        data = client_sock.recv(4096)
+                    except:
+                        data = None
+
                     if data:
                         try:
                             qemu_console_sock.sendall(data)

@@ -88,6 +88,8 @@ A private Ethernet network is defined by using the type *pv*. A VM connected to 
       # Suffix to append to hostnames of remote hypervisors when
       # tunneling Ethernet packets
       host-if-suffix: ""
+      # Prefix for Ethernet interface MAC addresses
+      mac-prefix: "52:54:00"
 
 Since the current implementation has poor performance for broadcast packets, you may want to prevent broadcast traffic on large virtual clusters by setting permanent ARP entries for the IPs of each VM (see the cloud-config example in the Getting Started section).
 

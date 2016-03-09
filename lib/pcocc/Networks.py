@@ -99,6 +99,8 @@ definitions:
       settings:
         type: object
         properties:
+          mac-prefix:
+           type: string
           bridge-prefix:
            type: string
           tap-prefix:
@@ -310,6 +312,7 @@ class VPVNetwork(VNetwork):
     def __init__(self, name, settings):
         super(VPVNetwork, self).__init__(name)
 
+        self._mac_prefix = settings.get("mac-prefix", "52:54:00")
         self._bridge_prefix = settings["bridge-prefix"]
         self._tap_prefix = settings["tap-prefix"]
         self._mtu = int(settings["mtu"])
@@ -526,7 +529,7 @@ class VPVNetwork(VNetwork):
             tun_delete_tap(tap_name)
 
     def _gen_vm_hwaddr(self, vm):
-        hw_prefix ="52:54:00" # Complete prefixes only
+        hw_prefix = self._mac_prefix # Complete prefixes only
         prefix_len = len(hw_prefix.replace(':', ''))
         suffix_len = 12 - prefix_len
         hw_suffix = ("%x"%(vm.rank)).zfill(suffix_len)

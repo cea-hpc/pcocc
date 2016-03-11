@@ -675,10 +675,17 @@ def get_license_opts(cluster):
               metavar='DIR')
 @click.option('-b', '--batch-script', type=click.File('r'),
               help='Launch a batch script in the first vm')
+@click.option('-E', '--host-script', type=click.File('r'),
+              help='Launch a batch script on the first host')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
 @docstring(batch_alloc_doc+batch_doc)
-def pcocc_batch(restart_ckpt, batch_script, batch_options, cluster_definition):
+def pcocc_batch(restart_ckpt, batch_script, host_script, batch_options,
+                cluster_definition):
+    if batch_script and host_script:
+        raise click.UsageError("Cannot specify both a batch script and a "
+                               "host script")
+
     try:
         config = load_config(process_type=ProcessType.OTHER)
 
@@ -690,7 +697,17 @@ def pcocc_batch(restart_ckpt, batch_script, batch_options, cluster_definition):
         (wrpfile, wrpname) = tempfile.mkstemp()
         wrpfile = os.fdopen(wrpfile, 'w')
 
-        if (batch_script):
+
+        if batch_script:
+            launcher_opt = "-s"
+            script = batch_script
+        elif host_script:
+            launcher_opt = "-E"
+            script = host_script
+        else:
+            script = None
+
+        if (script):
             wrpfile.write(
 """#!/bin/bash
 #SBATCH -o pcocc_%j.out
@@ -699,15 +716,16 @@ def pcocc_batch(restart_ckpt, batch_script, batch_options, cluster_definition):
 TEMP_SCRIPT="/tmp/pcocc.jobstart.$$"
 cat <<\PCOCC_BATCH_SCRIPT_EOF >> "${TEMP_SCRIPT}"
 """)
-            wrpfile.write(batch_script.read())
+            wrpfile.write(script.read())
             wrpfile.write(
 """
 PCOCC_BATCH_SCRIPT_EOF
 chmod u+x "$TEMP_SCRIPT"
-PYTHONUNBUFFERED=true pcocc %s internal launcher -s "$TEMP_SCRIPT" %s %s &
+PYTHONUNBUFFERED=true pcocc %s internal launcher %s "$TEMP_SCRIPT" %s %s &
 wait
 rm "$TEMP_SCRIPT"
-""" % (' '.join(build_verbose_opt()), ' '.join(ckpt_opt), cluster_definition))
+""" % (' '.join(build_verbose_opt()), launcher_opt,
+       ' '.join(ckpt_opt), cluster_definition))
         else:
             wrpfile.write(
 """#!/bin/bash

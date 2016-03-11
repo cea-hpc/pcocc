@@ -334,10 +334,12 @@ def vm_name_to_index(name):
               help='Job name of the selected cluster')
 @click.option('-d', '--dest',
               help='Make a full copy in a new directory',
-              metavar='DIR'
-)
+              metavar='DIR')
+@click.option('-s', '--safe',
+              help='Wait indefinitely for the Qemu agent to freeze filesystems',
+              is_flag=True)
 @click.argument('vm', nargs=1, default='vm0')
-def pcocc_save(jobid, jobname, dest,  vm):
+def pcocc_save(jobid, jobname, dest,  vm, safe):
     """Save the disk of a VM to a new disk image
 
     By default the output file only contains the differences between
@@ -376,7 +378,7 @@ def pcocc_save(jobid, jobname, dest,  vm):
                                      'image-rev%d'%(vm.revision + 1))
             full = False
 
-        vm.save(save_path, full)
+        vm.save(save_path, full, safe)
 
         click.secho('vm%d disk '
                     'succesfully saved to %s' % (index,

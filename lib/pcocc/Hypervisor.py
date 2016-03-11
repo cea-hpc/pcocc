@@ -42,6 +42,8 @@ from Config import Config
 
 lock = threading.Lock()
 
+QEMU_GUEST_AGENT_PORT='org.qemu.guest_agent.0'
+
 def try_kill(sproc):
     try:
         sproc.kill()
@@ -110,6 +112,38 @@ class RemoteMonitor(object):
                         '} }\n\n')
         self.send_raw(mon_stop_cmd)
         self.read_raw(MAX_QMP_JSON_SIZE)
+
+    def drive_backup(self, device, dest):
+        mon_backup_cmd = ('{"execute": "drive-backup",'
+                        '"arguments": { "device": "%s",'
+                        '"target": "%s", "sync": "top"'
+                        '} }\n\n' % (device, dest))
+        self.send_raw(mon_backup_cmd)
+        ret = self.read_raw(MAX_QMP_JSON_SIZE)
+
+        try:
+            ret = json.loads(ret)
+        except:
+            raise PcoccError("Could not parse drive-backup return: " + ret)
+
+        if "error" in ret:
+            raise ImageSaveError(ret["error"]["desc"])
+
+        ret = self.read_raw(MAX_QMP_JSON_SIZE)
+        try:
+            ret = json.loads(ret)
+            event = ret["event"]
+        except:
+            raise PcoccError("Could not parse drive-backup event: " + ret)
+
+
+        if event != "BLOCK_JOB_COMPLETED":
+            raise ImageSaveError("Qemu returned event {0}, "
+                                 "expected BLOCK_JOB_COMPLETED".format(event))
+
+        if "error" in ret["data"]:
+            raise ImageSaveError(ret["data"]["error"])
+
 
     def resume(self):
         mon_resume_cmd = ('{"execute": "cont", "arguments":{'
@@ -577,6 +611,9 @@ class Qemu(object):
 
         qemu_pid = os.fork()
         if qemu_pid == 0:
+            fd = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(fd, 2)
+            os.dup2(fd, 1)
             os.execvp(cmdline[0], cmdline)
 
         while True:
@@ -802,21 +839,44 @@ class Qemu(object):
         s_mon.quit()
         s_mon.close_monitor()
 
-    def save(self, vm, dest_img_file, full=False):
-        # FIXME: Use blockdev-snapshot-sync
-        # FIXME: Could use block stream to prevent long snapshot chains
-        # but this could be problematic with old QEMUs
+    def save(self, vm, dest_img_file, full=False, safe=False):
         batch = Config().batch
         snapshot_path = batch.get_vm_state_path(vm.rank, 'image_snapshot')
 
         remote_host = vm.get_host()
         vm_image_path = vm.image_path
 
+        if safe:
+            timeout = 0
+        else:
+            timeout = 2
+
         try:
-            subprocess.check_call(['ssh', remote_host,
-                                   'cp', snapshot_path, dest_img_file])
-        except (OSError, subprocess.CalledProcessError) as err:
-            raise ImageSaveError('unable to copy image')
+            self.fsthaw(vm, timeout=timeout)
+            use_fsfreeze = True
+        except AgentError:
+            if safe:
+                raise ImageSaveError('Unable to freeze filesystems')
+
+            print ('No answer from Qemu agent when trying to freeze filesystem: '
+                  'saved image could be corrupted if the filesystem '
+                   'is accessed')
+            use_fsfreeze = False
+
+        if use_fsfreeze:
+            self.fsfreeze(vm)
+
+        try:
+            mon = RemoteMonitor(vm)
+            mon.drive_backup('bootdisk', dest_img_file)
+            mon.close_monitor()
+        except:
+            if use_fsfreeze:
+                self.fsthaw(vm)
+            raise
+
+        if use_fsfreeze:
+            self.fsthaw(vm)
 
         need_rebase = False
         if full:
@@ -853,10 +913,9 @@ class Qemu(object):
             except (OSError, subprocess.CalledProcessError):
                 raise ImageSaveError('Unable to rebase disk')
 
-    def _get_agent_ctl_safe(self,vm):
+    def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0):
         batch = Config().batch
         qga_cmd = '{"execute":"guest-ping"}\n\n'
-
         remote_host = vm.get_host()
 
         # We need to make several tries because nc and qemu may drop or
@@ -866,7 +925,7 @@ class Qemu(object):
         # it which means something went wrong and we stop retrying
         retry_connect = True
         while 1:
-            s_ctl = self.socket_connect(vm, 'serial_taskcontrolport_socket')
+            s_ctl = self.socket_connect(vm, 'serial_{0}_socket'.format(port))
 
             atexit.register(try_kill, s_ctl)
             # TODO: Remove this wait. For now, without it, some of the data we
@@ -879,7 +938,10 @@ class Qemu(object):
                     rdy = select.select([s_ctl.stdout],
                                         [s_ctl.stdin], [])
                 else:
-                    rdy = select.select([s_ctl.stdout], [], [])
+                    rdy = select.select([s_ctl.stdout], [], [], timeout)
+
+                if timeout and rdy == ([], [], []):
+                    raise AgentError("Timeout pinging agent")
 
                 if s_ctl.stdout in rdy[0]:
                     data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
@@ -910,7 +972,14 @@ class Qemu(object):
                             break
                         else:
                             raise
+
             s_ctl.wait()
+
+            if timeout:
+                timeout -= 5
+                if timeout <= 0:
+                    raise AgentError("Timeout pinging agent")
+
             # wait before trying a reconnection
             time.sleep(5)
 
@@ -960,6 +1029,43 @@ class Qemu(object):
         s_ctl.terminate()
 
 
+    def fsfreeze(self, vm, port=QEMU_GUEST_AGENT_PORT, timeout=0):
+        s_ctl = self._get_agent_ctl_safe(vm, port, timeout)
+        s_ctl.stdin.write('{"execute":"guest-fsfreeze-freeze"}')
+        data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+        try:
+            ret = json.loads(data)
+        except:
+            raise AgentError("Failed to parse agent output")
+
+        if "error" in ret:
+            raise AgentError("Error while freezing VM: " + ret["error"]["desc"])
+
+        ret = json.loads(data)["return"]
+        if  ret <= 0:
+            raise AgentError("No filesystem frozen")
+
+        print 'vm{0} frozen'.format(vm.rank)
+        s_ctl.terminate()
+
+    def fsthaw(self, vm, port=QEMU_GUEST_AGENT_PORT, timeout=0):
+        s_ctl = self._get_agent_ctl_safe(vm, port, timeout)
+        s_ctl.stdin.write('{"execute":"guest-fsfreeze-thaw"}')
+        data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+        try:
+            ret = json.loads(data)
+        except:
+            raise AgentError("Failed to parse agent output")
+
+        if "error" in ret:
+            raise AgentError("Error while thawing VM: " + ret["error"]["desc"])
+
+        ret = json.loads(data)["return"]
+
+        if ret > 0:
+            print 'vm{0} thawed'.format(vm.rank)
+
+        s_ctl.terminate()
 
     def exec_cmd(self, vm, cmd, user):
         batch = Config().batch

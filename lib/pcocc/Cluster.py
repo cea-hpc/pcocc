@@ -29,6 +29,7 @@ import Batch
 from Error import PcoccError
 from Config import Config
 from pcocc.scripts import click
+from pcocc import Hypervisor
 
 class InvalidClusterError(PcoccError):
     """Exception raised when the cluster definition cannot be parsed
@@ -136,8 +137,8 @@ class VM(object):
     def checkpoint(self, ckpt_dir):
         Config().hyp.checkpoint(self, ckpt_dir)
 
-    def save(self, dest_file, full=False):
-        Config().hyp.save(self, dest_file, full)
+    def save(self, dest_file, full=False, safe=False):
+        Config().hyp.save(self, dest_file, full, safe)
 
     def quit(self):
         Config().hyp.quit(self)
@@ -180,7 +181,8 @@ class VM(object):
 
     @property
     def serial_ports(self):
-        return ['taskcontrolport', 'taskioport', 'taskinputport']
+        return ['taskcontrolport', 'taskioport', 'taskinputport',
+                Hypervisor.QEMU_GUEST_AGENT_PORT]
 
     @property
     def user_data(self):

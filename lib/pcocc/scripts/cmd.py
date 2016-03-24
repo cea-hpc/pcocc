@@ -853,7 +853,7 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
         pid, status = os.wait()
         if pid == s_pjob.pid:
             if status != 0:
-                sys.stderr.write("The cluster terminated unexepectedly\n")
+                sys.stderr.write("The cluster terminated unexpectedly\n")
             else:
                 sys.stderr.write("The cluster has shut down\n")
 

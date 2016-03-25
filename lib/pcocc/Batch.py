@@ -795,7 +795,7 @@ class SlurmManager(BatchManager):
 
     def _get_credential(self):
         if self._etcd_auth_type == 'munge':
-            return subprocess.check_output(['/usr/bin/munge', '-n'])
+            return subprocess_check_output(['/usr/bin/munge', '-n'])
         elif self._etcd_auth_type == 'password':
             if self._etcd_password is None:
                 self._init_password()

@@ -12,5 +12,7 @@ Requires(post): systemd
 Requires(preun): systemd
 Requires(postun): systemd
 BuildRequires: systemd
+%else
+%global _unitdir_installopt  %{nil}
 %endif
 

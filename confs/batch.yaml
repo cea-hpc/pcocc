@@ -11,5 +11,5 @@ settings:
  # Client port
  etcd-client-port: 2379
  # Protocol
- etcd-protocol: https
- etcd-auth-type: munge
+ etcd-protocol: http
+ etcd-auth-type: password

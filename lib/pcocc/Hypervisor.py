@@ -611,9 +611,12 @@ class Qemu(object):
 
         qemu_pid = os.fork()
         if qemu_pid == 0:
-            fd = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(fd, 2)
-            os.dup2(fd, 1)
+            # Silence Qemu unless in verbose mode
+            if not Config().verbose:
+                fd = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(fd, 2)
+                os.dup2(fd, 1)
+
             os.execvp(cmdline[0], cmdline)
 
         while True:

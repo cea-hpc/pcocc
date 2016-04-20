@@ -605,6 +605,18 @@ class VNATNetwork(VNetwork):
             #Check bridge settings
             ovs_add_bridge(self._bridge_name)
 
+        # Configure the bridge with the GW ip on the VM network
+        ip_add_idemp(self._vm_network_gw,
+                     self._vm_network_bits,
+                     self._bridge_name)
+
+        # Also give the bridge an IP on the NAT network with unique
+        # IPs for each VM
+        bridge_nat_ip = get_ip_on_network(self._nat_network, 1)
+        ip_add_idemp(bridge_nat_ip,
+                     self._vm_network_bits,
+                     self._bridge_name)
+
         if not self.has_dnsmasq():
             # Start a dnsmasq server to answer DHCP requests
             subprocess.check_call(
@@ -632,18 +644,6 @@ class VNATNetwork(VNetwork):
                         num_to_dotted_quad(make_mask(self._vm_network_bits)),
                         self._vm_network_gw,
                         self._vm_ip)))
-
-        # Configure the bridge with the GW ip on the VM network
-        ip_add_idemp(self._vm_network_gw,
-                     self._vm_network_bits,
-                     self._bridge_name)
-
-        # Also give the bridge an IP on the NAT network with unique
-        # IPs for each VM
-        bridge_nat_ip = get_ip_on_network(self._nat_network, 1)
-        ip_add_idemp(bridge_nat_ip,
-                     self._vm_network_bits,
-                     self._bridge_name)
 
         # Enable Routing for the bridge only
         subprocess.check_call("echo 1 > /proc/sys/net/ipv4/ip_forward",

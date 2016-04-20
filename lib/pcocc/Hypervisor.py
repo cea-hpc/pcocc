@@ -531,6 +531,16 @@ class Qemu(object):
             else:
                 readonly_string=''
 
+            # Fail early if the mount point is not accessible as Qemu will
+            # refuse to start anyway
+            try:
+                if ( not os.path.isdir(host_path) or
+                     not os.access(host_path, os.R_OK|os.X_OK)):
+                    raise
+            except:
+                raise HypervisorError('unable to access mount '
+                                      'point {0}'.format(host_path))
+
             cmdline += ['-fsdev', 'local,id=%s,path=%s,security_model=none%s'%
                         (mount, host_path, readonly_string)]
 

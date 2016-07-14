@@ -759,6 +759,7 @@ class SlurmManager(BatchManager):
         except AttributeError:
             hosts_tuple = [ (host, self._etcd_client_port) for
                             host in self._etcd_servers ]
+            random.shuffle(hosts_tuple)
             hosts_tuple = tuple(hosts_tuple)
             logging.debug('Starting etcd client')
             self._keyval_client = etcd.Client(

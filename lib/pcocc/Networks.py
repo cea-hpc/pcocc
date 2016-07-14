@@ -1286,14 +1286,18 @@ class VIBNetwork(VNetwork):
 
             for pkey, config in pkeys.iteritems():
                 partline = 'PK_{0}={0} , ipoib'.format(pkey)
-                if config['vf_guids']:
+                for vf_guids in chunks(config['vf_guids'], 128):
                     partline_vf = ', indx0 : ' + ', '.join(g + '=full'
-                                                           for g in config['vf_guids'])
+                                                           for g in vf_guids)
                     tmp.write(partline + partline_vf + ' ; \n')
 
-                partline += ': ' + ', '.join(g + '=full'
-                                             for g in config['host_guids'])
-                tmp.write(partline + ' ; \n')
+                partline += ': '
+
+                for host_guids in chunks(config['host_guids'], 128):
+                    tmp.write(partline +
+                              ', '.join(g + '=full'
+                                        for g in host_guids) +
+                              ' ; \n')
 
             tmp.close()
             shutil.move(tmp.name, self._opensm_partition_cfg)
@@ -1715,3 +1719,8 @@ def get_phys_port_guid(device_name):
 def guid_hex_to_col(guid):
     res = ':'.join(guid[c:c+2] for c in xrange(2, len(guid), 2))
     return res
+
+def chunks(array, n):
+    """Yield successive n-sized chunks from array."""
+    for i in range(0, len(array), n):
+        yield array[i:i+n]

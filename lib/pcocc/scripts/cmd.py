@@ -440,7 +440,7 @@ def pcocc_monitor_cmd(jobid, jobname,  vm, cmd):
         cluster = load_batch_cluster()
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]
-
+        vm.wait_start()
         res = vm.human_monitor_cmd(' '.join(cmd))
         print res
 

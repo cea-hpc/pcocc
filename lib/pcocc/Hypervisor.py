@@ -36,7 +36,7 @@ import logging
 
 from pcocc.scripts import click
 from ClusterShell.NodeSet  import RangeSet
-from Backports import subprocess_check_output
+from Backports import subprocess_check_output, enum
 from Error import PcoccError
 from Config import Config
 
@@ -49,6 +49,8 @@ def try_kill(sproc):
         sproc.kill()
     except OSError:
         pass
+
+VM_FREEZE_OPT = enum('NO', 'TRY', 'YES')
 
 class InvalidImageError(PcoccError):
     """Exception raised when the image file cannot be handled
@@ -85,33 +87,59 @@ class AgentError(PcoccError):
         super(AgentError, self).__init__('Guest agent failure: '
                                               + error)
 
-MAX_QMP_JSON_SIZE=32768
+QMP_READ_SIZE=32768
 
 class RemoteMonitor(object):
     def __init__(self, vm):
         self.s_mon = Config().hyp.socket_connect(vm, 'monitor_socket')
 
-        data = self.read_raw(MAX_QMP_JSON_SIZE)
+        self.flush_output()
         self.send_raw('{ "execute": "qmp_capabilities" }')
-        data = self.read_raw(MAX_QMP_JSON_SIZE)
+        self.flush_output()
 
     def send_raw(self, data):
         return os.write(self.s_mon.stdin.fileno(), data)
 
-    def read_raw(self, size):
-        return os.read(self.s_mon.stdout.fileno(), size)
+    def flush_output(self):
+        """Read everything from the monitor to start fresh
+        """
+        a = os.read(self.s_mon.stdout.fileno(), 1)
+        while select.select([self.s_mon.stdout.fileno()],[],[],0.0)[0]:
+            a = os.read(self.s_mon.stdout.fileno(), QMP_READ_SIZE)
+
+    def read_filtered(self, event_list=[]):
+        """Read from the monitor socket and discard all events not in the event_list array
+        """
+        while True:
+            data = self.s_mon.stdout.readline()
+            try:
+                ret = json.loads(data)
+                if 'event' in ret and ret['event'] not in event_list:
+                    continue
+            except:
+                pass
+
+            return data
+
 
     def quit(self):
         mon_quit_cmd = ('{"execute": "quit", "arguments":{'
                         '} }\n\n')
         self.send_raw(mon_quit_cmd)
-        data = self.read_raw(MAX_QMP_JSON_SIZE)
+        self.read_filtered()
 
     def stop(self):
         mon_stop_cmd = ('{"execute": "stop", "arguments":{'
                         '} }\n\n')
         self.send_raw(mon_stop_cmd)
-        self.read_raw(MAX_QMP_JSON_SIZE)
+        self.read_filtered()
+
+    def cont(self):
+        mon_cont_cmd = ('{"execute": "cont", "arguments":{'
+                        '} }\n\n')
+        self.send_raw(mon_cont_cmd)
+        self.read_filtered()
+
 
     def drive_backup(self, device, dest):
         mon_backup_cmd = ('{"execute": "drive-backup",'
@@ -119,7 +147,7 @@ class RemoteMonitor(object):
                         '"target": "%s", "sync": "top"'
                         '} }\n\n' % (device, dest))
         self.send_raw(mon_backup_cmd)
-        ret = self.read_raw(MAX_QMP_JSON_SIZE)
+        ret = self.read_filtered()
 
         try:
             ret = json.loads(ret)
@@ -129,7 +157,7 @@ class RemoteMonitor(object):
         if "error" in ret:
             raise ImageSaveError(ret["error"]["desc"])
 
-        ret = self.read_raw(MAX_QMP_JSON_SIZE)
+        ret = self.read_filtered(["BLOCK_JOB_COMPLETED"])
         try:
             ret = json.loads(ret)
             event = ret["event"]
@@ -149,7 +177,7 @@ class RemoteMonitor(object):
         mon_resume_cmd = ('{"execute": "cont", "arguments":{'
                         '} }\n\n')
         self.send_raw(mon_resume_cmd)
-        self.read_raw(MAX_QMP_JSON_SIZE)
+        self.read_filtered()
 
     def dump(self, dump_file):
         mon_dump_cmd = ('{"execute": "dump-guest-memory", "arguments":{ '
@@ -159,7 +187,7 @@ class RemoteMonitor(object):
         self.send_raw(mon_dump_cmd)
 
         while True:
-            data = self.read_raw(MAX_QMP_JSON_SIZE)
+            data = self.read_filtered()
             for line in data.splitlines():
                 ret = json.loads(line)
                 if "error" in ret:
@@ -177,13 +205,13 @@ class RemoteMonitor(object):
         mon_reset_cmd = ('{"execute": "system_reset", "arguments":{'
                         '} }\n\n')
         self.send_raw(mon_reset_cmd)
-        self.read_raw(MAX_QMP_JSON_SIZE)
+        self.read_filtered()
 
     def human_monitor_cmd(self, human_cmd):
         mon_human_cmd = ('{"execute": "human-monitor-command", "arguments":{'
                          '"command-line": "%s"} }\n\n' % human_cmd)
         self.send_raw(mon_human_cmd)
-        raw_data = self.read_raw(16384)
+        raw_data = self.read_filtered()
         try:
             data = json.loads(raw_data)
         except:
@@ -204,13 +232,21 @@ class RemoteMonitor(object):
                          '"value": 4294967296'
                          '} }\n\n')
         self.send_raw(mon_speed_cmd)
-        self.read_raw(MAX_QMP_JSON_SIZE)
+        self.read_filtered()
 
         mon_save_cmd = ('{"execute": "migrate", "arguments":{'
                         '"uri": "exec:lzop > %s"'
                         '} }\n\n'%(dest_mem_file))
         self.send_raw(mon_save_cmd)
-        self.read_raw(MAX_QMP_JSON_SIZE)
+        data = self.read_filtered()
+        try:
+            ret = json.loads(data)
+            if 'error' in ret:
+                raise PcoccError('Failed to start memory transfer: ' +
+                                 ret['error']['desc'])
+        except:
+            raise
+#            raise PcoccError("Unable to parse output from qemu: " + data)
 
     def snapshot_image(self, dest_image_file):
         #TODO
@@ -219,7 +255,7 @@ class RemoteMonitor(object):
     def query_migration(self):
         mon_query_cmd = ('{"execute": "query-migrate" }\n\n')
         self.send_raw(mon_query_cmd)
-        return self.read_raw(MAX_QMP_JSON_SIZE)
+        return self.read_filtered()
 
     def close_monitor(self):
         self.s_mon.terminate()
@@ -659,13 +695,13 @@ class Qemu(object):
                     time.sleep(1)
 
 
-        data = s_mon.recv(MAX_QMP_JSON_SIZE)
+        data = s_mon.recv(QMP_READ_SIZE)
         s_mon.sendall('{ "execute": "qmp_capabilities" }')
-        data = s_mon.recv(MAX_QMP_JSON_SIZE)
+        data = s_mon.recv(QMP_READ_SIZE)
 
         # Ask for vcpu thread info
         s_mon.sendall('{ "execute": "query-cpus" }')
-        data = s_mon.recv(8192)
+        data = s_mon.recv(QMP_READ_SIZE)
         ret = json.loads(data)
 
         # Bind each vcpu thread on its physical cpu
@@ -805,11 +841,12 @@ class Qemu(object):
 
         mon = RemoteMonitor(vm)
         mon.stop()
-        mon.start_migration(dest_mem_file)
 
-        retry_count = 0
-        status = 'failed'
         try:
+            mon.start_migration(dest_mem_file)
+            retry_count = 0
+            status = 'failed'
+
             while True:
                 time.sleep(1)
                 data = mon.query_migration()
@@ -849,9 +886,20 @@ class Qemu(object):
                     continue
                 else:
                     break
+        except PcoccError as err:
+            try:
+                mon.cont()
+            except:
+                pass
+            raise CheckpointError(str(err))
 
         except (KeyError , ValueError)  as err:
+            try:
+                mon.cont()
+            except:
+                pass
             raise CheckpointError(str(err) + ' Monitor sent: ' + data)
+
 
         if status != 'completed':
             raise CheckpointError('status is %s. Monitor sent: ' + data)
@@ -865,29 +913,31 @@ class Qemu(object):
         s_mon.quit()
         s_mon.close_monitor()
 
-    def save(self, vm, dest_img_file, full=False, safe=False):
+    def save(self, vm, dest_img_file, full=False, freeze=VM_FREEZE_OPT.TRY):
         batch = Config().batch
         snapshot_path = batch.get_vm_state_path(vm.rank, 'image_snapshot')
 
         remote_host = vm.get_host()
         vm_image_path = vm.image_path
 
-        if safe:
-            timeout = 0
-        else:
-            timeout = 2
+        use_fsfreeze = False
 
-        try:
-            self.fsthaw(vm, timeout=timeout)
-            use_fsfreeze = True
-        except AgentError:
-            if safe:
-                raise ImageSaveError('Unable to freeze filesystems')
+        if freeze != VM_FREEZE_OPT.NO:
+            if freeze == VM_FREEZE_OPT.YES:
+                timeout = 0
+            else:
+                timeout = 2
 
-            print ('No answer from Qemu agent when trying to freeze filesystem: '
-                  'saved image could be corrupted if the filesystem '
-                   'is accessed')
-            use_fsfreeze = False
+            try:
+                self.fsthaw(vm, timeout=timeout)
+                use_fsfreeze = True
+            except AgentError:
+                if safe:
+                    raise ImageSaveError('Unable to freeze filesystems')
+
+                print ('No answer from Qemu agent when trying to freeze filesystem: '
+                       'saved image could be corrupted if the filesystem '
+                       'is accessed')
 
         if use_fsfreeze:
             self.fsfreeze(vm)
@@ -970,7 +1020,7 @@ class Qemu(object):
                     raise AgentError("Timeout pinging agent")
 
                 if s_ctl.stdout in rdy[0]:
-                    data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+                    data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
                     try:
                         retval = json.loads(data)["return"]
                         if retval:
@@ -1024,7 +1074,7 @@ class Qemu(object):
             s_ctl.stdin.write('{"execute":"guest-file-open",'
                               '"arguments":{"path":"%s",'
                               '"mode":"w+"}}\n\n'%(dest_file))
-            data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
             handle = json.loads(data)["return"]
 
 
@@ -1032,7 +1082,7 @@ class Qemu(object):
                               '"arguments":{"handle":%d,'
                               '"buf-b64":"%s"}}' %
                               (handle, encoded_source))
-            data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
             count = json.loads(data)["return"]["count"]
             eof = json.loads(data)["return"]["eof"]
 
@@ -1040,7 +1090,7 @@ class Qemu(object):
                               '"arguments":{"handle":%d}}' %
                               handle)
 
-            data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
             ret = json.loads(data)["return"]
             if ret:
                 raise ValueError
@@ -1058,7 +1108,7 @@ class Qemu(object):
     def fsfreeze(self, vm, port=QEMU_GUEST_AGENT_PORT, timeout=0):
         s_ctl = self._get_agent_ctl_safe(vm, port, timeout)
         s_ctl.stdin.write('{"execute":"guest-fsfreeze-freeze"}')
-        data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+        data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
         try:
             ret = json.loads(data)
         except:
@@ -1077,7 +1127,7 @@ class Qemu(object):
     def fsthaw(self, vm, port=QEMU_GUEST_AGENT_PORT, timeout=0):
         s_ctl = self._get_agent_ctl_safe(vm, port, timeout)
         s_ctl.stdin.write('{"execute":"guest-fsfreeze-thaw"}')
-        data = os.read(s_ctl.stdout.fileno(), MAX_QMP_JSON_SIZE)
+        data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
         try:
             ret = json.loads(data)
         except:

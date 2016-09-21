@@ -378,7 +378,12 @@ def pcocc_save(jobid, jobname, dest,  vm, safe):
                                      'image-rev%d'%(vm.revision + 1))
             full = False
 
-        vm.save(save_path, full, safe)
+        if safe:
+            freeze_opt = Hypervisor.VM_FREEZE_OPT.YES
+        else:
+            freeze_opt = Hypervisor.VM_FREEZE_OPT.TRY
+
+        vm.save(save_path, full, freeze_opt)
 
         click.secho('vm%d disk '
                     'succesfully saved to %s' % (index,

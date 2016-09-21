@@ -53,29 +53,28 @@ class ClusterSetupError(PcoccError):
 
 class Worker(Thread):
     """Thread executing tasks from a given tasks queue"""
-    def __init__(self, tasks):
+    def __init__(self, pool):
         Thread.__init__(self)
-        self.tasks = tasks
+        self.pool = pool
         self.daemon = True
         self.start()
 
     def run(self):
         while True:
-            func, args, kargs = self.tasks.get()
+            func, args, kargs = self.pool.tasks.get()
             try:
-                # TODO: add error handling and save return codes
                 func(*args, **kargs)
-            except Exception, e:
-                print e
-                raise e
+            except Exception as e:
+                self.pool.exception=e
             finally:
-                self.tasks.task_done()
+                self.pool.tasks.task_done()
 
 class ThreadPool:
     """Pool of threads consuming tasks from a queue"""
     def __init__(self, num_threads):
         self.tasks = Queue(num_threads)
-        for _ in range(num_threads): Worker(self.tasks)
+        self.exception = None
+        for _ in range(num_threads): Worker(self)
 
     def add_task(self, func, *args, **kargs):
         """Add a task to the queue"""
@@ -85,12 +84,16 @@ class ThreadPool:
         """Wait for completion of all the tasks in the queue"""
         self.tasks.join()
 
+        if not (self.exception is None):
+            raise self.exception
+
 def do_checkpoint_vm(vm, ckpt_dir):
     vm.checkpoint(ckpt_dir)
 
 def do_save_vm(vm, ckpt_dir):
     if not vm.image_dir is None:
-        vm.save(vm.checkpoint_img_file(ckpt_dir))
+        vm.save(vm.checkpoint_img_file(ckpt_dir),
+                freeze=Hypervisor.VM_FREEZE_OPT.NO)
 
 def do_quit_vm(vm):
     vm.quit()
@@ -137,8 +140,8 @@ class VM(object):
     def checkpoint(self, ckpt_dir):
         Config().hyp.checkpoint(self, ckpt_dir)
 
-    def save(self, dest_file, full=False, safe=False):
-        Config().hyp.save(self, dest_file, full, safe)
+    def save(self, dest_file, full=False, freeze=Hypervisor.VM_FREEZE_OPT.TRY):
+        Config().hyp.save(self, dest_file, full, freeze)
 
     def quit(self):
         Config().hyp.quit(self)
@@ -328,6 +331,7 @@ class Cluster(object):
         for vm in self.vms:
             pool.add_task(do_checkpoint_vm, vm, ckpt_dir)
         pool.wait_completion()
+
 
         print "Checkpointing disks..."
         for vm in self.vms:

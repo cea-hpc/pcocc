@@ -496,6 +496,8 @@ class Qemu(object):
             cmdline += ['-boot', 'c']
 
         # Memory
+        # FIXME: Reserve 5% if total_memory for qemu
+        total_mem = int(total_mem * 0.95)
         total_mem = total_mem - (total_mem % len(cores_on_numa))
         cmdline += ['-m', str(total_mem)]
 

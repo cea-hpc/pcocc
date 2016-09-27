@@ -327,15 +327,14 @@ class Cluster(object):
     def checkpoint(self, ckpt_dir):
         pool = ThreadPool(16)
 
-        print "Checkpointing memory..."
-        for vm in self.vms:
-            pool.add_task(do_checkpoint_vm, vm, ckpt_dir)
-        pool.wait_completion()
-
-
         print "Checkpointing disks..."
         for vm in self.vms:
             pool.add_task(do_save_vm, vm, ckpt_dir)
+        pool.wait_completion()
+
+        print "Checkpointing memory..."
+        for vm in self.vms:
+            pool.add_task(do_checkpoint_vm, vm, ckpt_dir)
         pool.wait_completion()
 
         print "Checkpoint complete."

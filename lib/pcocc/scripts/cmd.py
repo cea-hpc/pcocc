@@ -37,7 +37,7 @@ import click
 import pwd
 
 import pcocc
-from pcocc import PcoccError, Config, Cluster
+from pcocc import PcoccError, Config, Cluster, Hypervisor
 from pcocc.Backports import total_seconds, subprocess_check_output
 from pcocc.Batch import ProcessType
 from Shine.TextTable import TextTable

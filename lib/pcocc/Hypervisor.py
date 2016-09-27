@@ -134,12 +134,27 @@ class RemoteMonitor(object):
         self.send_raw(mon_stop_cmd)
         self.read_filtered()
 
+    def query_status(self):
+        mon_query_cmd = ('{"execute": "query-status", "arguments":{'
+                        '} }\n\n')
+        self.send_raw(mon_query_cmd)
+        data = self.read_filtered()
+        try:
+            ret = json.loads(data)
+        except:
+            raise PcoccError("Could not parse query-status return: " + data)
+
+        try:
+            return ret["return"]["status"]
+        except:
+            raise PcoccError("Could not parse query-status return: " + data)
+
+
     def cont(self):
         mon_cont_cmd = ('{"execute": "cont", "arguments":{'
                         '} }\n\n')
         self.send_raw(mon_cont_cmd)
         self.read_filtered()
-
 
     def drive_backup(self, device, dest):
         mon_backup_cmd = ('{"execute": "drive-backup",'
@@ -701,6 +716,10 @@ class Qemu(object):
         s_mon.sendall('{ "execute": "qmp_capabilities" }')
         data = s_mon.recv(QMP_READ_SIZE)
 
+        self._set_vm_state('qemu-start',
+                           'binding vcpus',
+                           None, vm.rank)
+
         # Ask for vcpu thread info
         s_mon.sendall('{ "execute": "query-cpus" }')
         data = s_mon.recv(QMP_READ_SIZE)
@@ -738,6 +757,19 @@ class Qemu(object):
         pcocc_console_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         pcocc_console_sock.bind(pcocc_socket_path)
         pcocc_console_sock.listen(0)
+
+
+        if ckpt_dir:
+            # Signal VM restore
+            self._set_vm_state('qemu-start',
+                           'restoring',
+                           None, vm.rank)
+
+            mon = RemoteMonitor(vm)
+            while mon.query_status() == 'inmigrate':
+                time.sleep(1)
+            mon.cont()
+            mon.close_monitor()
 
         # Signal VM started
         self._set_vm_state('complete',

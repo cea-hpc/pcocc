@@ -50,6 +50,7 @@ patternProperties:
       - $ref: '#/definitions/nat'
       - $ref: '#/definitions/pv'
       - $ref: '#/definitions/ib'
+      - $ref: '#/definitions/bridged'
 additionalProperties: false
 
 definitions:
@@ -140,6 +141,26 @@ definitions:
 
     additionalProperties: false
 
+  bridged:
+    properties:
+      type:
+          enum:
+            - bridged
+
+      settings:
+        type: object
+        properties:
+          host-bridge:
+           type: string
+          tap-prefix:
+           type: string
+          mtu:
+           type: integer
+        additionalProperties: false
+
+    additionalProperties: false
+
+
 """
 
 class NetworkSetupError(PcoccError):
@@ -189,6 +210,8 @@ class VNetwork(object):
             return VNATNetwork(name, settings)
         if ntype == "ib":
             return VIBNetwork(name, settings)
+        if ntype == "bridged":
+            return VBridgedNetwork(name, settings)
 
         assert 0, "Unknown network type: " + ntype
 
@@ -304,8 +327,111 @@ class VNetwork(object):
         key
 
         """
-
         return  'net/type/{0}/{1}'.format(self._type, key)
+
+
+class VBridgedNetwork(VNetwork):
+    def __init__(self, name, settings):
+        super(VBridgedNetwork, self).__init__(name)
+
+        self._host_bridge = settings["host-bridge"]
+        self._tap_prefix = settings["tap-prefix"]
+        self._mtu = int(settings["mtu"])
+        self._type = "direct"
+
+    def init_node(self):
+        pass
+
+    def cleanup_node(self):
+        self._cleanup_stray_taps()
+
+    def alloc_node_resources(self, cluster):
+        batch = Config().batch
+        net_res = {}
+
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            vm_label = self._vm_res_label(vm)
+            net_res[vm_label] = self._alloc_vm_res(vm)
+
+        self.dump_resources(net_res)
+
+    def free_node_resources(self, cluster):
+        net_res = None
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            if not net_res:
+                net_res = self.load_resources()
+
+            vm_label = self._vm_res_label(vm)
+            self._cleanup_vm_res(net_res[vm_label])
+
+    def load_node_resources(self, cluster):
+        net_res = None
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            if not net_res:
+                net_res = self.load_resources()
+
+            vm_label = self._vm_res_label(vm)
+
+            try:
+                hwaddr = os.environ['PCOCC_NET_{0}_HWADDR'.format(
+                              self.name.upper())]
+            except KeyError:
+                hwaddr = [ 0x52, 0x54, 0x00,
+		           random.randint(0x00, 0x7f),
+		           random.randint(0x00, 0xff),
+		           random.randint(0x00, 0xff) ]
+	        hwaddr = ':'.join(map(lambda x: "%02x" % x, hwaddr))
+
+            vm.add_eth_if(self.name,
+                          net_res[vm_label]['tap_name'],
+                          hwaddr)
+
+    def _cleanup_stray_taps(self):
+        # Look for remaining taps to cleanup
+        for tap_id in find_used_dev_ids(self._tap_prefix):
+            logging.warning(
+                'Deleting leftover tap for {0} network'.format(self.name))
+
+            # Delete the tap
+            tap_name = dev_name_from_id(self._tap_prefix,
+                                        tap_id)
+            tun_delete_tap(tap_name)
+
+    def _alloc_vm_res(self, vm):
+        # Allocate a local VM id unique on this node
+        tap_id = find_free_dev_id(self._tap_prefix)
+        # Define the VM tap name and unique IP based on the VM id
+        tap_name = dev_name_from_id(self._tap_prefix, tap_id)
+
+        # Create and enable the tap
+        tun_create_tap(tap_name, Config().batch.batchuser)
+        tun_enable_tap(tap_name)
+        ip_set_mtu(tap_name, self._mtu)
+        bridge_add_port(tap_name, self._host_bridge)
+        return {'tap_name': tap_name}
+
+    def _cleanup_vm_res(self, resources):
+        tap_name = resources['tap_name']
+        # Delete the tap
+        tun_delete_tap(tap_name)
 
 
 class VPVNetwork(VNetwork):
@@ -1469,6 +1595,9 @@ def ip_has_tuntap():
 
     return ip_has_tuntap.ipversion >= 100519
 
+def bridge_add_port(tapname, bridgename):
+    subprocess.check_call(["ip", "link", "set", tapname, "master",
+                           bridgename])
 
 def tun_create_tap(name, user):
     if ip_has_tuntap():
@@ -1479,7 +1608,7 @@ def tun_create_tap(name, user):
                               stdout=open(os.devnull))
 
 def tun_enable_tap(name):
-    subprocess.check_call(["ifconfig", name, "up"])
+    subprocess.check_call(["ip", "link", "set", name, "up"])
 
 def tun_delete_tap(name):
     if ip_has_tuntap():

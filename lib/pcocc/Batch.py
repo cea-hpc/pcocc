@@ -115,6 +115,7 @@ properties:
         enum:
           - password
           - munge
+          - none
     additionalProperties: false
     required:
       - etcd-servers
@@ -582,8 +583,8 @@ class EtcdManager(BatchManager):
                 ca_cert=self._etcd_ca_cert,
                 protocol=self._etcd_protocol,
                 allow_reconnect=True,
-                username=pwd.getpwuid(os.getuid()).pw_name,
-                password=self._get_credential())
+                username=self._get_keyval_username(),
+                password=self._get_keyval_credential())
 
             logging.info('Started etcd client')
             self._last_cred_renew = datetime.datetime.now()
@@ -602,21 +603,28 @@ class EtcdManager(BatchManager):
             if  delta > datetime.timedelta(seconds=15):
                 logging.debug('Renewing etcd credentials')
                 self._last_cred_renew = datetime.datetime.now()
-                self._keyval_client.password = self._get_credential()
+                self._keyval_client.password = self._get_keyval_credential()
                 return
             else:
                 raise KeyCredentialError('access denied')
 
         raise e
 
-    def _get_credential(self):
+    def _get_keyval_credential(self):
         if self._etcd_auth_type == 'munge':
             return subprocess_check_output(['/usr/bin/munge', '-n'])
         elif self._etcd_auth_type == 'password':
             if self._etcd_password is None:
                 self._init_password()
             return self._etcd_password
+        elif self._etcd_auth_type == 'none':
+            return None
 
+    def _get_keyval_username(self):
+        if self._etcd_auth_type == 'none':
+            return None
+        else:
+            return pwd.getpwuid(os.getuid()).pw_name
 
     def _init_password(self):
         bad_perms = (stat.S_IRGRP |
@@ -683,33 +691,34 @@ class EtcdManager(BatchManager):
                 raise KeyCredentialError('unable to generate password: ' + str(e))
 
     def init_cluster_keys(self):
-        role = '{0}-pcocc'.format(self.batchuser)
+        if self._etcd_auth_type != 'none':
+          role = '{0}-pcocc'.format(self.batchuser)
+          logging.info('Initializing etcd role {0}'.format(role))
+          u = etcd.auth.EtcdRole(self.keyval_client, role)
+          u.grant('/pcocc/cluster/*', 'R')
+          u.grant('/pcocc/global/public/*', 'R')
+          u.grant('/pcocc/cluster/users/{0}/*'.format(self.batchuser), 'RW')
+          u.grant('/pcocc/global/users/{0}/*'.format(self.batchuser), 'RW')
+          u.write()
 
-        logging.info('Initializing etcd role {0}'.format(role))
-        u = etcd.auth.EtcdRole(self.keyval_client, role)
-        u.grant('/pcocc/cluster/*', 'R')
-        u.grant('/pcocc/global/public/*', 'R')
-        u.grant('/pcocc/cluster/users/{0}/*'.format(self.batchuser), 'RW')
-        u.grant('/pcocc/global/users/{0}/*'.format(self.batchuser), 'RW')
-        u.write()
+          logging.info('Initializing etcd user {0}'.format(self.batchuser))
 
-        logging.info('Initializing etcd user {0}'.format(self.batchuser))
+          u = etcd.auth.EtcdUser(self.keyval_client, self.batchuser)
+          try:
+              u.read()
+          except etcd.EtcdKeyNotFound:
+              pass
+          u.roles = list(u.roles) + [role]
+          if self._etcd_auth_type == 'password':
+              requested_cred = os.environ.get('SPANK_PCOCC_REQUEST_CRED', '')
+              if (len(requested_cred) == 2 * ETCD_PASSWORD_BYTES
+                  and u.password != requested_cred):
+                  logging.info('Updating password with ' + requested_cred)
+                  u.password = requested_cred
 
-        u = etcd.auth.EtcdUser(self.keyval_client, self.batchuser)
-        try:
-            u.read()
-        except etcd.EtcdKeyNotFound:
-            pass
-        u.roles = list(u.roles) + [role]
-        if self._etcd_auth_type == 'password':
-            requested_cred = os.environ.get('SPANK_PCOCC_REQUEST_CRED', '')
-            if (len(requested_cred) == 2 * ETCD_PASSWORD_BYTES
-                and u.password != requested_cred):
-                logging.info('Updating password with ' + requested_cred)
-                u.password = requested_cred
+          u.write()
 
-        u.write()
-        self.make_dir('cluster/user', '')
+          self.make_dir('cluster/user', '')
 
     def cleanup_cluster_keys(self):
         try:
@@ -811,7 +820,7 @@ class LocalManager(EtcdManager):
             raise AllocationError("already in a job")
 
         if self._etcd_auth_type == 'password':
-            os.environ['SPANK_PCOCC_REQUEST_CRED'] = self._get_credential()
+            os.environ['SPANK_PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
 
         os.environ['PCOCC_LOCAL_JOB_ID'] = str(os.getpid())
         os.environ['PCOCC_LOCAL_CLUSTER_DEFINITION'] = cluster.resource_definition
@@ -1323,7 +1332,7 @@ class SlurmManager(EtcdManager):
             raise AllocationError("already in a job")
         try:
             if self._etcd_auth_type == 'password':
-                os.environ['PCOCC_REQUEST_CRED'] = self._get_credential()
+                os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
             ret = subprocess.call(['salloc'] + alloc_opt + cmd)
         except KeyboardInterrupt as err:
@@ -1338,7 +1347,7 @@ class SlurmManager(EtcdManager):
 
         try:
             if self._etcd_auth_type == 'password':
-                os.environ['PCOCC_REQUEST_CRED'] = self._get_credential()
+                os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
             subprocess.check_call(['sbatch'] + ['-J', 'pcocc'] + alloc_opt + [cmd])
         except subprocess.CalledProcessError as err:

@@ -33,12 +33,14 @@ import tempfile
 import shutil
 import yaml
 import logging
+import signal
 
 from pcocc.scripts import click
 from ClusterShell.NodeSet  import RangeSet
 from Backports import subprocess_check_output, enum
 from Error import PcoccError
 from Config import Config
+from Misc import fake_signalfd, wait_or_term_child, CHILD_EXIT
 
 lock = threading.Lock()
 
@@ -187,13 +189,6 @@ class RemoteMonitor(object):
         if "error" in ret["data"]:
             raise ImageSaveError(ret["data"]["error"])
 
-
-    def resume(self):
-        mon_resume_cmd = ('{"execute": "cont", "arguments":{'
-                        '} }\n\n')
-        self.send_raw(mon_resume_cmd)
-        self.read_filtered()
-
     def dump(self, dump_file):
         mon_dump_cmd = ('{"execute": "dump-guest-memory", "arguments":{ '
                         '"paging": true, '
@@ -218,6 +213,12 @@ class RemoteMonitor(object):
 
     def system_reset(self):
         mon_reset_cmd = ('{"execute": "system_reset", "arguments":{'
+                        '} }\n\n')
+        self.send_raw(mon_reset_cmd)
+        self.read_filtered()
+
+    def system_powerdown(self):
+        mon_reset_cmd = ('{"execute": "system_powerdown", "arguments":{'
                         '} }\n\n')
         self.send_raw(mon_reset_cmd)
         self.read_filtered()
@@ -403,7 +404,14 @@ class Qemu(object):
         coreset = coreset[emulator_cores:]
 
         # Recompute num_cores to exclude emulator_cores
-        num_cores = len(coreset)
+        num_cores -= emulator_cores
+
+        if num_cores == len(coreset):
+            logging.info('Physical resources match VM definition, activating autobinding')
+            autobind_cpumem = True
+        else:
+            logging.info('Physical resources don\'t match VM definition. Autobind deactivated.')
+            autobind_cpumem = False
 
         for core_id in coreset:
             try:
@@ -425,6 +433,7 @@ class Qemu(object):
 
             cores_on_numa.setdefault(numa_node,
                                      RangeSet()).update(RangeSet(str(core_id)))
+
         if vm.qemu_bin:
             cmdline = [ vm.qemu_bin ]
         else:
@@ -501,7 +510,7 @@ class Qemu(object):
                         'drive=datadisk{0},addr={1:02d}.{2}'.format(
                             i, i/3+7, i%3)]
             cmdline += ['-drive',
-                        'file={0},cache={1},id=datadisk{2},format=raw,'
+                        'file={0},cache={1},id=datadisk{2},'
                         'if=none'.format(
                         path,
                         vm.persistent_drives[drive]['cache'],
@@ -525,31 +534,34 @@ class Qemu(object):
             cmdline += ['-smp', '%d,sockets=%d' %
                         (num_cores, len(cores_on_numa))]
 
-        start_cpu = 0
-        virt_to_phys_coreid = []
-        for i, numa_node in enumerate(sorted(cores_on_numa)):
-            numa_coreset = cores_on_numa[numa_node]
-            virt_to_phys_coreid += numa_coreset
-            ncores_on_node = len(numa_coreset)
-            # TODO: adjust the memory for irregular NUMA nodes
-            if qemu_version > 2:
-                cmdline += ['-numa', 'node,memdev=ram-%d,cpus=%d-%d,nodeid=%d' % (
-                        i,
-                        start_cpu,
-                        start_cpu + ncores_on_node - 1,
-                        i)]
+        if autobind_cpumem:
+          start_cpu = 0
+          virt_to_phys_coreid = []
+          for i, numa_node in enumerate(sorted(cores_on_numa)):
+              numa_coreset = cores_on_numa[numa_node]
+              virt_to_phys_coreid += numa_coreset
+              ncores_on_node = len(numa_coreset)
+              # TODO: adjust the memory for irregular NUMA nodes
+              if qemu_version > 2:
+                  cmdline += ['-numa', 'node,memdev=ram-%d,cpus=%d-%d,nodeid=%d' % (
+                          i,
+                          start_cpu,
+                          start_cpu + ncores_on_node - 1,
+                          i)]
 
-                cmdline += ['-object', 'memory-backend-ram,size=%dM,policy=preferred,prealloc=yes,'
-                            'host-nodes=%d,id=ram-%d' % (
-                                total_mem / len(cores_on_numa),
-                                numa_node, i)]
+                  cmdline += ['-object', 'memory-backend-ram,size=%dM,policy=preferred,prealloc=yes,'
+                              'host-nodes=%d,id=ram-%d' % (
+                                  total_mem / len(cores_on_numa),
+                                  numa_node, i)]
 
-            else:
-                cmdline += ['-numa', 'node,cpus=%d-%d,nodeid=%d' % (
-                        start_cpu,
-                        start_cpu + ncores_on_node - 1,
-                        i)]
-            start_cpu += ncores_on_node
+              else:
+                  cmdline += ['-numa', 'node,cpus=%d-%d,nodeid=%d' % (
+                          start_cpu,
+                          start_cpu + ncores_on_node - 1,
+                          i)]
+              start_cpu += ncores_on_node
+        else:
+            cmdline += ['-m', str(total_mem)]
 
         # Ethernet interfaces
         try:
@@ -647,7 +659,7 @@ class Qemu(object):
             iso_file = batch.get_vm_state_path(vm.rank, 'cloud_seed')
 
             f = open(meta_data_file, 'w')
-            f.write('instance-id: pcocc-deploy\n')
+            f.write('instance-id: {0}\n'.format(vm.instance_id))
             f.write('local-hostname: vm%d\n' % (vm.rank))
             f.close()
 
@@ -678,7 +690,7 @@ class Qemu(object):
             cmdline += vm.custom_args
 
 
-        if emulator_coreset:
+        if emulator_coreset and autobind_cpumem:
             emulator_phys_coreset = [ subprocess_check_output(
                     ['hwloc-calc', '--po', '-I', 'PU', 'Core:%s' % core]).strip()
                                       for core in emulator_coreset ]
@@ -692,7 +704,9 @@ class Qemu(object):
                 fd = os.open(os.devnull, os.O_WRONLY)
                 os.dup2(fd, 2)
                 os.dup2(fd, 1)
-
+            # Run in a new process group to not get SIGINTs if launched from
+            # a terminal
+            os.setpgid(0, 0)
             os.execvp(cmdline[0], cmdline)
 
         while True:
@@ -703,13 +717,12 @@ class Qemu(object):
                 break
 
             except socket.error as err:
-                if err.errno == errno.ENOENT:
-                    pid, status = os.waitpid(qemu_pid, os.WNOHANG)
-                    if pid:
-                        ret = status >> 8
-                        raise HypervisorError("qemu exited during init with"
-                                              " status %d" % (ret))
-                    time.sleep(1)
+                pid, status = os.waitpid(qemu_pid, os.WNOHANG)
+                if pid:
+                    ret = status >> 8
+                    raise HypervisorError("qemu exited during init with"
+                                          " status %d" % (ret))
+                time.sleep(1)
 
 
         data = s_mon.recv(QMP_READ_SIZE)
@@ -720,21 +733,22 @@ class Qemu(object):
                            'binding vcpus',
                            None, vm.rank)
 
-        # Ask for vcpu thread info
-        s_mon.sendall('{ "execute": "query-cpus" }')
-        data = s_mon.recv(QMP_READ_SIZE)
-        ret = json.loads(data)
+        if autobind_cpumem:
+          # Ask for vcpu thread info
+          s_mon.sendall('{ "execute": "query-cpus" }')
+          data = s_mon.recv(QMP_READ_SIZE)
+          ret = json.loads(data)
 
-        # Bind each vcpu thread on its physical cpu
-        for cpu_info in ret["return"]:
-            cpu_id = cpu_info["CPU"]
-            cpu_thread_id = cpu_info["thread_id"]
-            phys_coreid = subprocess_check_output(
-                ['hwloc-calc' , '--po', '-I', 'PU',
-                 'core:%s'%(virt_to_phys_coreid[cpu_id])]  +
-                topology_cache_args).strip()
-            subprocess_check_output(['taskset', '-p', '-c',
-                                     phys_coreid, str(cpu_thread_id)])
+          # Bind each vcpu thread on its physical cpu
+          for cpu_info in ret["return"]:
+              cpu_id = cpu_info["CPU"]
+              cpu_thread_id = cpu_info["thread_id"]
+              phys_coreid = subprocess_check_output(
+                  ['hwloc-calc' , '--po', '-I', 'PU',
+                   'core:%s'%(virt_to_phys_coreid[cpu_id])]  +
+                  topology_cache_args).strip()
+              subprocess_check_output(['taskset', '-p', '-c',
+                                       phys_coreid, str(cpu_thread_id)])
 
         s_mon.close()
 
@@ -776,6 +790,13 @@ class Qemu(object):
                            'started',
                            None, vm.rank)
 
+        # If we need to properly shutdown the guest, catch SIGTERMs
+        # and SIGINTS
+        if vm.wait_for_poweroff:
+            term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
+        else:
+            term_sigfd = None
+
         # Proxy the VM console until Qemu closes it
         client_sock = None
 
@@ -783,14 +804,27 @@ class Qemu(object):
                                                    'qemu_console_log'), 'w+',
                                 1)
 
+        t = None
+        shutdown_attempts = 0
+        if term_sigfd is None:
+            base_list = [qemu_console_sock]
+        else:
+            base_list = [term_sigfd, qemu_console_sock]
+
         while qemu_console_sock:
             # Only accept one client at a time
             if client_sock:
-                sock_list = [client_sock, qemu_console_sock]
+                listen_list = base_list + [client_sock]
             else:
-                sock_list = [pcocc_console_sock, qemu_console_sock]
+                listen_list = base_list + [pcocc_console_sock]
 
-            rdy, _ , _  = select.select(sock_list, [], [])
+            try:
+                rdy, _ , _  = select.select(listen_list, [], [])
+            except select.error as e:
+                if e[0] == errno.EINTR:
+                    continue
+                else:
+                    raise
 
             for s in rdy:
                 if s is pcocc_console_sock:
@@ -846,8 +880,35 @@ class Qemu(object):
                         except:
                             pass
                         client_sock = None
+                elif s is term_sigfd:
+                    os.read(term_sigfd, 1024)
+                    if shutdown_attempts >= 5:
+                        logging.info('Timed out waiting for VM to poweroff')
+                        # Exit loops
+                        qemu_console_sock = None
+                        break
 
-        pid, status = os.waitpid(qemu_pid, 0)
+                    mon = RemoteMonitor(vm)
+                    mon.system_powerdown()
+                    mon.close_monitor()
+                    logging.debug('Waiting for VM to poweroff')
+                    # Wait 10s for Qemu to exit and resend signal
+                    if t:
+                        t.cancel()
+                        t.join(0)
+                    t = threading.Timer(10, os.kill,
+                                        [os.getpid(), signal.SIGTERM])
+                    t.start()
+                    shutdown_attempts+=1
+
+        logging.debug('Cleaning up Qemu')
+        # Qemu should have exited, send it a SIGTERM and a SIGKILL 5s later
+        if t:
+            t.cancel()
+            t.join(0)
+        os.kill(os.getpid(), signal.SIGTERM)
+        status, pid, _ = wait_or_term_child(qemu_pid, signal.SIGTERM,
+                                            term_sigfd, 5)
         ret = status >> 8
         if ret != 0:
             raise HypervisorError("qemu exited with status %d" % ret)
@@ -966,7 +1027,7 @@ class Qemu(object):
                 self.fsthaw(vm, timeout=timeout)
                 use_fsfreeze = True
             except AgentError:
-                if safe:
+                if freeze == VM_FREEZE_OPT.YES:
                     raise ImageSaveError('Unable to freeze filesystems')
 
                 print ('No answer from Qemu agent when trying to freeze filesystem: '

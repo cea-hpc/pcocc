@@ -192,6 +192,10 @@ class VM(object):
         return self._template.user_data
 
     @property
+    def instance_id(self):
+        return self._template.instance_id
+
+    @property
     def full_node(self):
         return self._template.full_node
 
@@ -202,6 +206,13 @@ class VM(object):
     @property
     def persistent_drives(self):
         return self._template.persistent_drives
+
+    @property
+    def wait_for_poweroff(self):
+        if self._template.persistent_drives:
+            return True
+        else:
+            return False
 
     @property
     def qemu_bin(self):

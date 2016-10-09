@@ -35,11 +35,12 @@ import time
 import threading
 import click
 import pwd
-
+import logging
 import pcocc
 from pcocc import PcoccError, Config, Cluster, Hypervisor
 from pcocc.Backports import total_seconds, subprocess_check_output
 from pcocc.Batch import ProcessType
+from pcocc.Misc import fake_signalfd, wait_or_term_child
 from Shine.TextTable import TextTable
 
 helperdir = '/etc/pcocc/helpers'
@@ -546,6 +547,9 @@ def pcocc_console(jobid, jobname, log, vm):
         pcocc console vm1
 """
     try:
+        signal.signal(signal.SIGINT, clean_exit)
+        signal.signal(signal.SIGTERM, clean_exit)
+
         config = load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
 
@@ -566,7 +570,7 @@ def pcocc_console(jobid, jobname, log, vm):
                                 vm.rank,
                                 'qemu_console_log'))))
                 click.echo_via_pager(log)
-            except:
+            except Exception:
                 click.secho("Unable to read console log",
                             fg='red', err=True)
 
@@ -742,9 +746,11 @@ wait
 """ % (' '.join(ckpt_opt), cluster_definition))
 
         wrpfile.close()
-        ret = config.batch.batch(batch_options + get_license_opts(cluster) +
-                                 ['-n', '%d' % (len(cluster.vms)),
-                                  '-J', 'pcocc', wrpname])
+        ret = config.batch.batch(cluster,
+                                 batch_options +
+                                 get_license_opts(cluster) +
+                                 ['-n', '%d' % (len(cluster.vms))],
+                                  wrpname)
         sys.exit(ret)
 
     except PcoccError as err:
@@ -778,9 +784,10 @@ def pcocc_alloc(restart_ckpt, alloc_script, batch_options, cluster_definition):
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
         alloc_opt = gen_alloc_script_opt(alloc_script)
 
-        ret = config.batch.alloc(batch_options + get_license_opts(cluster) +
-                                 ['-n', '%d' % (len(cluster.vms)),
-                                  'pcocc' ] + build_verbose_opt() +
+        ret = config.batch.alloc(cluster,
+                                 batch_options + get_license_opts(cluster) +
+                                 ['-n', '%d' % (len(cluster.vms))],
+                                  ['pcocc'] + build_verbose_opt() +
                                  [ 'internal', 'launcher',
                                   cluster_definition] + alloc_opt +
                                   ckpt_opt)
@@ -824,13 +831,12 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
     # TODO: This cmdline should be tunable
     with open(os.devnull, "w") as fnull:
         resource_definition = cluster.resource_definition
-        s_pjob = subprocess.Popen(['srun', '-Q', '-X', '--vm', resource_definition,
-                                   '--resv-port', 'pcocc', ] +
-                                  build_verbose_opt() +
-                                  [ 'internal', 'run'] +
-                                  ckpt_opt,
-                                  cwd=batch.cluster_state_dir, stdin=fnull)
-
+        s_pjob = batch.run(cluster,
+                           ['-Q', '-X', '--resv-port'],
+                           ['pcocc'] +
+                           build_verbose_opt() +
+                           [ 'internal', 'run'] +
+                           ckpt_opt)
     try:
         cluster.wait_host_config()
     except PcoccError as err:
@@ -842,6 +848,8 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
 
     batch.write_key("cluster/user", "definition", cluster_definition)
 
+    term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
+
     if script:
         if restart_ckpt:
             s_exec = subprocess.Popen(["pcocc", "exec"])
@@ -852,10 +860,12 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
     else:
         shell_env = os.environ
         shell_env['PROMPT_COMMAND']='echo -n "(pcocc/%d) "' % (batch.batchid)
-        s_exec = subprocess.Popen(['bash'], env=shell_env)
+        shell = os.getenv('SHELL', default='bash')
+        s_exec = subprocess.Popen(shell, env=shell_env)
 
     while True:
-        pid, status = os.wait()
+        status, pid, _ = wait_or_term_child([s_pjob.pid, s_exec.pid],
+                                            signal.SIGTERM, term_sigfd, 40)
         if pid == s_pjob.pid:
             if status != 0:
                 sys.stderr.write("The cluster terminated unexpectedly\n")
@@ -864,14 +874,18 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
 
             # This is racy but helps
             if s_exec.poll() is None:
+                s_exec.terminate()
+
+            time.sleep(1)
+            if s_exec.poll() is None:
                 s_exec.kill()
 
             sys.exit(status >> 8)
         elif pid == s_exec.pid and not wait:
             sys.stderr.write("Terminating the cluster...\n")
-            t = threading.Timer(5, wait_timeout, [s_pjob])
+            t = threading.Timer(40, wait_timeout, [s_pjob])
             t.start()
-            s_pjob.send_signal(signal.SIGINT)
+            s_pjob.send_signal(signal.SIGTERM)
             s_pjob.wait()
             t.cancel()
             sys.exit(status >> 8)
@@ -879,8 +893,9 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
 
 def wait_timeout(s_proc):
     try:
+        logging.error("Forcibly killing hypervisor processes...\n")
         s_proc.kill()
-    except:
+    except Exception as e:
         pass
 
 @internal.command(name='pkeyd',
@@ -896,6 +911,8 @@ def pcocc_pkeyd():
         handle_error(err)
 
 
+# We want to catch some signals and exit ourselves
+# so that all 'atexit' cleanup callbacks are executed
 def clean_exit(sig, frame):
     sys.exit(0)
 
@@ -905,6 +922,8 @@ def clean_exit(sig, frame):
               help='Restart cluster from the specified checkpoint')
 def pcocc_run(restart_ckpt):
     signal.signal(signal.SIGINT, clean_exit)
+    signal.signal(signal.SIGTERM, clean_exit)
+
     try:
         config = load_config(process_type=ProcessType.HYPERVISOR)
         cluster = load_batch_cluster()
@@ -998,11 +1017,13 @@ def pcocc_setup(action):
         config.cleanup_node()
     elif action == 'create':
         config.load(process_type=ProcessType.SETUP)
+        Config().batch.create_resources()
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)
         cluster.alloc_node_resources()
     elif action == 'delete':
         config.load(process_type=ProcessType.SETUP)
+        Config().batch.delete_resources()
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)
         cluster.free_node_resources()

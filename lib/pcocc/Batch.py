@@ -37,6 +37,7 @@ import time
 import psutil
 import signal
 import argparse
+import uuid
 
 from etcd import auth
 from ClusterShell.NodeSet  import NodeSet, NodeSetException
@@ -199,14 +200,14 @@ class BatchManager(object):
         raise PcoccError("Not implemented")
 
     def batch(self, cluster, alloc_opt, cmd):
-        """Allocate an batch job"""
+        """Allocate a batch job"""
         raise PcoccError("Not implemented")
 
     def create_resources(self):
         """Called on each node at the resource creation step"""
         pass
 
-    def delete_resources(self):
+    def delete_resources(self, force=False):
         """Called on each node at the resource deletion step"""
         pass
 
@@ -734,11 +735,11 @@ class EtcdManager(BatchManager):
 """Schema to validate the global pkey state in the key/value store"""
 local_job_allocation_schema = """
 type: object
-patternProperties:
-  "^([a-zA-Z_0-9--])+$":
+properties:
+  jobs:
     type: object
     patternProperties:
-      "^([0-9]+)$":
+      "^([0-9]+)+$":
         type: object
         properties:
           batchname:
@@ -747,11 +748,22 @@ patternProperties:
             type: string
           definition:
             type: string
+          uuid:
+            type: string
+          host:
+            type: string
+          user:
+            type: string
         required:
           - batchname
           - definition
+          - uuid
+          - host
+          - user
         additionalProperties: no
-    additionalProperties: no
+  next_batchid:
+    type: integer
+additionalProperties: no
 """
 class LocalManager(EtcdManager):
     def __init__(self, batchid, batchname, default_batchname, settings,
@@ -794,12 +806,15 @@ class LocalManager(EtcdManager):
                     except InvalidJobError:
                         pass
 
+
         if self.batchid == 0 or self.proc_type == ProcessType.OTHER:
             # Not related to a job, no need to initialize job state
             return
 
-        # Assume all invocations are done on the local node
-        self.nodeset = NodeSet(socket.gethostname().split('.')[0])
+
+        job_record = self._get_job_record(self.batchid)
+        self.nodeset = NodeSet(job_record['host'])
+        # Only on node per job in local mode
         self.node_rank = 0
 
         # Define working directories
@@ -822,7 +837,6 @@ class LocalManager(EtcdManager):
         if self._etcd_auth_type == 'password':
             os.environ['SPANK_PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
 
-        os.environ['PCOCC_LOCAL_JOB_ID'] = str(os.getpid())
         os.environ['PCOCC_LOCAL_CLUSTER_DEFINITION'] = cluster.resource_definition
 
         parser = argparse.ArgumentParser()
@@ -862,6 +876,8 @@ class LocalManager(EtcdManager):
                     alloc_opt.coreset))
             os.environ['PCOCC_LOCAL_CORE_SET'] = alloc_opt.coreset
 
+        self._req_uuid = uuid.uuid4()
+        os.environ['PCOCC_LOCAL_JOB_UUID'] = str(self._req_uuid)
 
         # TODO: Only one VM in local mode for now
         os.environ['PCOCC_LOCAL_PROCID'] = '0'
@@ -871,7 +887,9 @@ class LocalManager(EtcdManager):
 
         jobid_in_use = None
         try:
-            jobid_in_use = self.find_job_by_name(self.batchuser, alloc_opt.jobname)
+            jobid_in_use = self.find_job_by_name(self.batchuser,
+                                                 alloc_opt.jobname,
+                                                 socket.gethostname().split('.')[0])
         except:
             pass
 
@@ -891,13 +909,14 @@ class LocalManager(EtcdManager):
         subprocess.check_call(['sudo',
                                'pcocc',
                                'internal', 'setup', 'init'])
-
         atexit.register(self._run_resource_cleanup)
 
         subprocess.check_call(['sudo',
                                'pcocc',
                                'internal', 'setup', 'create'])
 
+        self.batchid = self._uuid_to_batchid(self.batchuser, self._req_uuid)
+        os.environ['PCOCC_LOCAL_JOB_ID'] = str(self.batchid )
 
         # We expect to be given 60s to shutdown so give 50s to
         # our child process
@@ -908,6 +927,8 @@ class LocalManager(EtcdManager):
                              'request after SIGTERM was received')
 
     def _run_resource_cleanup(self):
+        os.environ['PCOCC_LOCAL_JOB_ID'] = str(self._uuid_to_batchid(self.batchuser,
+                                                                       self._req_uuid))
         subprocess.call(['sudo', 'pcocc',
                          'internal', 'setup', 'delete'])
 
@@ -922,7 +943,6 @@ class LocalManager(EtcdManager):
 
     @property
     def cluster_definition(self):
-        self._only_in_a_job()
         return os.environ.get('PCOCC_LOCAL_CLUSTER_DEFINITION')
 
     @property
@@ -976,92 +996,160 @@ class LocalManager(EtcdManager):
         """
         job_alloc_state = self.read_key('global',
                                         self._job_allocation_key())
-        job_alloc_state = yaml.safe_load(job_alloc_state)
-        jsonschema.validate(job_alloc_state,
-                            yaml.safe_load(local_job_allocation_schema))
+        job_alloc_state = self._validate_job_state(job_alloc_state)
 
-        jobs = []
-        for g in job_alloc_state.itervalues():
-            for job in g.iterkeys():
-                jobs.append(int(job))
+        return [ int(batchid) for batchid in job_alloc_state['jobs'].iterkeys() ]
 
-        return jobs
+    def find_job_by_name(self, user, batchname,
+                         host=None):
 
-    def find_job_by_name(self, user, batchname):
         job_alloc_state = self.read_key('global',
                                         self._job_allocation_key())
+        job_alloc_state = self._validate_job_state(job_alloc_state)
 
-        job_alloc_state = yaml.safe_load(job_alloc_state)
-        jsonschema.validate(job_alloc_state,
-                            yaml.safe_load(local_job_allocation_schema))
+        batchids = []
+        hosts = []
+        for batchid, job in job_alloc_state['jobs'].iteritems():
+            if (job['user'] == user and job['batchname'] == batchname):
+                if host and job['host'] == host:
+                    return batchid
+                elif not host:
+                    if job['host'] == socket.gethostname().split('.')[0]:
+                        return batchid
+                    else:
+                        batchids.append(int(batchid))
+                        hosts.append(job['host'])
 
-        if user in job_alloc_state:
-            for b in job_alloc_state[user]:
-                if job_alloc_state[user][b]['batchname'] == batchname:
-                    return int(b)
 
-        raise InvalidJobError('no valid match for name '+ batchname)
+        if not batchids:
+            raise InvalidJobError('no valid match for name '+ batchname)
 
-    def _do_alloc_job(self, user, batchid, batchname, definition, job_alloc_state):
+        if len(batchids) > 1:
+            raise InvalidJobError('name {0} is ambiguous (active on {1})'.format(
+                batchname, ', '.join(hosts)))
+
+        return batchids[0]
+
+    def _get_job_record(self, batchid):
+        job_alloc_state = self.read_key('global',
+                                        self._job_allocation_key())
+        job_alloc_state = self._validate_job_state(job_alloc_state)
+
+        try:
+            return job_alloc_state['jobs'][str(batchid)]
+        except KeyError:
+            raise InvalidJobError('no job record for batchid ' + str(batchid))
+
+    def _do_alloc_job(self, user, batchname, uuid, definition, job_alloc_state):
         """Helper to allocate a jobname"""
         batch = Config().batch
 
-        if not job_alloc_state:
-            job_alloc_state = {}
-        else:
-            job_alloc_state = yaml.safe_load(job_alloc_state)
+        job_alloc_state = self._validate_job_state(job_alloc_state)
 
-        schema = yaml.safe_load(local_job_allocation_schema)
-        jsonschema.validate(job_alloc_state, schema)
+        try:
+            batchid = self._uuid_to_batchid(user, uuid, job_alloc_state)
+        except AllocationError:
+            batchid = -1
 
-        if not user in job_alloc_state:
-            job_alloc_state[user] = {}
+        if batchid != -1:
+            raise AllocationError(
+                'uuid {0} already in used by job {1} on host {2}'.format(
+                    uuid, batchid, job_alloc_state['jobs'][str(batchid)]['host']))
 
-        for b in job_alloc_state[user]:
-            if job_alloc_state[user][b]['batchname'] == batchname:
-                raise AllocationError(
-                    'Job name {0} already in used by job {1}'.format(
-                        batchname, batchid))
 
-        job_alloc_state[user][str(batchid)] = {
+        try:
+            batchid = self.find_job_by_name(user, batchname,
+                                            socket.gethostname().split('.')[0])
+        except InvalidJobError:
+            batchid = -1
+
+        if batchid != -1:
+            raise AllocationError(
+                'Jobname {0} already in used by job {1} on host {2}'.format(
+                    batchname, batchid, job_alloc_state['jobs'][str(batchid)]['host']))
+
+
+        batchid = job_alloc_state['next_batchid']
+        job_alloc_state['next_batchid'] = batchid + 1
+
+        job_alloc_state['jobs'][str(batchid)] = {
             'batchname': batchname,
-            'definition': definition
+            'definition': definition,
+            'uuid': str(uuid),
+            'user': user,
+            'host': socket.gethostname().split('.')[0]
         }
 
-        jsonschema.validate(job_alloc_state, schema)
-        return yaml.dump(job_alloc_state), True
+        job_alloc_state = self._validate_job_state(job_alloc_state)
+        return yaml.dump(job_alloc_state), batchid
 
-    def _do_free_job(self, user, batchid, job_alloc_state):
+    def _do_free_job(self, user, uuid, job_alloc_state):
         """Helper to allocate a jobname"""
         batch = Config().batch
 
-        job_alloc_state = yaml.safe_load(job_alloc_state)
+        job_alloc_state = self._validate_job_state(job_alloc_state)
+
+        batchid = self._uuid_to_batchid(user, uuid, job_alloc_state)
+        job_record = job_alloc_state['jobs'].pop(str(batchid))
+
+        job_alloc_state = self._validate_job_state(job_alloc_state)
+        return yaml.dump(job_alloc_state), job_record
+
+    def _validate_job_state(self, state):
+        if state is None:
+            job_alloc_state = {'jobs': {}, 'next_batchid': 1}
+        elif isinstance(state, dict):
+            job_alloc_state = state
+        else:
+            job_alloc_state = yaml.safe_load(state)
+
         schema = yaml.safe_load(local_job_allocation_schema)
         jsonschema.validate(job_alloc_state, schema)
 
-        job_record = job_alloc_state[user].pop(str(batchid))
+        return job_alloc_state
 
-        jsonschema.validate(job_alloc_state, schema)
-        return yaml.dump(job_alloc_state), job_record
+    def _uuid_to_batchid(self, user, uuid, job_alloc_state=None):
+        if job_alloc_state is None:
+          job_alloc_state = self.read_key('global',
+                                          self._job_allocation_key())
+
+        job_alloc_state = self._validate_job_state(job_alloc_state)
+
+        try:
+            for batchid, job in job_alloc_state['jobs'].iteritems():
+                if job['uuid'] == str(uuid):
+                    return int(batchid)
+        except KeyError:
+            pass
+
+        raise AllocationError('Unable to find job with uuid {0}'.format(uuid))
+
 
     def create_resources(self):
-        caller_pid = psutil.Process(os.getppid()).ppid()
-        if self.batchid != caller_pid:
-            raise Allocation('Unauthorized resource allocation call')
-
         req_jobname = os.getenv('PCOCC_LOCAL_JOB_NAME', None)
+        req_uuid = os.getenv('PCOCC_LOCAL_JOB_UUID', None)
+        caller_pid = psutil.Process(os.getppid()).ppid()
+
         if not req_jobname:
             raise AllocationError('Job name was not specified')
-
         self._validate_jobname(req_jobname)
 
-        self.atom_update_key(
+        if not req_uuid:
+            raise AllocationError('Job uuid was not specified')
+
+        try:
+            req_uuid = uuid.UUID(req_uuid)
+        except Exception:
+            raise
+            raise AllocationError('Invalid uuid')
+
+        self.batchid = self.atom_update_key(
             'global',
             self._job_allocation_key(),
             self._do_alloc_job,
             self.batchuser,
-            self.batchid,
             req_jobname,
+            req_uuid,
             self.cluster_definition)
 
 
@@ -1076,7 +1164,7 @@ class LocalManager(EtcdManager):
                      'Unable to set requested cpuset: ' + str(e))
 
         with open(os.path.join(self._cpuset_cluster(), 'tasks'), 'w') as f:
-            f.write(str(self.batchid))
+            f.write(str(caller_pid))
 
         try:
             cores = os.environ.get('PCOCC_LOCAL_CORE_SET', None)
@@ -1092,50 +1180,68 @@ class LocalManager(EtcdManager):
         except Exception as e:
             raise BatchError('Unable to set requested cpuset: ' + str(e))
 
-    def delete_resources(self):
-        caller_pid = psutil.Process(os.getppid()).ppid()
+        self.node_rank=0
+        self.nodeset=NodeSet(socket.gethostname().split('.')[0])
 
-        try:
-            f = open(os.path.join(self._cpuset_cluster(), 'tasks'))
-        except IOError:
-            logging.warning('No cpuset for job {0}'.format(self.batchid))
-            f = None
+    def delete_resources(self, force=False):
+        if not self.batchid:
+            raise AllocationError('Job id was not specified')
 
-        if f:
-            pids = f.read().splitlines()
+        job_record = self._get_job_record(self.batchid)
+        if self.batchuser != 'root' and job_record['user'] != self.batchuser:
+            raise AllocationError('Wrong user for job {0}'.format(self.batchid))
 
-            # Only the allocation process is allowed to delete resources
-            # while there are still active processes
-            if self.batchid != caller_pid and pids:
-                raise BatchError('There are still running processes for job '
-                                 '{0} ({1})'.format(
-                                     self.batchid, ' '.join(pids)))
+        remote = False
+        if job_record['host'] != socket.gethostname().split('.')[0]:
+            if force:
+                remote = True
+            else:
+                raise AllocationError('Wrong host for job {0}'.format(self.batchid))
 
-            for pid in pids:
-                pid = int(pid)
-                try:
-                    if ((psutil.Process(pid).username() == self.batchuser) and
-                        pid != caller_pid and pid != os.getppid()
-                        and pid != os.getpid()):
-                        os.kill(pid, signal.SIGKILL)
-                except psutil.NoSuchProcess:
-                    pass
-                except OSError as e:
-                    pass
+        if not remote:
+          caller_pid = psutil.Process(os.getppid()).ppid()
+          try:
+              f = open(os.path.join(self._cpuset_cluster(), 'tasks'))
+          except IOError:
+              logging.warning('No cpuset for job {0}'.format(self.batchid))
+              f = None
 
-            f.close()
+          if f:
+              pids = f.read().splitlines()
 
-        job_record = None
+              # Only the allocation process is allowed to delete resources
+              # while there are still active processes
+              if pids and (str(caller_pid) not in pids) and not force:
+                  raise BatchError('There are still running processes for job '
+                                   '{0} ({1})'.format(
+                                       self.batchid, ' '.join(pids)))
+
+              for pid in pids:
+                  pid = int(pid)
+                  try:
+                      if ((psutil.Process(pid).username() == self.batchuser) and
+                          pid != caller_pid and pid != os.getppid()
+                          and pid != os.getpid()):
+                          os.kill(pid, signal.SIGKILL)
+                  except psutil.NoSuchProcess:
+                      pass
+                  except OSError as e:
+                      pass
+
+              f.close()
+
         try:
             job_record = self.atom_update_key(
                 'global',
                 self._job_allocation_key(),
                 self._do_free_job,
                 self.batchuser,
-                self.batchid)
+                job_record['uuid'])
         except:
+            raise
             logging.error('No allocation record to delete '
-                          'matching job {0}'.format(self.batchid))
+                          'matching job {0} for user {1}'.format(self.batchid,
+                                                                 self.batchuser))
             sys.exit(1)
 
         # Allow recovering from the jobid if the allocation process

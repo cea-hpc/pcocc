@@ -999,7 +999,11 @@ class Lock:
 @internal.command(name='setup',
              short_help="For internal use")
 @click.argument('action', type=click.Choice(['init', 'cleanup', 'create', 'delete']))
-def pcocc_setup(action):
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster (only valid for deletion)')
+@click.option('-F', '--force', is_flag=True,
+              help='Force job deletion')
+def pcocc_setup(action, jobid, force):
     # Dont load user config, we run as a privileged user
     config = Config()
 
@@ -1008,6 +1012,9 @@ def pcocc_setup(action):
 
     # Always raise verbosity for setup processes
     config.verbose = max(config.verbose, 1)
+
+    if(action != 'delete' and (jobid or force)):
+        raise click.UsageError('this option can only be used with delete')
 
     if action == 'init':
         config.load(process_type=ProcessType.OTHER)
@@ -1022,8 +1029,8 @@ def pcocc_setup(action):
                           resource_only=True)
         cluster.alloc_node_resources()
     elif action == 'delete':
-        config.load(process_type=ProcessType.SETUP)
-        Config().batch.delete_resources()
+        config.load(jobid=jobid, process_type=ProcessType.SETUP)
+        Config().batch.delete_resources(force)
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)
         cluster.free_node_resources()

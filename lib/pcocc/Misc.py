@@ -23,8 +23,11 @@ import fcntl
 import select
 import logging
 import errno
+import socket
 
 from Backports import  enum
+
+stop_threads = threading.Event()
 
 def fake_signalfd(sigs):
     sig_r, sig_w = os.pipe()
@@ -110,3 +113,22 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout):
 
     nanny.join()
     return return_val['val'], return_val['pid'], status
+
+def systemd_notify(status, ready=False, watchdog=False):
+    sock_path = os.getenv("NOTIFY_SOCKET", None)
+    if sock_path is None:
+        return False
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    sock.connect(sock_path)
+
+    s = "STATUS={0}".format(status)
+    if ready:
+        s = "READY=1\n{0}".format(s)
+    if watchdog:
+        s = "WATCHDOG=1\n{0}".format(s)
+
+    sock.send(s)
+    sock.close()
+
+    return True

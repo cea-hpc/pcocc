@@ -40,7 +40,7 @@ import pcocc
 from pcocc import PcoccError, Config, Cluster, Hypervisor
 from pcocc.Backports import total_seconds, subprocess_check_output
 from pcocc.Batch import ProcessType
-from pcocc.Misc import fake_signalfd, wait_or_term_child
+from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from Shine.TextTable import TextTable
 
 helperdir = '/etc/pcocc/helpers'
@@ -914,6 +914,8 @@ def pcocc_pkeyd():
 # We want to catch some signals and exit ourselves
 # so that all 'atexit' cleanup callbacks are executed
 def clean_exit(sig, frame):
+    logging.error('clean exit')
+    stop_threads.set()
     sys.exit(0)
 
 @internal.command(name='run',

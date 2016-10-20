@@ -904,7 +904,7 @@ class LocalManager(EtcdManager):
         # Make sure we don't get spuriously interrupted
         # once we start allocating host resources
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        term_sigfd = fake_signalfd([signal.SIGTERM])
+        term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGABRT])
 
         subprocess.check_call(['sudo',
                                'pcocc',

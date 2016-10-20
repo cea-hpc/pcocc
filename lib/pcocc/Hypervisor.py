@@ -34,13 +34,15 @@ import shutil
 import yaml
 import logging
 import signal
+import datetime
+import random
 
 from pcocc.scripts import click
 from ClusterShell.NodeSet  import RangeSet
 from Backports import subprocess_check_output, enum
 from Error import PcoccError
 from Config import Config
-from Misc import fake_signalfd, wait_or_term_child, CHILD_EXIT
+from Misc import fake_signalfd, wait_or_term_child, CHILD_EXIT, stop_threads, systemd_notify
 
 lock = threading.Lock()
 
@@ -811,6 +813,11 @@ class Qemu(object):
         else:
             base_list = [term_sigfd, qemu_console_sock]
 
+
+        if systemd_notify('VM is booting...', ready=True):
+            watchdog = threading.Thread(None, self.watchdog, args=[vm])
+            watchdog.start()
+
         while qemu_console_sock:
             # Only accept one client at a time
             if client_sock:
@@ -906,6 +913,8 @@ class Qemu(object):
         if t:
             t.cancel()
             t.join(0)
+
+        stop_threads.set()
         os.kill(os.getpid(), signal.SIGTERM)
         status, pid, _ = wait_or_term_child(qemu_pid, signal.SIGTERM,
                                             term_sigfd, 5)
@@ -914,6 +923,21 @@ class Qemu(object):
             raise HypervisorError("qemu exited with status %d" % ret)
 
         return ret
+
+    def watchdog(self, vm):
+        while not stop_threads.wait(30):
+          try:
+              s_ctl = self._get_agent_ctl_safe(vm, QEMU_GUEST_AGENT_PORT, 5)
+              s_ctl.terminate()
+              s_ctl.wait()
+              systemd_notify('Watchdog successful at {0}'.format(
+                  datetime.datetime.now()), watchdog=True)
+          except Exception as e:
+              systemd_notify('Watchdog could not query guest at {0}'.format(
+                  datetime.datetime.now()))
+              pass
+
+        logging.info('Got thread termination event')
 
     def dump(self, vm, dumpfile):
         mon = RemoteMonitor(vm)

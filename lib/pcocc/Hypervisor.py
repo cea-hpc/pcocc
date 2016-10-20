@@ -655,6 +655,9 @@ class Qemu(object):
                             'id=ioserial%d,name=%s' %
                             (serialid, serialid, serial)]
 
+        # Virtio RNG
+        cmdline += [ '-device', 'virtio-rng-pci']
+
         try:
             user_data_file = batch.get_vm_state_path(vm.rank, 'user-data')
             meta_data_file = batch.get_vm_state_path(vm.rank, 'meta-data')

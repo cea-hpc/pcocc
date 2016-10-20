@@ -914,7 +914,7 @@ def pcocc_pkeyd():
 # We want to catch some signals and exit ourselves
 # so that all 'atexit' cleanup callbacks are executed
 def clean_exit(sig, frame):
-    logging.error('clean exit')
+    logging.debug('clean exit')
     stop_threads.set()
     sys.exit(0)
 

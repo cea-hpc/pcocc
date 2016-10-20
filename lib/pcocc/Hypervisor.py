@@ -120,7 +120,7 @@ class RemoteMonitor(object):
                 ret = json.loads(data)
                 if 'event' in ret and ret['event'] not in event_list:
                     continue
-            except:
+            except Exception:
                 pass
 
             return data
@@ -1110,7 +1110,6 @@ class Qemu(object):
 
     def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0):
         batch = Config().batch
-        qga_cmd = '{"execute":"guest-ping"}\n\n'
         remote_host = vm.get_host()
 
         # We need to make several tries because nc and qemu may drop or
@@ -1121,6 +1120,9 @@ class Qemu(object):
         retry_connect = True
         while 1:
             s_ctl = self.socket_connect(vm, 'serial_{0}_socket'.format(port))
+            syn_id = random.randint(100000000,999999999)
+            qga_cmd = '{"execute":"guest-sync", "arguments": { "id": %d }}\n\n' % syn_id
+            logging.debug("Sending agent sync {0}".format(qga_cmd))
 
             atexit.register(try_kill, s_ctl)
             # TODO: Remove this wait. For now, without it, some of the data we
@@ -1136,26 +1138,19 @@ class Qemu(object):
                     rdy = select.select([s_ctl.stdout], [], [], timeout)
 
                 if timeout and rdy == ([], [], []):
-                    raise AgentError("Timeout pinging agent")
+                    self._cleanup_and_raise(s_ctl, AgentError("Timeout pinging agent"))
 
                 if s_ctl.stdout in rdy[0]:
                     data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
-                    try:
-                        retval = json.loads(data)["return"]
-                        if retval:
-                            raise AgentError("unexpected answer when "
-                                             "pinging VM agent  "
-                                             "%s\n" % data)
-                        else:
-                            return s_ctl
-                    except (ValueError, KeyError)  as err:
-                        if not data:
-                            # Pipe closed, retry
-                            break
-                        else:
-                            raise AgentError("unexpected answer when "
-                                             "pinging VM agent  "
-                                             "%s\n" % data)
+                    if not data:
+                        # Pipe closed, retry
+                        break
+
+                    if data.find(str(syn_id)) == -1:
+                        self._cleanup_and_raise(s_ctl, AgentError("unexpected answer when "
+                                                                  "pinging VM agent  "
+                                                                  "%s\n" % data))
+                    return s_ctl
 
                 if retry_send and s_ctl.stdin in rdy[1]:
                     try:
@@ -1173,10 +1168,21 @@ class Qemu(object):
             if timeout:
                 timeout -= 5
                 if timeout <= 0:
-                    raise AgentError("Timeout pinging agent")
-
+                    self._cleanup_and_raise(s_ctl, AgentError("Timeout pinging agent"))
             # wait before trying a reconnection
             time.sleep(5)
+
+    def _cleanup_and_raise(self, sproc, error):
+        try:
+            if not sproc.poll():
+                sproc.terminate()
+
+            sproc.wait()
+        except Exception as e:
+            pass
+
+        raise error
+
 
     def put_file(self, vm, source_file, dest_file):
         batch = Config().batch

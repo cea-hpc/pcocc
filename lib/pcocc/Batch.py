@@ -921,7 +921,7 @@ class LocalManager(EtcdManager):
         # We expect to be given 60s to shutdown so give 50s to
         # our child process
         r, _, s = wait_or_term_child(subprocess.Popen(cmd),
-                                     signal.SIGTERM, term_sigfd, 15)
+                                     signal.SIGTERM, term_sigfd, 50)
         if s == CHILD_EXIT.KILL:
             raise PcoccError('VM launcher did not acknowlege VM shutdown ' +
                              'request after SIGTERM was received')

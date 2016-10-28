@@ -588,6 +588,7 @@ class EtcdManager(BatchManager):
                 ca_cert=self._etcd_ca_cert,
                 protocol=self._etcd_protocol,
                 allow_reconnect=True,
+                read_timeout=10,
                 username=self._get_keyval_username(),
                 password=self._get_keyval_credential())
 

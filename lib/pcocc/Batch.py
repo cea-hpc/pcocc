@@ -203,6 +203,10 @@ class BatchManager(object):
         """Allocate a batch job"""
         raise PcoccError("Not implemented")
 
+    def init_node(self):
+        """Called on each node at the init step"""
+        pass
+
     def create_resources(self):
         """Called on each node at the resource creation step"""
         pass
@@ -894,9 +898,8 @@ class LocalManager(EtcdManager):
             pass
 
         if not jobid_in_use is None:
-            raise AllocationError(
-                'Job name {0} already in used by job {1}'.format(
-                    alloc_opt.jobname, jobid_in_use))
+            logging.warning('Job name {0} is already in use by'.format(alloc_opt.jobname,
+                                                                       jobid_in_use))
 
         self._run_pid = 0
         self._shutdown = False
@@ -907,12 +910,12 @@ class LocalManager(EtcdManager):
         term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGABRT])
 
         subprocess.check_call(['sudo',
-                               'pcocc',
+                               'pcocc', '-vv',
                                'internal', 'setup', 'init'])
         atexit.register(self._run_resource_cleanup)
 
         subprocess.check_call(['sudo',
-                               'pcocc',
+                               'pcocc', '-vv',
                                'internal', 'setup', 'create'])
 
         self.batchid = self._uuid_to_batchid(self.batchuser, self._req_uuid)
@@ -975,10 +978,16 @@ class LocalManager(EtcdManager):
         self._only_in_a_job()
         return rank
 
-    def _cpuset_cluster(self):
+    def _cpuset_cluster(self, batchid=None):
+        if batchid is None:
+            batchid = self.batchid
+
+        return os.path.join(self._cpuset_base(), 'pcocc', str(batchid))
+
+    def _cpuset_base(self):
         cpuset_base = subprocess.check_output(['lssubsys', '-m', 'cpuset'])
         cpuset_base = cpuset_base.split(' ')[1].strip()
-        return os.path.join(cpuset_base, 'pcocc', str(self.batchid))
+        return cpuset_base
 
     def _validate_jobname(self, batchname):
         if not re.match('[a-zA-Z0-9_-]+', batchname):
@@ -987,6 +996,30 @@ class LocalManager(EtcdManager):
 
     def _job_allocation_key(self):
         return 'public/batch-local/job_allocation_state'
+
+    def _cleanup_orphan_jobs(self):
+        """Cleanup jobs which were not properly deleted
+        """
+        job_alloc_state = self.read_key('global',
+                                        self._job_allocation_key())
+        job_alloc_state = self._validate_job_state(job_alloc_state)
+
+        for batchid, job in job_alloc_state['jobs'].iteritems():
+            if job['host'] == socket.gethostname().split('.')[0]:
+                f = None
+                try:
+                    f = open(os.path.join(self._cpuset_cluster(int(batchid)), 'tasks'))
+                except IOError:
+                    pids = ''
+
+                if f:
+                    pids = f.read().splitlines()
+                    f.close()
+
+                if not pids:
+                    logging.warning('Trying to clean orphan job {0}'.format(batchid))
+                    subprocess.call(['pcocc', '-vv',
+                                     'internal', 'setup', 'delete', '-j', batchid, '--nolock'])
 
     def list_all_jobs(self):
         """List all jobs in the cluster
@@ -1124,6 +1157,8 @@ class LocalManager(EtcdManager):
 
         raise AllocationError('Unable to find job with uuid {0}'.format(uuid))
 
+    def init_node(self):
+        self._cleanup_orphan_jobs()
 
     def create_resources(self):
         req_jobname = os.getenv('PCOCC_LOCAL_JOB_NAME', None)
@@ -1155,6 +1190,10 @@ class LocalManager(EtcdManager):
 
         # Create cpuset cgroup and move caller into it
         try:
+            with open(os.path.join(
+                    self._cpuset_base(), 'cgroup.clone_children'), 'w') as f:
+                f.write('1')
+
             os.makedirs(self._cpuset_cluster())
         except OSError as e:
              if e == errno.EEXIST:

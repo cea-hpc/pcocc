@@ -38,6 +38,7 @@ import psutil
 import signal
 import argparse
 import uuid
+import threading
 
 from etcd import auth
 from ClusterShell.NodeSet  import NodeSet, NodeSetException
@@ -46,7 +47,8 @@ from ClusterShell.NodeSet  import RangeSet
 from Config import Config
 from Backports import subprocess_check_output
 from Error import PcoccError, InvalidConfigurationError
-from Misc import fake_signalfd, wait_or_term_child, CHILD_EXIT
+from Misc import fake_signalfd, wait_or_term_child, CHILD_EXIT,\
+                 datetime_to_epoch, stop_threads
 
 class BatchError(PcoccError):
     """Generic exception for Batch related issues
@@ -426,6 +428,12 @@ class EtcdManager(BatchManager):
                               val.etcd_index)
 
     @_retry_on_cred_expiry
+    def write_ttl(self, key_type, key, value, ttl):
+        """Write a single key with a ttl"""
+        key_path = self.get_key_path(key_type, key)
+        self.keyval_client.write(key_path, value, ttl=ttl)
+
+    @_retry_on_cred_expiry
     def write_key(self, key_type, key, value):
         """Write a single key"""
         key_path = self.get_key_path(key_type, key)
@@ -759,12 +767,15 @@ properties:
             type: string
           user:
             type: string
+          start:
+            type: integer
         required:
           - batchname
           - definition
           - uuid
           - host
           - user
+          - start
         additionalProperties: no
   next_batchid:
     type: integer
@@ -922,13 +933,21 @@ class LocalManager(EtcdManager):
         self.batchid = self._uuid_to_batchid(self.batchuser, self._req_uuid)
         os.environ['PCOCC_LOCAL_JOB_ID'] = str(self.batchid )
 
+        heartbeat = threading.Thread(None, self._hearbeat_thread)
+        heartbeat.start()
+
         # We expect to be given 60s to shutdown so give 50s to
         # our child process
         r, _, s = wait_or_term_child(subprocess.Popen(cmd),
                                      signal.SIGTERM, term_sigfd, 50)
+        stop_threads.set()
         if s == CHILD_EXIT.KILL:
             raise PcoccError('VM launcher did not acknowlege VM shutdown ' +
                              'request after SIGTERM was received')
+
+    def _hearbeat_thread(self):
+        while not stop_threads.wait(30):
+            self._update_heartbeat()
 
     def _run_resource_cleanup(self):
         os.environ['PCOCC_LOCAL_JOB_ID'] = str(self._uuid_to_batchid(self.batchuser,
@@ -1022,7 +1041,34 @@ class LocalManager(EtcdManager):
                     subprocess.call(['pcocc', '-vv',
                                      'internal', 'setup', 'delete', '-j', batchid, '--nolock'])
 
-    def list_all_jobs(self):
+    def _list_alive_jobs(self):
+        path = self.get_key_path('global/user', 'batch-local/heartbeat')
+        d = self.read_dir('global/user', 'batch-local/heartbeat')
+        if d is None:
+            return []
+
+        batchids = []
+        for child in d.children:
+            if child.key == path:
+                continue
+            else:
+                try:
+                    batchids.append(int(os.path.split(child.key)[-1]))
+                except:
+                    logging.warning('Invalid heartbeat entry for '
+                                    'user {0}: {1}'.format(
+                                        self.batchuser,
+                                        child.key
+                                    ))
+        return batchids
+
+    def _update_heartbeat(self, ttl=60):
+        d = self.write_ttl('global/user',
+                           'batch-local/heartbeat/{0}'.format(self.batchid),
+                           '',
+                           ttl)
+
+    def list_all_jobs(self, include_expired=False):
         """List all jobs in the cluster
 
         Returns a list of the batchids of all jobs in the cluster
@@ -1032,7 +1078,23 @@ class LocalManager(EtcdManager):
                                         self._job_allocation_key())
         job_alloc_state = self._validate_job_state(job_alloc_state)
 
-        return [ int(batchid) for batchid in job_alloc_state['jobs'].iterkeys() ]
+
+        user_live_batchids = self._list_alive_jobs()
+
+        batchids = []
+        for batchid, job in job_alloc_state['jobs'].iteritems():
+            batchid = int(batchid)
+            if (include_expired or
+                job['user'] != self.batchuser or
+                datetime_to_epoch(datetime.datetime.now()) - job['start'] < 5 or
+                batchid in user_live_batchids):
+
+                batchids.append(batchid)
+            else:
+                logging.warning('list_all_jobs: ignoring stale job {0} on {1} '.format(
+                    batchid, job['host']))
+
+        return batchids
 
     def find_job_by_name(self, user, batchname,
                          host=None):
@@ -1059,7 +1121,7 @@ class LocalManager(EtcdManager):
             raise InvalidJobError('no valid match for name '+ batchname)
 
         if len(batchids) > 1:
-            raise InvalidJobError('name {0} is ambiguous (active on {1})'.format(
+            raise InvalidJobError('name {0} is ambiguous (exists on {1})'.format(
                 batchname, ', '.join(hosts)))
 
         return batchids[0]
@@ -1087,7 +1149,7 @@ class LocalManager(EtcdManager):
 
         if batchid != -1:
             raise AllocationError(
-                'uuid {0} already in used by job {1} on host {2}'.format(
+                'uuid {0} already in use by job {1} on host {2}'.format(
                     uuid, batchid, job_alloc_state['jobs'][str(batchid)]['host']))
 
 
@@ -1099,7 +1161,7 @@ class LocalManager(EtcdManager):
 
         if batchid != -1:
             raise AllocationError(
-                'Jobname {0} already in used by job {1} on host {2}'.format(
+                'Jobname {0} already in use by job {1} on host {2}'.format(
                     batchname, batchid, job_alloc_state['jobs'][str(batchid)]['host']))
 
 
@@ -1111,7 +1173,8 @@ class LocalManager(EtcdManager):
             'definition': definition,
             'uuid': str(uuid),
             'user': user,
-            'host': socket.gethostname().split('.')[0]
+            'host': socket.gethostname().split('.')[0],
+            'start': datetime_to_epoch(datetime.datetime.now())
         }
 
         job_alloc_state = self._validate_job_state(job_alloc_state)
@@ -1187,6 +1250,7 @@ class LocalManager(EtcdManager):
             req_jobname,
             req_uuid,
             self.cluster_definition)
+        self._update_heartbeat()
 
 
         # Create cpuset cgroup and move caller into it
@@ -1277,6 +1341,8 @@ class LocalManager(EtcdManager):
                 self._do_free_job,
                 self.batchuser,
                 job_record['uuid'])
+
+            self._update_heartbeat(0)
         except:
             raise
             logging.error('No allocation record to delete '

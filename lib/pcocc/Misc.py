@@ -24,6 +24,7 @@ import select
 import logging
 import errno
 import socket
+import datetime
 
 from Backports import  enum
 
@@ -132,3 +133,7 @@ def systemd_notify(status, ready=False, watchdog=False):
     sock.close()
 
     return True
+
+epoch = datetime.datetime.utcfromtimestamp(0)
+def datetime_to_epoch(dt):
+    return int((dt - epoch).total_seconds())

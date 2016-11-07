@@ -914,7 +914,6 @@ def pcocc_pkeyd():
 # We want to catch some signals and exit ourselves
 # so that all 'atexit' cleanup callbacks are executed
 def clean_exit(sig, frame):
-    logging.debug('clean exit')
     stop_threads.set()
     sys.exit(0)
 
@@ -1003,14 +1002,17 @@ class Lock:
 @click.argument('action', type=click.Choice(['init', 'cleanup', 'create', 'delete']))
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster (only valid for deletion)')
+@click.option('--nolock', is_flag=True,
+              help='Disable locking')
 @click.option('-F', '--force', is_flag=True,
               help='Force job deletion')
-def pcocc_setup(action, jobid, force):
+def pcocc_setup(action, jobid, nolock, force):
     # Dont load user config, we run as a privileged user
     config = Config()
 
     lock = Lock("/tmp/.pcocc_setup.lock")
-    lock.acquire()
+    if not nolock:
+        lock.acquire()
 
     # Always raise verbosity for setup processes
     config.verbose = max(config.verbose, 1)
@@ -1020,6 +1022,7 @@ def pcocc_setup(action, jobid, force):
 
     if action == 'init':
         config.load(process_type=ProcessType.OTHER)
+        Config().batch.init_node()
         config.config_node()
     elif action == 'cleanup':
         config.load(process_type=ProcessType.OTHER)
@@ -1037,7 +1040,8 @@ def pcocc_setup(action, jobid, force):
                           resource_only=True)
         cluster.free_node_resources()
 
-    lock.release()
+    if not nolock:
+        lock.release()
 
 
 @template.command(name='list',

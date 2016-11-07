@@ -277,7 +277,7 @@ class RemoteMonitor(object):
 
     def close_monitor(self):
         self.s_mon.terminate()
-        self.s_mon.wait()
+        self.s_mon.communicate()
 
 class Qemu(object):
     def __init__(self):
@@ -929,16 +929,22 @@ class Qemu(object):
 
     def watchdog(self, vm):
         while not stop_threads.wait(30):
-          try:
-              s_ctl = self._get_agent_ctl_safe(vm, QEMU_GUEST_AGENT_PORT, 5)
-              s_ctl.terminate()
-              s_ctl.wait()
-              systemd_notify('Watchdog successful at {0}'.format(
-                  datetime.datetime.now()), watchdog=True)
-          except Exception as e:
-              systemd_notify('Watchdog could not query guest at {0}'.format(
-                  datetime.datetime.now()))
-              pass
+            try:
+                s_ctl = self._get_agent_ctl_safe(vm, QEMU_GUEST_AGENT_PORT, 5,
+                                                 False)
+                systemd_notify('Watchdog successful at {0}'.format(
+                    datetime.datetime.now()), watchdog=True)
+
+            except Exception as e:
+                systemd_notify('Watchdog could not query guest at {0}'.format(
+                    datetime.datetime.now()))
+                pass
+
+            try:
+                s_ctl.terminate()
+                s_ctl.communicate()
+            except Exception as e:
+                pass
 
         logging.info('Got thread termination event')
 
@@ -1111,7 +1117,7 @@ class Qemu(object):
             except (OSError, subprocess.CalledProcessError):
                 raise ImageSaveError('Unable to rebase disk')
 
-    def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0):
+    def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0, kill_atexit=True):
         batch = Config().batch
         remote_host = vm.get_host()
 
@@ -1122,12 +1128,12 @@ class Qemu(object):
         # it which means something went wrong and we stop retrying
         retry_connect = True
         while 1:
-            s_ctl = self.socket_connect(vm, 'serial_{0}_socket'.format(port))
+            s_ctl = self.socket_connect(vm, 'serial_{0}_socket'.format(port), kill_atexit)
             syn_id = random.randint(100000000,999999999)
             qga_cmd = '{"execute":"guest-sync", "arguments": { "id": %d }}\n\n' % syn_id
             logging.debug("Sending agent sync {0}".format(qga_cmd))
 
-            atexit.register(try_kill, s_ctl)
+            #atexit.register(try_kill, s_ctl)
             # TODO: Remove this wait. For now, without it, some of the data we
             # send is lost
             time.sleep(1)
@@ -1166,7 +1172,13 @@ class Qemu(object):
                         else:
                             raise
 
-            s_ctl.wait()
+            try:
+                if sproc.poll is None():
+                    sproc.terminate()
+            except Exception as e:
+                pass
+
+            s_ctl.communicate()
 
             if timeout:
                 timeout -= 5
@@ -1179,10 +1191,10 @@ class Qemu(object):
         try:
             if not sproc.poll():
                 sproc.terminate()
-
-            sproc.wait()
         except Exception as e:
             pass
+
+        sproc.communicate()
 
         raise error
 
@@ -1343,9 +1355,9 @@ class Qemu(object):
                         self._flush_outstanding_io(s_io)
 
                         s_ctl.terminate()
-                        s_ctl.wait()
+                        s_ctl.communicate()
                         s_io.terminate()
-                        s_io.wait()
+                        s_io.communicate()
 
                         return retval
 
@@ -1360,7 +1372,7 @@ class Qemu(object):
                                 # it means qemu existed. We should do the same
                                 # sys.stderr.write("Agent closed\n")
                                 s_io.terminate()
-                                s_io.wait()
+                                s_io.communicate()
                                 return 0
 
                             elif s_ctl.returncode and not cmd:
@@ -1372,7 +1384,7 @@ class Qemu(object):
                                 # and just retry
                                 # sys.stderr.write("Retrying connection\n")
                                 s_io.terminate()
-                                s_io.wait()
+                                s_io.communicate()
                                 s_ctl = self.socket_connect(vm,
                                                'serial_taskcontrolport_socket')
                                 s_io = self.socket_connect(vm,
@@ -1407,7 +1419,7 @@ class Qemu(object):
     def checkpoint_img_file(self, vm, ckpt_dir):
         return os.path.join(ckpt_dir,'disk-vm%d' % (vm.rank))
 
-    def socket_connect(self,vm, name):
+    def socket_connect(self,vm, name, kill_atexit=True):
         batch = Config().batch
         remote_host = vm.get_host()
         io_file = batch.get_vm_state_path(vm.rank,
@@ -1418,9 +1430,11 @@ class Qemu(object):
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE,
                              stdin=subprocess.PIPE)
+        if kill_atexit:
+            atexit.register(try_kill, subproc)
+
         lock.release()
 
-        atexit.register(try_kill, subproc)
         return subproc
 
     def _set_vm_state(self, state, desc, value, vm_rank):

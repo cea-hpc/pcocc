@@ -32,7 +32,7 @@ class pcocc_install(install):
             self.distribution.data_files+=[(self.unitdir, ['dist/pkeyd.service'])]
         install.finalize_options(self)
 
-setup(name= 'pcocc', version= '0.2.2', description= 'Spawn VMs on a HPC Cluster',
+setup(name= 'pcocc', version= '0.2.7', description= 'Spawn VMs on a HPC Cluster',
       long_description= 'Pcocc  allows users of a HPC cluster '
       'to host their own clusters of VMs on compute nodes alongside regular '
       'jobs. This allows users to fully customize their software environnements '
@@ -47,7 +47,7 @@ setup(name= 'pcocc', version= '0.2.2', description= 'Spawn VMs on a HPC Cluster'
                    ['confs/templates.yaml', 'confs/networks.yaml',
                     'confs/resources.yaml', 'confs/batch.yaml']),
                   ('/etc/slurm/lua.d/', ['plugins/slurm/vm-setup.lua']),
-                  ('/etc/pcocc/helpers', glob.glob('helpers/*'))],
+                  ('/etc/pcocc/helpers/examples', glob.glob('helpers/examples/*'))],
       entry_points= '''
         [console_scripts]
         pcocc=pcocc.scripts.cmd:cli

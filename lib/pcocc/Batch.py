@@ -1348,7 +1348,7 @@ class LocalManager(EtcdManager):
             logging.error('No allocation record to delete '
                           'matching job {0} for user {1}'.format(self.batchid,
                                                                  self.batchuser))
-            sys.exit(1)
+        sys.exit(1)
 
         # Allow recovering from the jobid if the allocation process
         # died without calling resource deletion

@@ -32,7 +32,7 @@ class pcocc_install(install):
             self.distribution.data_files+=[(self.unitdir, ['dist/pkeyd.service'])]
         install.finalize_options(self)
 
-setup(name= 'pcocc', version= '0.2.7', description= 'Spawn VMs on a HPC Cluster',
+setup(name= 'pcocc', version= '0.2.8', description= 'Spawn VMs on a HPC Cluster',
       long_description= 'Pcocc  allows users of a HPC cluster '
       'to host their own clusters of VMs on compute nodes alongside regular '
       'jobs. This allows users to fully customize their software environnements '

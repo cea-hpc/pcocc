@@ -1561,7 +1561,8 @@ class SlurmManager(EtcdManager):
             if self._etcd_auth_type == 'password':
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
-            subprocess.check_call(['sbatch'] + ['-J', 'pcocc'] + alloc_opt + [cmd])
+            subprocess.check_call(['sbatch'] + ['-J', 'pcocc',
+                                                '--signal', '15'] + alloc_opt + [cmd])
         except subprocess.CalledProcessError as err:
             raise AllocationError(str(err))
 

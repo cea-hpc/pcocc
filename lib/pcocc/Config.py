@@ -130,6 +130,10 @@ class Config(object):
     def verbose(self):
         return self._verbose
 
+    @property
+    def verbose_opt(self):
+        return ['-v'] * self._verbose
+
     @verbose.setter
     def verbose(self, value):
         self._verbose = value

@@ -922,13 +922,13 @@ class LocalManager(EtcdManager):
         term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGABRT])
 
         subprocess.check_call(['sudo',
-                               'pcocc', '-vv',
-                               'internal', 'setup', 'init'])
+                               'pcocc'] + Config().verbose_opt +
+                               ['internal', 'setup', 'init'])
         atexit.register(self._run_resource_cleanup)
 
         subprocess.check_call(['sudo',
-                               'pcocc', '-vv',
-                               'internal', 'setup', 'create'])
+                               'pcocc'] + Config().verbose_opt +
+                               ['internal', 'setup', 'create'])
 
         self.batchid = self._uuid_to_batchid(self.batchuser, self._req_uuid)
         os.environ['PCOCC_LOCAL_JOB_ID'] = str(self.batchid )
@@ -952,8 +952,8 @@ class LocalManager(EtcdManager):
     def _run_resource_cleanup(self):
         os.environ['PCOCC_LOCAL_JOB_ID'] = str(self._uuid_to_batchid(self.batchuser,
                                                                        self._req_uuid))
-        subprocess.call(['sudo', 'pcocc',
-                         'internal', 'setup', 'delete'])
+        subprocess.call(['sudo', 'pcocc'] + Config().verbose_opt +
+                         ['internal', 'setup', 'delete'])
 
     def run(self, cluster, run_opt, cmd):
         """Launch the VM tasks"""
@@ -1038,8 +1038,8 @@ class LocalManager(EtcdManager):
 
                 if not pids:
                     logging.warning('Trying to clean orphan job {0}'.format(batchid))
-                    subprocess.call(['pcocc', '-vv',
-                                     'internal', 'setup', 'delete', '-j', batchid, '--nolock'])
+                    subprocess.call(['pcocc'] + Config().verbose_opt +
+                                     ['internal', 'setup', 'delete', '-j', batchid, '--nolock'])
 
     def _list_alive_jobs(self):
         path = self.get_key_path('global/user', 'batch-local/heartbeat')

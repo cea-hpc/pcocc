@@ -1133,7 +1133,6 @@ class Qemu(object):
             qga_cmd = '{"execute":"guest-sync", "arguments": { "id": %d }}\n\n' % syn_id
             logging.debug("Sending agent sync {0}".format(qga_cmd))
 
-            #atexit.register(try_kill, s_ctl)
             # TODO: Remove this wait. For now, without it, some of the data we
             # send is lost
             time.sleep(1)
@@ -1181,9 +1180,12 @@ class Qemu(object):
             s_ctl.communicate()
 
             if timeout:
+                # Shave 5 seconds off of the timeout as we are
+                # going to sleep for that much before retry our select
                 timeout -= 5
                 if timeout <= 0:
                     self._cleanup_and_raise(s_ctl, AgentError("Timeout pinging agent"))
+
             # wait before trying a reconnection
             time.sleep(5)
 
@@ -1194,7 +1196,10 @@ class Qemu(object):
         except Exception as e:
             pass
 
-        sproc.communicate()
+        try:
+            sproc.communicate()
+        except Exception as e:
+            pass
 
         raise error
 

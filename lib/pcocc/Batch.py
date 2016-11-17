@@ -1344,11 +1344,13 @@ class LocalManager(EtcdManager):
 
             self._update_heartbeat(0)
         except:
-            raise
             logging.error('No allocation record to delete '
                           'matching job {0} for user {1}'.format(self.batchid,
                                                                  self.batchuser))
-        sys.exit(1)
+        if remote:
+            logging.warning('Exiting without performing host resource cleanup for '
+                            'forced remote job deletion')
+            sys.exit(1)
 
         # Allow recovering from the jobid if the allocation process
         # died without calling resource deletion

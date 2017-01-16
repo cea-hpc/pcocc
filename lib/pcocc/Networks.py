@@ -51,6 +51,7 @@ patternProperties:
       - $ref: '#/definitions/pv'
       - $ref: '#/definitions/ib'
       - $ref: '#/definitions/bridged'
+      - $ref: '#/definitions/hostib'
 additionalProperties: false
 
 definitions:
@@ -160,7 +161,20 @@ definitions:
 
     additionalProperties: false
 
+  hostib:
+    properties:
+      type:
+          enum:
+            - hostib
 
+      settings:
+        type: object
+        properties:
+          host-device:
+           type: string
+        additionalProperties: false
+
+    additionalProperties: false
 """
 
 class NetworkSetupError(PcoccError):
@@ -212,6 +226,9 @@ class VNetwork(object):
             return VIBNetwork(name, settings)
         if ntype == "bridged":
             return VBridgedNetwork(name, settings)
+        if ntype == "hostib":
+            return VHostIBNetwork(name, settings)
+
 
         assert 0, "Unknown network type: " + ntype
 
@@ -1152,18 +1169,12 @@ items:
     - batchid
 """
 
-class VIBNetwork(VNetwork):
+class VHostIBNetwork(VNetwork):
     def __init__(self, name, settings):
-        super(VIBNetwork, self).__init__(name)
+        super(VHostIBNetwork, self).__init__(name)
 
-        self._type = "ib"
+        self._type = "hostib"
         self._device_name = settings["host-device"]
-        self._min_pkey   = int(settings["min-pkey"], 0)
-        self._max_pkey   = int(settings["max-pkey"], 0)
-        self._license_name = settings.get("license", None)
-        self._opensm_partition_cfg = settings["opensm-partition-cfg"]
-        self._opensm_partition_tpl = settings["opensm-partition-tpl"]
-        self._opensm_daemon = settings["opensm-daemon"]
 
     def init_node(self):
         # We can probably remove this once we get kernels with the
@@ -1179,6 +1190,114 @@ class VIBNetwork(VNetwork):
             logging.warning(
                 'Deleted {0} leftover VFs for {1} network'.format(
                     len(deleted_vfs), self.name))
+
+    @property
+    def _dev_vf_type(self):
+        return device_vf_type(self._device_name)
+
+    def _gen_guid_suffix(self):
+        return ''.join(['%02x' % random.randint(0,0xff) for _ in xrange(6)])
+
+    def alloc_node_resources(self, cluster):
+        batch = Config().batch
+        net_res = {}
+
+        if (self._dev_vf_type != VFType.MLX5):
+            raise NetworkSetupError('Direct host IB network access is only '
+                                    'available for mlx5 devices')
+
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            try:
+                port_guid = os.environ['PCOCC_NET_{0}_PORT_GUID'.format(
+                                        self.name.upper())]
+            except KeyError:
+                port_guid ='0xc1cc' + self._gen_guid_suffix()
+
+            try:
+                node_guid = os.environ['PCOCC_NET_{0}_NODE_GUID'.format(
+                                        self.name.upper())]
+            except KeyError:
+                node_guid ='0xd1cc' + self._gen_guid_suffix()
+
+            try:
+                device_name = self._device_name
+                vf_name = find_free_vf(device_name)
+
+                vf_bind_vfio(vf_name, batch.batchuser)
+                vf_set_guid(device_name, vf_name,
+                            port_guid,
+                            node_guid)
+
+                vm_label = self._vm_res_label(vm)
+                net_res[vm_label] = {'vf_name': vf_name}
+            except Exception as e:
+                self.dump_resources(net_res)
+                raise
+
+        self.dump_resources(net_res)
+
+    def _free_node_vfs(self, cluster):
+        net_res = None
+        batch = Config().batch
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            if not net_res:
+                net_res = self.load_resources()
+
+            vm_label = self._vm_res_label(vm)
+
+            device_name = self._device_name
+            vf_name = net_res[vm_label]['vf_name']
+
+            vf_unbind_vfio(vf_name)
+            if (self._dev_vf_type == VFType.MLX4):
+                vf_unset_pkey(device_name, vf_name)
+            else:
+                vf_unset_guid(device_name, vf_name)
+
+
+    def free_node_resources(self, cluster):
+        return self._free_node_vfs(cluster)
+
+    def load_node_resources(self, cluster):
+        net_res = None
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            if not net_res:
+                net_res = self.load_resources()
+
+            vm_label = self._vm_res_label(vm)
+            vm.add_vfio_if(self.name,
+                           net_res[vm_label]['vf_name'])
+
+class VIBNetwork(VHostIBNetwork):
+    def __init__(self, name, settings):
+        super(VIBNetwork, self).__init__(name, settings)
+
+        self._type = "ib"
+        self._device_name = settings["host-device"]
+        self._min_pkey   = int(settings["min-pkey"], 0)
+        self._max_pkey   = int(settings["max-pkey"], 0)
+        self._license_name = settings.get("license", None)
+        self._opensm_partition_cfg = settings["opensm-partition-cfg"]
+        self._opensm_partition_tpl = settings["opensm-partition-tpl"]
+        self._opensm_daemon = settings["opensm-daemon"]
 
     def get_license(self, cluster):
         if self._license_name:
@@ -1303,26 +1422,7 @@ class VIBNetwork(VNetwork):
         net_res = None
         batch = Config().batch
 
-        for vm in cluster.vms:
-            if not vm.is_on_node():
-                continue
-
-            if not self.name in vm.networks:
-                continue
-
-            if not net_res:
-                net_res = self.load_resources()
-
-            vm_label = self._vm_res_label(vm)
-
-            device_name = self._device_name
-            vf_name = net_res[vm_label]['vf_name']
-
-            vf_unbind_vfio(vf_name)
-            if (self._dev_vf_type == VFType.MLX4):
-                vf_unset_pkey(device_name, vf_name)
-            else:
-                vf_unset_guid(device_name, vf_name)
+        self._free_node_vfs(cluster)
 
         if net_res and net_res['master']:
             # Update opensm
@@ -1340,22 +1440,6 @@ class VIBNetwork(VNetwork):
             batch.delete_dir(
                 'cluster',
                 self._get_net_key_path(''))
-
-    def load_node_resources(self, cluster):
-        net_res = None
-        for vm in cluster.vms:
-            if not vm.is_on_node():
-                continue
-
-            if not self.name in vm.networks:
-                continue
-
-            if not net_res:
-                net_res = self.load_resources()
-
-            vm_label = self._vm_res_label(vm)
-            vm.add_vfio_if(self.name,
-                           net_res[vm_label]['vf_name'])
 
     def pkey_daemon(self):
         batch = Config().batch
@@ -1444,15 +1528,13 @@ class VIBNetwork(VNetwork):
             batch.wait_key_index('global', 'opensm/pkeys', last_index,
                                  timeout=0)
 
-    @property
-    def _dev_vf_type(self):
-        if self._device_name[:4] == 'mlx4':
-            return VFType.MLX4
-        elif self._device_name[:4] == 'mlx5':
-            return VFType.MLX5
+def device_vf_type(device_name):
+    if device_name[:4] == 'mlx4':
+        return VFType.MLX4
+    elif device_name[:4] == 'mlx5':
+        return VFType.MLX5
 
-        raise NetworkSetupError('Cannot determine VF type for device %s' % device_name)
-
+    raise NetworkSetupError('Cannot determine VF type for device %s' % device_name)
 
 def make_mask(num_bits):
     "return a mask of num_bits as a long integer"

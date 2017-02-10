@@ -76,6 +76,8 @@ definitions:
            type: string
           bridge:
            type: string
+          bridge-hwaddr:
+           type: string
           tap-prefix:
            type: string
           mtu:
@@ -699,6 +701,7 @@ class VNATNetwork(VNetwork):
         self._domain_name = settings["domain-name"]
         self._dns_server = settings["dns-server"]
         self._dnsmasq_pid_filename = "/var/run/pcocc_dnsmasq.pid"
+        self._bridge_hwaddr = settings.get("bridge-hwaddr", "52:54:00:C0:C0:C0")
 
         if "allow-outbound" in settings:
             if settings["allow-outbound"] == 'none':
@@ -742,11 +745,11 @@ class VNATNetwork(VNetwork):
     def init_node(self):
         if not ovs_bridge_exists(self._bridge_name):
             # Create nat bridge
-            ovs_add_bridge(self._bridge_name)
+            ovs_add_bridge(self._bridge_name, self._bridge_hwaddr)
             self.kill_dnsmasq()
         else:
             #Check bridge settings
-            ovs_add_bridge(self._bridge_name)
+            ovs_add_bridge(self._bridge_name, self._bridge_hwaddr)
 
         # Configure the bridge with the GW ip on the VM network
         ip_add_idemp(self._vm_network_gw,
@@ -1556,8 +1559,12 @@ def address_in_network(ip, net):
     "Is an address in a network"
     return ip & net == net
 
-def ovs_add_bridge(brname):
-    subprocess.check_call(["ovs-vsctl", "--may-exist", "add-br", brname])
+def ovs_add_bridge(brname, hwaddr=None):
+    cmd = ["ovs-vsctl", "--may-exist", "add-br", brname]
+    if not (hwaddr is None):
+        cmd += [ "--", "set", "bridge", brname,
+                 "other-config:hwaddr={0}".format(hwaddr)]
+    subprocess.check_call(cmd)
     # Drop the ovs default flow, only allow packets that we want
     # TODO: Is it possible to create an ovs bridge without this
     # rule ?

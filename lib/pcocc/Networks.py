@@ -1786,23 +1786,29 @@ def find_free_vf(device_name):
 def cleanup_all_vfs(device_name):
     return _perform_on_vfs(device_name, 'cleanup')
 
-def _perform_on_vfs(device_name, action):
+def _perform_on_vfs(device_name, action, *args):
     device_path = "/sys/class/infiniband/%s/device" % (device_name)
     bound_devices = os.listdir("/sys/bus/pci/drivers/vfio-pci")
 
     vf_list = []
-    for vf_name in os.listdir(device_path):
-        if not re.match(r'virtfn\d+', vf_name):
+    for virtfn in os.listdir(device_path):
+        m = re.match(r'virtfn(\d+)', virtfn)
+
+        if not re.match(r'virtfn(\d+)', virtfn):
             continue
 
+        vf_id = m.group(1)
+
         vf_name = os.path.basename(os.readlink(
-            os.path.join(device_path, vf_name)))
+            os.path.join(device_path, virtfn)))
 
         if action == 'find' and vf_name not in bound_devices:
             return vf_name
         elif action == 'cleanup' and vf_name in bound_devices:
             vf_unbind_vfio(vf_name)
             vf_list.append(vf_name)
+        elif action == 'getid' and vf_name == args[0]:
+            return int(vf_id)
 
 
     if action == 'find':
@@ -1879,20 +1885,18 @@ def vf_unset_pkey(device_name, vf_name):
     with open(os.path.join(pkey_idx_path, '1'), 'w') as f:
         f.write('none')
 
-def vf_id_from_name(vf_name):
-    m = re.search(r'(\d\d).(\d)$', vf_name)
-    return 8 * int(m.group(1)) + int(m.group(2)) - 1
-
+def vf_id_from_name(device, vf_name):
+    return _perform_on_vfs(device, 'getid', vf_name)
 
 def vf_unset_guid(device_name, vf_name):
-    vf_id = vf_id_from_name(vf_name)
+    vf_id = vf_id_from_name(device_name, vf_name)
     sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(device_name,vf_id)
 
     with open(os.path.join(sriov_path, 'policy'), 'w') as f:
         f.write('Down\n')
 
 def vf_set_guid(device_name, vf_name, guid, node_guid):
-    vf_id = vf_id_from_name(vf_name)
+    vf_id = vf_id_from_name(device_name, vf_name)
     sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(device_name,vf_id)
 
     with open(os.path.join(sriov_path, 'policy'), 'w') as f:

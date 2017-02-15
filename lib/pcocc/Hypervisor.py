@@ -411,30 +411,30 @@ class Qemu(object):
         if num_cores == len(coreset):
             logging.info('Physical resources match VM definition, activating autobinding')
             autobind_cpumem = True
+            for core_id in coreset:
+                try:
+                    with open(os.devnull, 'w') as devnull:
+                        numa_node = int(subprocess_check_output(['hwloc-calc',
+                                                                 'Core:%d' %
+                                                                 (int(core_id)),
+                                                                 '-I', 'NUMANode'] +
+                                                                topology_cache_args,
+                                        stderr=devnull))
+                except ValueError:
+                    # Use NUMA node 0 if the CPU doesnt intersect any NUMANode
+                    # Usually this means that we have a UMA machine
+                    numa_node = 0
+
+                except Exception as err:
+                    raise HypervisorError('unable to compute NUMA node: '
+                                          + str(err))
+
+                cores_on_numa.setdefault(numa_node,
+                                         RangeSet()).update(RangeSet(str(core_id)))
         else:
             logging.info('Physical resources don\'t match VM definition. Autobind deactivated.')
             autobind_cpumem = False
-
-        for core_id in coreset:
-            try:
-                with open(os.devnull, 'w') as devnull:
-                    numa_node = int(subprocess_check_output(['hwloc-calc',
-                                                             'Core:%d' %
-                                                             (int(core_id)),
-                                                             '-I', 'NUMANode'] +
-                                                            topology_cache_args,
-                                    stderr=devnull))
-            except ValueError:
-                # Use NUMA node 0 if the CPU doesnt intersect any NUMANode
-                # Usually this means that we have a UMA machine
-                numa_node = 0
-
-            except Exception as err:
-                raise HypervisorError('unable to compute NUMA node: '
-                                      + str(err))
-
-            cores_on_numa.setdefault(numa_node,
-                                     RangeSet()).update(RangeSet(str(core_id)))
+            cores_on_numa[0] = coreset
 
         if vm.qemu_bin:
             cmdline = [ vm.qemu_bin ]
@@ -697,7 +697,8 @@ class Qemu(object):
 
         if emulator_coreset and autobind_cpumem:
             emulator_phys_coreset = [ subprocess_check_output(
-                    ['hwloc-calc', '--po', '-I', 'PU', 'Core:%s' % core]).strip()
+                ['hwloc-calc', '--po', '-I', 'PU', 'Core:%s' % core] +
+                topology_cache_args).strip()
                                       for core in emulator_coreset ]
             cmdline = ['taskset',
                        '-c', ','.join(emulator_phys_coreset)] + cmdline

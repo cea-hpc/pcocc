@@ -982,13 +982,7 @@ class LocalManager(EtcdManager):
 
         """
         self._only_in_a_job()
-
-        try:
-            return int(os.environ['PCOCC_LOCAL_CPUS_PER_VM'])
-        except KeyError:
-            # The variable isn't defined when not
-            # provided explicitely
-            return len(self.coreset)
+        return int(os.environ['PCOCC_LOCAL_CPUS_PER_VM'])
 
     def get_host_rank(self, rank):
         self._only_in_a_job()
@@ -1636,14 +1630,14 @@ class SlurmManager(EtcdManager):
         except KeyError:
             # The variable isn't defined when not
             # provided explicitely
-            return len(self.coreset)
+            return 1
 
     @property
     def coreset(self):
         """Returns the list of cores allocated to the current task
 
         Only valid for hypervisor processes
-
+-
         """
         self._only_in_a_job()
         # Assume we've been bound to our cores by SLURM

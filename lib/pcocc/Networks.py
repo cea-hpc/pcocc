@@ -359,7 +359,9 @@ class VBridgedNetwork(VNetwork):
         self._type = "direct"
 
     def init_node(self):
-        pass
+        if not bridge_exists(self._host_bridge):
+            raise NetworkSetupError("Host bridge {0} doesn't exist".format(
+                self._host_bridge))
 
     def cleanup_node(self):
         self._cleanup_stray_taps()
@@ -1578,6 +1580,11 @@ def ovs_del_bridge(brname):
 def ovs_enable_bridge_stp(brname):
     subprocess.check_call(["ovs-vsctl", "set", "bridge", brname,
                            "stp_enable=true"])
+
+def bridge_exists(brname):
+    """ returns whether brname is a bridge (linux or ovs) """
+    return (os.path.exists('/sys/devices/virtual/net/{0}/bridge/'.format(brname)) or
+           ovs_bridge_exists(brname))
 
 def ovs_bridge_exists(brname):
     match = re.search(r'Bridge %s' % (brname),

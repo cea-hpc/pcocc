@@ -1056,7 +1056,8 @@ class VNATNetwork(VNetwork):
                           id_from_dev_name(self._tap_prefix, tap_name) )
 
             if host_port > self._host_rnat_port_range[1]:
-                raise BaseException
+                raise NetworkSetupError('Unable to find a free host port for '
+                                        'reverse NAT')
 
             ipt_append_rule_idemp(
                 "-d %s/32 -p tcp -m tcp --dport %s "

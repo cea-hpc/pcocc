@@ -691,9 +691,6 @@ def get_license_opts(cluster):
 @docstring(batch_alloc_doc+batch_doc)
 def pcocc_batch(restart_ckpt, batch_script, host_script, batch_options,
                 cluster_definition):
-    if batch_script and host_script:
-        raise click.UsageError("Cannot specify both a batch script and a "
-                               "host script")
 
     try:
         config = load_config(process_type=ProcessType.OTHER)
@@ -706,44 +703,52 @@ def pcocc_batch(restart_ckpt, batch_script, host_script, batch_options,
         (wrpfile, wrpname) = tempfile.mkstemp()
         wrpfile = os.fdopen(wrpfile, 'w')
 
-
-        if batch_script:
-            launcher_opt = "-s"
-            script = batch_script
-        elif host_script:
-            launcher_opt = "-E"
-            script = host_script
+        if batch_script or host_script:
+            launcher_opt = []
         else:
-            script = None
+            launcher_opt = ['-w']
 
-        if (script):
-            wrpfile.write(
+        wrpfile.write(
 """#!/bin/bash
 #SBATCH -o pcocc_%j.out
 #SBATCH -e pcocc_%j.err
-
-TEMP_SCRIPT="/tmp/pcocc.jobstart.$$"
-cat <<\PCOCC_BATCH_SCRIPT_EOF >> "${TEMP_SCRIPT}"
 """)
-            wrpfile.write(script.read())
+        if batch_script:
+            launcher_opt += ['-s', '"$TEMP_BATCH_SCRIPT"']
+            wrpfile.write(
+"""
+TEMP_BATCH_SCRIPT="/tmp/pcocc.batch.$$"
+cat <<\PCOCC_BATCH_SCRIPT_EOF >> "${TEMP_BATCH_SCRIPT}"
+""")
+            wrpfile.write(batch_script.read())
             wrpfile.write(
 """
 PCOCC_BATCH_SCRIPT_EOF
-chmod u+x "$TEMP_SCRIPT"
-PYTHONUNBUFFERED=true pcocc %s internal launcher %s "$TEMP_SCRIPT" %s %s &
-wait
-rm "$TEMP_SCRIPT"
-""" % (' '.join(build_verbose_opt()), launcher_opt,
-       ' '.join(ckpt_opt), cluster_definition))
-        else:
-            wrpfile.write(
-"""#!/bin/bash
-#SBATCH -o pcocc_%%j.out
-#SBATCH -e pcocc_%%j.err
+chmod u+x "$TEMP_BATCH_SCRIPT"
+""")
 
-PYTHONUNBUFFERED=true pcocc internal launcher -w %s %s &
+        if host_script:
+            launcher_opt += ['-E', '"$TEMP_HOST_SCRIPT"']
+            wrpfile.write(
+"""
+TEMP_HOST_SCRIPT="/tmp/pcocc.host.$$"
+cat <<\PCOCC_HOST_SCRIPT_EOF >> "${TEMP_HOST_SCRIPT}"
+""")
+            wrpfile.write(host_script.read())
+            wrpfile.write(
+"""
+PCOCC_HOST_SCRIPT_EOF
+chmod u+x "$TEMP_HOST_SCRIPT"
+""")
+
+        wrpfile.write(
+"""
+PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s &
 wait
-""" % (' '.join(ckpt_opt), cluster_definition))
+rm "$TEMP_BATCH_SCRIPT" 2>/dev/null
+rm "$TEMP_HOST_SCRIPT" 2>/dev/null
+""" % (' '.join(build_verbose_opt()), ' '.join(launcher_opt),
+       ' '.join(ckpt_opt), cluster_definition))
 
         wrpfile.close()
         ret = config.batch.batch(cluster,
@@ -850,11 +855,16 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
 
     term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
 
+    monitor_list = [ s_pjob.pid ]
+
     if script:
         if restart_ckpt:
             s_exec = subprocess.Popen(["pcocc", "exec"])
         else:
             s_exec = subprocess.Popen(["pcocc", "exec", "-s", script])
+        if alloc_script:
+            s_exec2 = subprocess.Popen(shlex.split(alloc_script))
+            monitor_list.append(s_exec2.pid)
     elif alloc_script:
         s_exec = subprocess.Popen(shlex.split(alloc_script))
     else:
@@ -863,8 +873,10 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
         shell = os.getenv('SHELL', default='bash')
         s_exec = subprocess.Popen(shell, env=shell_env)
 
+    monitor_list.append(s_exec.pid)
+
     while True:
-        status, pid, _ = wait_or_term_child([s_pjob.pid, s_exec.pid],
+        status, pid, _ = wait_or_term_child(monitor_list,
                                             signal.SIGTERM, term_sigfd, 40)
         if pid == s_pjob.pid:
             if status != 0:

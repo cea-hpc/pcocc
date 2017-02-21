@@ -1208,10 +1208,6 @@ class VHostIBNetwork(VNetwork):
         batch = Config().batch
         net_res = {}
 
-        if (self._dev_vf_type != VFType.MLX5):
-            raise NetworkSetupError('Direct host IB network access is only '
-                                    'available for mlx5 devices')
-
         for vm in cluster.vms:
             if not vm.is_on_node():
                 continue
@@ -1236,9 +1232,13 @@ class VHostIBNetwork(VNetwork):
                 vf_name = find_free_vf(device_name)
 
                 vf_bind_vfio(vf_name, batch.batchuser)
-                vf_set_guid(device_name, vf_name,
-                            port_guid,
-                            node_guid)
+                if (self._dev_vf_type == VFType.MLX4):
+                    vf_allow_host_pkeys(device_name,
+                                        vf_name)
+                else:
+                    vf_set_guid(device_name, vf_name,
+                                port_guid,
+                                node_guid)
 
                 vm_label = self._vm_res_label(vm)
                 net_res[vm_label] = {'vf_name': vf_name}
@@ -1268,7 +1268,7 @@ class VHostIBNetwork(VNetwork):
 
             vf_unbind_vfio(vf_name)
             if (self._dev_vf_type == VFType.MLX4):
-                vf_unset_pkey(device_name, vf_name)
+                vf_clear_pkeys(device_name, vf_name)
             else:
                 vf_unset_guid(device_name, vf_name)
 
@@ -1877,6 +1877,43 @@ def find_pkey_idx(device_name, pkey_value):
 
     raise NetworkSetupError('pkey %s not found on device %s' % (
         hex(pkey_value), device_name))
+
+def vf_allow_host_pkeys(device_name, vf_name):
+    device_path = "/sys/class/infiniband/{0}".format(device_name)
+    num_ports = len(os.listdir(os.path.join(device_path, "ports")))
+
+    for port in xrange(1, num_ports+1):
+        pkeys_path = os.path.join(device_path, "ports", str(port),
+                                  "pkeys")
+        pkey_idx_path = os.path.join(device_path, "iov", vf_name,
+                                     "ports", str(port), "pkey_idx")
+
+        idx = 0
+        for pkey_idx in os.listdir(pkeys_path):
+            p = os.path.join(pkeys_path, pkey_idx)
+            with open(p) as f:
+                try:
+                    this_pkey_value = int(f.read().strip(), 0)
+                except ValueError:
+                    continue
+
+                if this_pkey_value:
+                    with open(os.path.join(pkey_idx_path, str(idx)), 'w') as f:
+                        f.write(pkey_idx)
+                    idx+=1
+
+def vf_clear_pkeys(device_name, vf_name):
+    device_path = '/sys/class/infiniband/{0}'.format(device_name)
+    num_ports = len(os.listdir(os.path.join(device_path, 'ports')))
+
+    for port in xrange(1, num_ports+1):
+        pkey_idx_path = os.path.join(device_path, 'iov', vf_name,
+                                     'ports', str(port), 'pkey_idx')
+
+        for pkey_idx in os.listdir(pkey_idx_path):
+            this_pkey_idx_path = os.path.join(pkey_idx_path, pkey_idx)
+            with open(this_pkey_idx_path, 'w') as f:
+                f.write('none')
 
 def vf_set_pkey(device_name, vf_name, pkey_value):
     pkey_idx_path = "/sys/class/infiniband/%s/iov/%s/ports/1/pkey_idx" % (

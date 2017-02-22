@@ -963,7 +963,7 @@ def pcocc_run(restart_ckpt):
               help='User id to use to execute the command')
 @click.option('-s', '--script', is_flag=True,
               help='Cmd is a shell script to be copied to /tmp and executed in place')
-@click.argument('cmd', nargs=-1, required=True)
+@click.argument('cmd', nargs=-1, required=False)
 def pcocc_exec(index, jobid, jobname, user, script, cmd):
     """Execute commands through the guest agent
 

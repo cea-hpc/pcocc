@@ -821,6 +821,8 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
     cluster_definition = ascii(cluster_definition)
     cluster = Cluster(cluster_definition)
 
+    batch.populate_env()
+
     if restart_ckpt:
         ckpt_opt=['-r', restart_ckpt]
     else:

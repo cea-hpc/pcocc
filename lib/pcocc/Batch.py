@@ -744,6 +744,9 @@ class EtcdManager(BatchManager):
         except:
             logging.warning('Failed to cleanup cluster etcd keystore')
 
+    def populate_env(self):
+        """ Populate environment variables with batch related info to propagate """
+        os.putenv('PCOCC_JOB_ID', str(self.batchid))
 
 """Schema to validate the global pkey state in the key/value store"""
 local_job_allocation_schema = """
@@ -1550,9 +1553,6 @@ class SlurmManager(EtcdManager):
 
     def batch(self, cluster, alloc_opt, cmd):
         """Allocate a batch job"""
-        if self._in_a_job:
-            raise AllocationError("already in a job")
-
         try:
             if self._etcd_auth_type == 'password':
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
@@ -1665,3 +1665,8 @@ class SlurmManager(EtcdManager):
             rank_on_host = rank_on_host + 1
 
         return rank_on_host - 1
+
+    def populate_env(self):
+        """ Populate environment variables with batch related info to propagate """
+        os.putenv('PCOCC_JOB_ID', str(self.batchid))
+        os.putenv('PCOCC_JOB_NAME', os.environ.get('SLURM_JOB_NAME', ''))

@@ -7,7 +7,7 @@ Requires: tunctl
 %endif
 
 %if 0%{?_with_systemd}
-%global _unitdir_installopt --unitdir %{_unitdir}
+%global _unitdir_installopt --unitdir %{_unitdir} --mandir %{_mandir} --sysconfdir %{_sysconfdir} --pkgdocdir %{_docdir}/%{name}-%{version}
 Requires(post): systemd
 Requires(preun): systemd
 Requires(postun): systemd

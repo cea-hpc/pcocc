@@ -1,0 +1,452 @@
+.\" Man page generated from reStructuredText.
+.
+.TH "PCOCC-NEWVM-TUTORIAL" "7" "Aug 10, 2017" "0.3.1" "pcocc"
+.SH NAME
+pcocc-newvm-tutorial \- How to import VM images and define VM templates
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.sp
+This tutorial details how VM templates can be added to pcocc. It shows how to import cloud VM images provided by various Linux distributions which can be customized using cloud\-init. More detailed information on how to configure such images is provided in the tutorial dealing with the configuration of VMs with cloud\-init\&.
+.SH VM TEMPLATES
+.sp
+pcocc is built around the notion of templates which define the main attributes of the VMs that can be instantiated. In a template, you can define, among other things:
+.INDENT 0.0
+.IP \(bu 2
+The reference image for the VM boot disk
+.IP \(bu 2
+The network resources provided to the VM
+.IP \(bu 2
+A cloud\-config file to configure a cloud image (see pcocc\-cloudconfig\-tutorial(7))
+.IP \(bu 2
+Host directories to expose in the VM
+.UNINDENT
+.sp
+Two types of templates can be configured:
+.INDENT 0.0
+.IP \(bu 2
+System\-wide templates in \fB/etc/pcocc/templates.yaml\fP
+.IP \(bu 2
+Per\-user templates in \fB~/.pcocc/templates.yaml\fP (by default)
+.UNINDENT
+.sp
+A user has access to both his personal templates and the system\-wide templates. Note that a per\-user template can inherit from a system\-wide template.
+.SH IMPORTING VM IMAGES
+.sp
+pcocc runs standard VM images in the Qemu qcow2 format. Many Linux distributions provide handy cloud images in this format which can be configured at instantiation time thanks to cloud\-init.
+.INDENT 0.0
+.IP \(bu 2
+For Ubuntu you may get images from \fI\%https://cloud\-images.ubuntu.com/\fP
+.IP \(bu 2
+For Debian from \fI\%https://cdimage.debian.org/cdimage/openstack/\fP
+.IP \(bu 2
+For CentOS from \fI\%https://cloud.centos.org/centos/\fP
+.IP \(bu 2
+For Fedora from \fI\%https://alt.fedoraproject.org/cloud/\fP
+.UNINDENT
+.sp
+In this guide, we use the following images (x86_64):
+.INDENT 0.0
+.IP \(bu 2
+Ubuntu Server (Artful): \fI\%https://cloud\-images.ubuntu.com/artful/current/artful\-server\-cloudimg\-amd64.img\fP
+.IP \(bu 2
+CentOS 7: \fI\%https://cloud.centos.org/centos/7/images/CentOS\-7\-x86_64\-GenericCloud.qcow2\fP
+.UNINDENT
+.sp
+You may now download these images or those that you want to install. Note that the import process below is the same whether you use cloud\-init enabled VMs or regular qcow2 images that you have already configured.
+.sp
+In this guide, we use \fB$VMDIR\fP as the base directory holding our VM images. It should be on a shared filesystem accessible from all front\-end and compute nodes and ideally on a fast parallel filesystem for best scalability. If you are the system administrator, you may want to provide these base distribution images to all your users by creating system\-wide templates. In that case \fB$VMDIR\fP (and its content) should be readable by all pcocc end\-users but write protected.
+.sp
+We will now create directories in \fB$VMDIR\fP, one for each image:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+mkdir $VMDIR/ubuntu\-server\-artful\-cloud
+mkdir $VMDIR/centos7\-cloud
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+We used the "\-cloud" suffix as a convention to identify cloud\-init enabled images.
+.UNINDENT
+.UNINDENT
+.sp
+Now simply move the images to their respective directories, naming them \fBimage\fP:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+mv artful\-server\-cloudimg\-amd64.img $VMDIR/ubuntu\-artful\-cloud/image
+mv CentOS\-7\-x86_64\-GenericCloud.qcow2 $VMDIR/centos7\-cloud/image
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+At this point you should have the following file hierarchy:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+$VMDIR/centos7\-cloud:
+    image
+
+$VMDIR/ubuntu\-artful\-cloud:
+    image
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH DEFINING VM TEMPLATES
+.sp
+Now that we have copied the images to our shared filesystem, we can define templates for them within the pcocc templates.yaml configuration file. A system administrator can define them as system\-wide templates in \fB/etc/pcocc/templates.yaml\fP to make them avaialable to all users. Otherwise, define them in \fB~/.pcocc/templates.yaml\fP\&. We first define basic templates which only make the image available. We can then inherit from them to create custom VMs.
+.sp
+Here is the content of \fBtemplates.yaml\fP for these three VMs (don\(aqt forget to replace \fB$VMDIR\fP with the actual PATH):
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+centos7\-cloud:
+    image: "$VMDIR/centos7\-cloud"
+    resource\-set: "cluster"
+    description: "Cloud enabled CentOS 7"
+
+ubuntu\-artful\-cloud:
+    image: "$VMDIR/ubuntu\-artful\-cloud"
+    resource\-set: "cluster"
+    description: "Cloud enabled Ubuntu 17.10"
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+We selected the \fIcluster\fP configuration as a \fBresource\-set\fP for these VMs. It should reference one of the resource sets defined in the \fB/etc/resources.yaml\fP file. Please refer to the resources.yaml and networks.yaml configuration files for more informations on this option.
+.sp
+Following this step, you should be able to list your new virtual machines:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+$ pcocc template list
+NAME                 DESCRIPTION                 RESOURCES    IMAGE
+\-\-\-\-                 \-\-\-\-\-\-\-\-\-\-\-                 \-\-\-\-\-\-\-\-\-    \-\-\-\-\-
+ubuntu\-artful\-cloud  Cloud enabled Ubuntu 17.10  cluster      /shared/vms/ubuntu\-artful\-cloud
+centos7\-cloud        Cloud enabled CentOS 7      cluster      /shared/vms/centos7\-cloud
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH BASIC VM CONFIGURATION
+.sp
+Cloud\-init enabled VMs such as the ones we installed in the previous section must be configured with a cloud\-config file. If you imported a regular image which was already configured to be accessible by SSH you can skip this step.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The cloud\-init enabled images used in this guide don\(aqt have default login credentials. This is by design to prevent anyone from accessing the VM before you would be able to change the password. The cloud\-config file will allow creating a user with proper authentication credentials such as a SSH public key.
+.UNINDENT
+.UNINDENT
+.sp
+The most basic cloud\-config file which you can use is as follows:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+#cloud\-config
+users:
+   \- name: demo
+     sudo: [\(aqALL=(ALL) NOPASSWD:ALL\(aq]
+     ssh\-authorized\-keys:
+      \- <your ssh public key>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+It creates a user named \fIdemo\fP able to use sudo without password and which can login via SSH with the specified key.
+.sp
+\fBWARNING:\fP
+.INDENT 0.0
+.INDENT 3.5
+Please note that indentation levels are significant in YAML and that tabs are not allowed. If you run into trouble you can use a validator at \fI\%https://coreos.com/validate/\fP\&.
+.UNINDENT
+.UNINDENT
+.sp
+For a simple cluster, we don\(aqt want to deploy a DHCP or DNS server to manage addresses on the private network. Instead, we define an \fB/etc/hosts\fP file and use a simple script which configures the Ethernet interface on the private Ethernet network with an IP derived on from the interface\(aqs MAC address. Append the following to your cloud\-config file:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+write_files:
+  \- path: /sbin/ifup\-local
+    permissions: \(aq0755\(aq
+    content: |
+      #!/bin/bash
+      VM_ID0=$(printf "%d\en" 0x$(cat /sys/class/net/eth1/address | cut \-d : \-f 6))
+      VM_ID1=$(printf "%d\en" 0x$(cat /sys/class/net/eth1/address | cut \-d : \-f 5))
+      VM_ID=$(( 256 * $VM_ID1 + $VM_ID0 ))
+      BYTE0=$((  $VM_ID / 255 ))
+      BYTE1=$(( ( $VM_ID % 255 ) + 1 ))
+
+      ifconfig eth1 "10.252.${BYTE0}.${BYTE1}/16" mtu 1450
+      hostname vm"${VM_ID}"
+
+   \- path: /etc/hosts
+     permissions: \(aq0644\(aq
+     content: |
+       #Host file
+       127.0.0.1   localhost localhost.localdomain
+
+       10.252.0.1 vm0
+       10.252.0.2 vm1
+       10.252.0.3 vm2
+       10.252.0.4 vm3
+       10.252.0.5 vm4
+       10.252.0.6 vm5
+       10.252.0.7 vm6
+       10.252.0.8 vm7
+       10.252.0.9 vm8
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The MTU is set to 1450 compared to 1500 on the host network to account for encapsulation headers. More entries in /etc/hosts could be defined to account for more VMs.
+.UNINDENT
+.UNINDENT
+.sp
+Moreover, we we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest in a network indepenant and OSagnostic fashion. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:\fIpcocc\-save(1)<save>\fP command. We also make sure that the eth1 interface (corresponding to the private network) is up. Append the following content to your cloud\-config file:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+packages:
+    \- qemu\-guest\-agent
+
+runcmd:
+    # Make sure that the service is up on all distros
+    \- systemctl start qemu\-guest\-agent
+    \- ifup eth1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To pass this cloud\-config file to our VMs, we can specialize the generic templates. As a regular user you can then add the fllowing content to the \fB~/.pcocc/templates.yaml\fP configuration file:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+mycentos:
+    inherits: centos7\-cloud
+    user\-data: ~/my\-cloud\-config
+    description: "Custom CentOS 7"
+
+myubuntu:
+    inherits: ubuntu\-artful\-cloud
+    user\-data: ~/my\-cloud\-config
+    description: "Custom Ubuntu"
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+This configuration file assumes that you saved the previous cloud\-config file as \fB~/my\-cloud\-config\fP in your home directory. Please adapt the path to what you have used.
+.UNINDENT
+.UNINDENT
+.SH LAUNCHING A VIRTUAL CLUSTER
+.sp
+We can now instantiate VMs:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc alloc \-c2 mycentos:3,myubuntu:1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Using this command, you will launch four VMs with two cores each:
+.INDENT 0.0
+.IP \(bu 2
+three \fImycentos\fP
+.IP \(bu 2
+one \fImyubuntu\fP
+.UNINDENT
+.sp
+VMs are numbered in order so they will be as as follows:
+.TS
+center;
+|l|l|.
+_
+T{
+ID
+T}	T{
+Type
+T}
+_
+T{
+vm0
+T}	T{
+CentOS (1)
+T}
+_
+T{
+vm1
+T}	T{
+CentOS (2)
+T}
+_
+T{
+vm2
+T}	T{
+CentOS (3)
+T}
+_
+T{
+vm3
+T}	T{
+Ubuntu (1)
+T}
+_
+.TE
+.sp
+The pcocc alloc command puts you in a subshell which controls your allocation. If you exit this shell, your virtual cluster will be terminated and the temporary disks of the VMs will be destroyed.
+.sp
+If you used the cloud\-config file described in the previous steps, you now should be able to login as the demo user (this assumes your default SSH private key matches the public key you specified in the cloud\-config file, otherwise, specify the correct private key with the \fI\-i\fP option)
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc ssh vm0 \-l demo
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+You should be logged into one of the CentOS VM:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+[demo@vm0 ~]$ cat /etc/redhat\-release
+CentOS Linux release 7.3.1611 (Core)
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Note that, since you are in the aforementioned subshell, pcocc commands such as \fIpcocc ssh\fP automatically target the current virtual cluster, but you can  target a specific cluster by jobid/jobname from any shell using the \-j/\-J pcocc options.
+.sp
+To reach the Ubuntu VM:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc ssh vm3 \-l demo
+
+$ cat /etc/lsb\-release
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=17.10
+DISTRIB_CODENAME=artful
+DISTRIB_DESCRIPTION="Ubuntu Artful Aardvark (development branch)"
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+You can connect to the serial consoles using the following command:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc console vm1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+Hit CTRL+C three times to leave the serial console.
+.UNINDENT
+.UNINDENT
+.sp
+You can also look back at the serial console log with:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc console \-l
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The console is very helpful to follow the VM boot and cloud\-init progress. Installing packages can take some time and in this example, the Qemu guest agent will only be available once the configuration process is complete. If you run into any issue, check the serial console log for error messages and make sure your YAML syntax is correct.
+.UNINDENT
+.UNINDENT
+.SH SAVING VM IMAGES
+.sp
+Instead of configuring your VM with cloud\-init each time you instantiate them, you may want to create template from pre\-configured images that already contain the necessary packages, configuration files, user defintions etc. pcocc allows you to create new images from a running VM with the ref:\fIpcocc\-save(1)<save>\fP command.
+.SH AUTHOR
+François Diakhaté
+.SH COPYRIGHT
+2017
+.\" Generated by docutils manpage writer.
+.

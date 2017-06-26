@@ -64,21 +64,21 @@ pv:
     host-if-suffix: ""
 
 
-# Define a private ifiniband network
-ib:
-  # Infiniband network based on SRIOV virtual functions
-  type: ib
-  settings:
-    # Host infiniband device
-    host-device: "mlx5_0"
-    # Range of PKeys to allocate for virtual clusters
-    min-pkey: "0x2000"
-    max-pkey: "0x3000"
-    # Resource manager token to request when allocating this network
-    license: "pkey"
-    # Name of opensm process
-    opensm-daemon: "opensm"
-    # Configuration file for opensm partitions
-    opensm-partition-cfg: /etc/opensm/partitions.conf
-    # Template for generating the configuration file for opensm partitions
-    opensm-partition-tpl: /etc/opensm/partitions.conf.tpl
+# # Define a private Infiniband network
+# ib:
+#   # Infiniband network based on SRIOV virtual functions
+#   type: ib
+#   settings:
+#     # Host infiniband device
+#     host-device: "mlx5_0"
+#     # Range of PKeys to allocate for virtual clusters
+#     min-pkey: "0x2000"
+#     max-pkey: "0x3000"
+#     # Resource manager token to request when allocating this network
+#     license: "pkey"
+#     # Name of opensm process
+#     opensm-daemon: "opensm"
+#     # Configuration file for opensm partitions
+#     opensm-partition-cfg: /etc/opensm/partitions.conf
+#     # Template for generating the configuration file for opensm partitions
+#     opensm-partition-tpl: /etc/opensm/partitions.conf.tpl

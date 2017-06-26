@@ -1,0 +1,238 @@
+.\" Man page generated from reStructuredText.
+.
+.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Aug 10, 2017" "0.3.1" "pcocc"
+.SH NAME
+pcocc-cloudconfig-tutorial \- How to configure cloud-init enabled VMs
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.sp
+This tutorial shows how to configure a cloud\-init enabled VM image, that is, a VM image where the cloud\-init service has been enabled to run a boot time. Cloud\-init is a multi\-distribution package that handles early initialization of a VM instance. It can perform various tasks such as configuring users and access credentials, installing packages or setting up mount points. These tasks are defined in a cloud\-config file that can be passed to a pcocc VM using the \fBuser\-data\fP template parameter.
+.sp
+Many distributions provide cloud\-init enabled VM images that you can easily import as pcocc templates. More information downloading and importing these images can be found in pcocc\-newvm\-tutorial(7)\&.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+By default it is not possible to login to cloud\-enabled VMs, you must first specify a cloud\-config file to setup a SSH key or other authentication mechanism.
+.UNINDENT
+.UNINDENT
+.sp
+This tutorial provides a quick overview of some cloud\-config directives which can be used to configure pcocc VMs. The complete documentation of cloud\-init capabilities can be found at \fI\%https://cloudinit.readthedocs.io/en/latest/\fP\&.
+.SH USING CLOUD-CONFIG FILES WITH PCOCC
+.sp
+A cloud\-config file is a YAML formatted file beginning with the \fI#cloud\-config\fP pragma and followed by various configuration directives, some of which we will cover in the next sections. It can be passed to pcocc VMs by adding the \fBuser\-data\fP template parameter, for example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+mycentos:
+    inherits: centos7\-ci
+    user\-data: ~/conf
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where \fB~/conf\fP is the cloud\-config file which will be passed to cloud\-init at VM boot.
+.sp
+Most cloud\-config directives are only applied at the first VM boot. As a result, if you reboot a VM or if you save it after cloud\-init has run, it will no longer apply the cloud\-config file, even if you change its directives.
+.sp
+This mechanism is based on the value of \fBinstance\-id\fP which defaults to \fIpcocc\-deploy\fP for pcocc VMs. Cloud\-init records the \fBinstance\-id\fP it sees on first boot and will no longer run as long as it stays the same. This means that you can configure a VM a second time by changing its \fBinstance\-id\fP template parameter to something else. If you are pre\-configuring VMs for other users to customize later with cloud\-init, you might want to use a non\-default \fBinstance\-id\fP so that your users don\(aqt have to change it to apply another cloud\-config file.
+.SH SETTING UP USER CREDENTIALS
+.sp
+With cloud\-init enabled VMs the first configuration task is often to define user credentials to login to the VM. This can be done with the following syntax:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+users:
+\- name : demo1
+  ssh\-authorized\-keys:
+    \- key1 <ssh pub key 1>
+    \- key2 <ssh pub key 2>
+\- name : demo2
+  ssh\-authorized\-keys:
+    \- key3 <ssh pub key 3>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This defines two demo users, with their respective public SSH keys. You can also provide sudo privileges to a user with the \fBsudo\fP parameter or define its numerical id with the \fBuid\fP parameter:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+users:
+    \- name: demo1
+    sudo: [\(aqALL=(ALL) NOPASSWD:ALL\(aq]
+    uid: 1247
+    ssh\-authorized\-keys:
+        \- key1 ...
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH RUNNING EARLY BOOT COMMANDS
+.sp
+Boot commands are executed first in the configuration process. They are run as root. In contrast to other directives, they are run on each boot instead of only once. The \fIcloud\-init\-per\fP wrapper command can be used to run these boot commands only once. For example, if you are relying on local mirrors of package repositories you may want to disable those configured by default in the cloud\-init image. For a CentOS guest you may add:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+bootcmd:
+ \- [ cloud\-init\-per, instance, yumcleanbase, yum\-config\-manager, \-\-disable, base]
+ \- [ cloud\-init\-per, instance, yumcleanupdates, yum\-config\-manager, \-\-disable, updates]
+ \- [ cloud\-init\-per, instance, yumcleanextras, yum\-config\-manager, \-\-disable, extras]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH INSTALLING PACKAGES
+.sp
+You can provide a list of packages to install, for example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+packages:
+    \- qemu\-guest\-agent
+    \- vim
+    \- gcc
+    \- gdb
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+You can also setup additional package repositories for yum:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+yum_repos:
+   epel_mirror:
+    baseurl: http://local\-mirror.mydomain/pub/epel/testing/7/$basearch
+    enabled: true
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Or for apt:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+apt:
+   primary:
+     \- arches: [default]
+       search:
+         \- http://local\-mirror.mydomain/pub/debian/
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+You can also ask for packages to be upgraded first:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+package_update: false
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH WRITING FILES
+.sp
+You can write arbitrary files in the VM filesystem. Files are written after packages have been installed which allows for customizing configuration files. For example to write a simple \fB/etc/hosts\fP file for VMs on a private network:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+\- path: /etc/hosts
+  permissions: \(aq0644\(aq
+  content: |
+    #Host file
+    127.0.0.1   localhost localhost.localdomain
+
+    10.252.0.1 vm0
+    10.252.0.2 vm1
+    10.252.0.3 vm2
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH MOUNTING FILESYSTEMS
+.sp
+You can add entries to the VM fstab to mount filesystems. For example, to mount a 9p filesystem:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+mounts:
+ \- [ optmount, /opt, 9p, \(aqtrans=virtio,version=9p2000.L,msize=262144,nofail\(aq, \(aq0\(aq, \(aq0\(aq]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH RUNNING COMMANDS
+.sp
+You can run arbitrary commands as root once at the end of the configuration process. Commands will run once all packages have been installed and files written. It can be used to reload a service that you just reconfigured or amend a configuration file:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+runcmd:
+    \- sed \-i \(aqs/a/b\(aq /etc/config\-file
+    \- sytemctl restart service
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH TO GO FURTHER
+.sp
+We only briefly covered part of the capabilities of cloud\-init. Please refer to \fI\%https://cloudinit.readthedocs.io/en/latest/index.html\fP for an exhaustive documentation.
+.SH AUTHOR
+François Diakhaté
+.SH COPYRIGHT
+2017
+.\" Generated by docutils manpage writer.
+.

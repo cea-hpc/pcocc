@@ -1,0 +1,180 @@
+.\" Man page generated from reStructuredText.
+.
+.TH "PCOCC" "1" "Aug 10, 2017" "0.3.1" "pcocc"
+.SH NAME
+pcocc \- Private Cloud on a Compute Cluster
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.SH INTRODUCTION
+.sp
+pcocc (pronounced like "peacock") stands for Private Cloud On a Compute Cluster. It allows users of an HPC cluster to host their own clusters of VMs on compute nodes, alongside regular jobs. Users are thus able to fully customize their software environments for development, testing, or facilitating application deployment. Compute nodes remain managed by the batch scheduler as usual since the clusters of VMs are seen as regular jobs. For each virtual cluster, pcocc allocates the necessary resources to host the VMs, including private Ethernet and/or Infiniband networks, creates temporary disk images from the selected templates and instantiates the requested VMs.
+.SH WORKING PRINCIPLE
+.sp
+pcocc leverages SLURM to start, stop and supervise virtual clusters in the same way as regular parallel jobs. It allocates CPU and memory resources using sbatch/salloc and a SLURM plugin allows to setup virtual networks on the allocated nodes. Once the nodes are allocated and configured, VMs are launched by SLURM as any other task with the rights of the invoking user. VMs are configured to replicate, as much as possible, the resources and capabilities of the portion of the underlying host that is allocated for them (CPU model and core count, memory amount and NUMA topology, CPU and memory binding...) so as to maximize performance.
+.sp
+To launch a virtual cluster, the user selects a template from which to instantiate its VMs and the number of requested VMs (it is possible to combine several templates among a cluster). A template defines, among other things, the base image disk to use, the virtual networks to setup, and optional parameters such as host directories to export to the VMs via 9p. Administrators can define system\-wide templates from which users can inherit to define their own templates. When a VM is instantiated from a template, an ephemeral disk image is built from the reference image using copy\-on\-write. By default, any changes made to the VMs\(aq disks are therefore lost once the virtual cluster stops but it is possible to save these changes to create new revisions of the templates.
+.SH LIST OF HELP TOPICS
+.sp
+This documentation is organized into help topics which are listed in the following sections. These topics include tutorials to help you get started, individual pcocc sub\-commands to manage and interact with virtual clusters and configuration files.
+.sp
+You may get further information on each of these topics listed below by doing:
+.INDENT 0.0
+.INDENT 3.5
+pcocc help [\fITOPIC\fP]
+.UNINDENT
+.UNINDENT
+.sp
+For example to open the newvm tutorial:
+.INDENT 0.0
+.INDENT 3.5
+pcocc help newvm\-tutorial
+.UNINDENT
+.UNINDENT
+.sp
+To example read help about the ssh sub\-command:
+.INDENT 0.0
+.INDENT 3.5
+pcocc help ssh
+.UNINDENT
+.UNINDENT
+.sp
+For installing pcocc on a cluster, have a look at the installation guide\&. [1]
+.SS Sub\-Commands
+.sp
+pcocc supports the following sub\-commands:
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+Define and Allocate VMs:
+.INDENT 2.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B alloc
+Instantiate or restore a virtual cluster (interactive mode)
+.TP
+.B batch
+Instantiate or restore a virtual cluster (batch mode)
+.TP
+.B template
+List and manage VM templates
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+Connect to VMs:
+.INDENT 2.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B console
+Connect to a VM console
+.TP
+.B nc
+Connect to a VM via  nc
+.TP
+.B scp
+Transfer files to a VM via scp
+.TP
+.B ssh
+Connect to a VM via ssh
+.TP
+.B exec
+Execute commands through the pcocc guest agent
+.TP
+.B display
+Display the graphical output of a VM
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+Manage running VMs:
+.INDENT 2.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B reset
+Reset a VM
+.TP
+.B ckpt
+Checkpoint a virtual cluster
+.TP
+.B dump
+Dump the memory of a VM to a file
+.TP
+.B monitor\-cmd
+Send a command to the monitor
+.TP
+.B save
+Save the disk of a VM
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS Tutorials
+.INDENT 0.0
+.TP
+.B newvm\-tutorial
+How to import VM images and define VM templates
+.TP
+.B cloudconfig\-tutorial
+How to configure cloud\-init enabled VMs
+.TP
+.B 9pmount\-tutorial
+How to mount host directories in VMs
+.UNINDENT
+.SS Configuration Files
+.INDENT 0.0
+.TP
+.B batch.yaml
+Batch environment configuration file
+.TP
+.B networks.yaml
+Networks configuration file
+.TP
+.B resources.yaml
+Resource sets configuration file
+.TP
+.B templates.yaml
+VM templates definition file
+.UNINDENT
+.SS See also
+.sp
+pcocc\-alloc(1), pcocc\-batch(1), pcocc\-ckpt(1), pcocc\-console(1), pcocc\-display(1), pcocc\-dump(1), pcocc\-exec(1), pcocc\-monitor\-cmd(1), pcocc\-nc(1), pcocc\-reset(1), pcocc\-save(1), pcocc\-scp(1), pcocc\-ssh(1), pcocc\-template(1), pcocc\-batch.yaml(5), pcocc\-networks.yaml(5), pcocc\-resources.yaml(5), pcocc\-templates.yaml(5), pcocc\-9pmount\-tutorial(7), pcocc\-cloudconfig\-tutorial(7), pcocc\-newvm\-tutorial(7)
+.SH FOOTNOTES
+.IP [1] 5
+Local installation guide: /usr/share/doc/pcocc\-0.3.1/install.html
+.SH AUTHOR
+François Diakhaté
+.SH COPYRIGHT
+2017
+.\" Generated by docutils manpage writer.
+.

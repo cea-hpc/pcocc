@@ -104,6 +104,23 @@ def load_batch_cluster():
 def cli(verbose):
     Config().verbose = verbose
 
+def display_manpage(page):
+    try:
+        if page == 'pcocc':
+            p = subprocess.Popen(['man', page])
+        else:
+            p = subprocess.Popen(['man', 'pcocc-' + page])
+    except:
+        raise click.UsageError("No such help topic '" + page + "'\n"
+                               "       use 'pcocc help' to list topics")
+
+    p.communicate()
+
+@cli.command(name='help', short_help='Display man pages for a given subcommand')
+@click.argument('command', default='pcocc')
+def help(command):
+        display_manpage(command)
+
 @cli.group(hidden=True)
 def internal():
     """ For internal use """

@@ -3,3 +3,5 @@ include plugins/slurm/vm-setup.lua
 include helpers/examples/*
 include dist/pkeyd.service
 include LICENSE lib/pcocc/scripts/click/LICENSE
+recursive-include docs/build/man *
+recursive-include docs/build/html *

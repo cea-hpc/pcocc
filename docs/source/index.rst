@@ -6,14 +6,15 @@
 Welcome to pcocc's documentation!
 =================================
 
+.. include:: description.rst
+
 .. toctree::
    :maxdepth: 2
 
-   introduction
-   getting_started
-   template_defs
-   config_files
-
+   install
+   tutorials
+   conf
+   cli
 
 Navigation
 ==========

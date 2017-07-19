@@ -150,6 +150,49 @@ def find_vm_ssh_opt(opts, regex, s_opts, v_opts, first_arg_only=True):
     return i, match
 
 
+@cli.command(name='display',
+             short_help='Display the graphical output of a VM')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('--user',
+              help='Select cluster among jobs of the specified user')
+@click.option('-p', '--print_opts', is_flag=True, help='Print remote-viewer options')
+@click.argument('vm', nargs=1, default='vm0')
+def pcocc_display(jobid, jobname, user, print_opts, vm):
+    """Display the graphical output of a VM
+
+    This requires the VM to have a remote display method defined in it's template.
+
+    \b
+    Example usage:
+           pcocc display vm0
+    """
+    try:
+        config = load_config(jobid, jobname, default_batchname='pcocc',
+                             batchuser=user)
+        cluster = load_batch_cluster()
+        index = vm_name_to_index(vm)
+        vm = cluster.vms[index]
+
+        if vm.remote_display == 'spice':
+            opts_file = os.path.join(config.batch.cluster_state_dir,
+                                     'spice_vm{0}/console.vv'.format(index))
+            if print_opts:
+                with open(opts_file, 'r') as f:
+                    print f.read()
+            else:
+                s_ctl = subprocess.Popen(['remote-viewer', opts_file])
+                ret = s_ctl.wait()
+                sys.exit(ret)
+        else:
+            raise click.UsageError('VM has no valid remote display')
+
+    except PcoccError as err:
+        handle_error(err)
+
+
 @cli.command(name='ssh',
              context_settings=dict(ignore_unknown_options=True,
                                    allow_interspersed_args=False),

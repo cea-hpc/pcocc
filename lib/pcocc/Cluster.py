@@ -208,6 +208,14 @@ class VM(object):
         return self._template.persistent_drives
 
     @property
+    def disk_model(self):
+        return self._template.disk_model
+
+    @property
+    def remote_display(self):
+        return self._template.remote_display
+
+    @property
     def wait_for_poweroff(self):
         if self._template.persistent_drives:
             return True

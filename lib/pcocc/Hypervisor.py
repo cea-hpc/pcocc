@@ -36,6 +36,7 @@ import logging
 import signal
 import datetime
 import random
+import binascii
 
 from pcocc.scripts import click
 from ClusterShell.NodeSet  import RangeSet
@@ -339,6 +340,79 @@ class Qemu(object):
                              'mmp/' + path)
 
 
+    def _setup_spice(self, vm):
+        batch = Config().batch
+        # TODO: Add TLS support for untrusted networks
+        spice_path = os.path.join(batch.cluster_state_dir, 'spice_vm{0}'.format(vm.rank))
+        sasldb_path = os.path.join(spice_path, 'saslpasswd.db')
+        os.environ['SASL_CONF_PATH'] = spice_path
+        os.mkdir(spice_path, 0700)
+
+        spice_password = binascii.b2a_hex(os.urandom(16))
+        s_exec = subprocess.Popen(['saslpasswd2', '-f',
+                                   sasldb_path, '-p',
+                                   '-c',  '-u', 'pcocc',
+                                   batch.batchuser],
+                                  stdin=subprocess.PIPE)
+        s_exec.communicate(input=spice_password + '\n')
+        if s_exec.returncode:
+            raise PcoccError('Failed to setup SASL password')
+
+        qemu_conf="""
+mech_list: digest-md5
+sasldb_path: {0}
+auxprop_plugin: sasldb
+""".format(sasldb_path)
+        with open(os.path.join(spice_path, 'qemu.conf'), 'w') as f:
+            f.write(qemu_conf)
+
+
+        randrange = range(5900,6100, 2)
+        random.shuffle(randrange)
+        # TODO: find a better way to allocate port numbers since qemu
+        # requires a fixed port. For now use odd port numbers as locks
+        # guarding even port numbers and hope we don't race with some
+        # non-pcocc app.
+        locksocket = socket.socket(socket.AF_INET,
+                                   socket.SOCK_STREAM)
+        testsocket = socket.socket(socket.AF_INET,
+                                   socket.SOCK_STREAM)
+
+        for spice_port in randrange:
+            try:
+                locksocket.bind(('', spice_port + 1))
+            except Exception as e:
+                continue
+
+            try:
+                testsocket.bind(('', spice_port))
+            except Exception as e:
+                locksocket.close()
+                locksocket = socket.socket(socket.AF_INET,
+                                               socket.SOCK_STREAM)
+                continue
+
+            testsocket.close()
+            atexit.register(locksocket.close)
+            break
+        else:
+            raise HypervisorError('Unable to find a free port for remote display')
+
+        with open(os.path.join(spice_path, 'console.vv'.format(vm.rank)),
+                  'w') as f:
+            f.write("""[virt-viewer]
+type=spice
+host={0}
+port={1}
+password={2}
+username={3}@pcocc
+""".format(vm.get_host(), spice_port,
+           spice_password, batch.batchuser))
+
+        return ['-spice','port={0},sasl'.format(spice_port),
+                '-device', 'virtserialport,chardev=spicechannel0,name=com.redhat.spice.0',
+                '-chardev', 'spicevmc,id=spicechannel0,name=vdagent']
+
     def run(self, vm, ckpt_dir=None):
         batch = Config().batch
 
@@ -453,7 +527,7 @@ class Qemu(object):
 
         # Basic machine definition
         cmdline += ['-machine', 'type=pc,accel=kvm']
-        cmdline += ['-nographic']
+        cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,vgamem_mb=16']
         cmdline += ['-rtc', 'base=utc']
         cmdline += ['-cpu', 'host']
 
@@ -484,8 +558,15 @@ class Qemu(object):
 
             atexit.register(os.remove, snapshot_path)
 
-            cmdline += ['-device', 'virtio-blk-pci,'
-                        'drive=bootdisk,addr=06.0']
+            if vm.disk_model == 'virtio':
+                cmdline += ['-device', 'virtio-blk-pci,'
+                            'drive=bootdisk,addr=06.0']
+            elif vm.disk_model == 'ide':
+                cmdline += ['-device', 'ide-hd,'
+                            'drive=bootdisk,bus=ide.0,unit=1']
+            else:
+                raise HypervisorError('Unsupported disk model: '
+                                      + str(vm.disk_model))
 
             cmdline += ['-drive', 'id=bootdisk,'
                         'file=%s,index=0,if=none,'
@@ -642,7 +723,7 @@ class Qemu(object):
         if len(vm.serial_ports) > 0:
             nserials = len(vm.serial_ports)
             cmdline += [ '-device',
-                        'virtio-serial,id=ser0,max_ports=%d' % (nserials+1) ]
+                         'virtio-serial,id=ser0,max_ports=%d' % (nserials+2) ]
             for i, serial in enumerate(vm.serial_ports):
                 serialid = i + 1
                 socket_path = batch.get_vm_state_path(vm.rank,
@@ -657,6 +738,15 @@ class Qemu(object):
 
         # Virtio RNG
         cmdline += [ '-device', 'virtio-rng-pci']
+
+        #Display
+        if vm.remote_display == 'spice':
+            cmdline += self._setup_spice(vm)
+        elif not vm.remote_display:
+            cmdline += ['-display', 'none']
+        else:
+            raise HypervisorError('Unsupported remote display type: '
+                                  + str(vm.remote_display))
 
         try:
             user_data_file = batch.get_vm_state_path(vm.rank, 'user-data')

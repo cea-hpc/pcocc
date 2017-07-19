@@ -41,6 +41,8 @@ template_settings = {'image': (False, None, True),
                      'full-node': (False, False, True),
                      'emulator-cores': (False, 0, True),
                      'disk-cache': (False, 'unsafe', True),
+                     'disk-model': (False, 'virtio', True),
+                     'remote-display': (False, None, True),
                      'description': (False, '', False),
                      'persistent-drives': (False, [], True),
                      'placeholder': (False, False, False)}

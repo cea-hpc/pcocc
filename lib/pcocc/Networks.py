@@ -39,8 +39,7 @@ import psutil
 from Backports import subprocess_check_output
 from Error import PcoccError, InvalidConfigurationError
 from Config import Config
-
-
+from Misc import DefaultValidatingDraft4Validator
 
 network_config_schema = """
 type: object
@@ -74,24 +73,38 @@ definitions:
            type: string
           vm-hwaddr:
            type: string
+           default-value: '52:54:00:44:AE:5E'
+           pattern: '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'
           bridge:
            type: string
           bridge-hwaddr:
            type: string
+           default-value: '52:54:00:C0:C0:C0'
+           pattern: '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'
           tap-prefix:
            type: string
           mtu:
            type: integer
+           default-value: 1500
           domain-name:
            type: string
+           default-value: ''
           dns-server:
            type: string
+           default-value: ''
           reverse-nat:
            type: object
           allow-outbound:
            type: string
+           default-value: 'all'
         additionalProperties: false
-
+        required:
+         - nat-network
+         - vm-network
+         - vm-network-gw
+         - vm-ip
+         - bridge
+         - tap-prefix
     additionalProperties: false
 
   pv:
@@ -105,15 +118,21 @@ definitions:
         properties:
           mac-prefix:
            type: string
+           default-value: '52:54:00'
+           pattern: '^([0-9a-fA-F]{2}:){0,3}[0-9a-fA-F]{2}$'
           bridge-prefix:
            type: string
           tap-prefix:
            type: string
           mtu:
            type: integer
+           default-value: 1500
           host-if-suffix:
            type: string
         additionalProperties: false
+        required:
+         - bridge-prefix
+         - tap-prefix
 
     additionalProperties: false
 
@@ -130,8 +149,10 @@ definitions:
            type: string
           min-pkey:
            type: string
+           pattern: "^0x[0-9a-zA-Z]{4}$"
           max-pkey:
            type: string
+           pattern: "^0x[0-9a-zA-Z]{4}$"
           license:
            type: string
           opensm-daemon:
@@ -141,6 +162,13 @@ definitions:
           opensm-partition-tpl:
            type: string
         additionalProperties: false
+        required:
+         - min-pkey
+         - max-pkey
+         - host-device
+         - opensm-daemon
+         - opensm-partition-cfg
+         - opensm-partition-tpl
 
     additionalProperties: false
 
@@ -159,7 +187,11 @@ definitions:
            type: string
           mtu:
            type: integer
+           default-value: 1500
         additionalProperties: false
+        required:
+         - host-bridge
+         - tap-prefix
 
     additionalProperties: false
 
@@ -175,6 +207,8 @@ definitions:
           host-device:
            type: string
         additionalProperties: false
+        required:
+         - host-device
 
     additionalProperties: false
 """
@@ -197,16 +231,20 @@ class VNetworkConfig(dict):
         try:
             stream = file(filename, 'r')
             net_config = yaml.safe_load(stream)
-        except yaml.parser.ParserError as err:
+        except yaml.YAMLError as err:
             raise InvalidConfigurationError(str(err))
         except IOError as err:
             raise InvalidConfigurationError(str(err))
 
         try:
-            jsonschema.validate(net_config,
-                                yaml.safe_load(network_config_schema))
+            validator = DefaultValidatingDraft4Validator(yaml.safe_load(network_config_schema))
+            validator.validate(net_config)
         except jsonschema.exceptions.ValidationError as err:
-            raise InvalidConfigurationError(str(err))
+            message = "failed to parse configuration for network {0} \n\n".format(err.path[0])
+            best_error = jsonschema.exceptions.best_match(validator.iter_errors(net_config))
+            message += str(best_error)
+
+            raise InvalidConfigurationError(message)
 
         for name, net_attr in net_config.iteritems():
             self[name] = VNetwork.create(net_attr['type'],
@@ -703,17 +741,16 @@ class VNATNetwork(VNetwork):
         self._domain_name = settings["domain-name"]
         self._dns_server = settings["dns-server"]
         self._dnsmasq_pid_filename = "/var/run/pcocc_dnsmasq.pid"
-        self._bridge_hwaddr = settings.get("bridge-hwaddr", "52:54:00:C0:C0:C0")
+        self._bridge_hwaddr = settings["bridge-hwaddr"]
 
-        if "allow-outbound" in settings:
-            if settings["allow-outbound"] == 'none':
-                self._allow_outbound = False
-            else:
-                raise InvalidConfigurationError(
-                    '%s is not a valid value '
-                    'for allow-outbound' % settings["allow-outbound"])
-        else:
+        if settings["allow-outbound"] == 'none':
+            self._allow_outbound = False
+        elif settings["allow-outbound"] == 'all':
             self._allow_outbound = True
+        else:
+            raise InvalidConfigurationError(
+                '%s is not a valid value '
+                'for allow-outbound' % settings["allow-outbound"])
 
         if "reverse-nat" in settings:
             self._vm_rnat_port = int(settings["reverse-nat"]["vm-port"])

@@ -25,7 +25,7 @@ class ResSetConfig(dict):
         try:
             stream = file(filename, 'r')
             res_config = yaml.safe_load(stream)
-        except yaml.parser.ParserError as err:
+        except yaml.YAMLError as err:
             raise InvalidConfigurationError(str(err))
         except IOError as err:
             raise InvalidConfigurationError(str(err))

@@ -40,6 +40,7 @@ from Backports import subprocess_check_output
 from Error import PcoccError, InvalidConfigurationError
 from Config import Config
 from Misc import DefaultValidatingDraft4Validator
+from Misc import do_free_key, do_alloc_key
 
 network_config_schema = """
 type: object
@@ -313,68 +314,6 @@ class VNetwork(object):
     def _vm_res_label(self, vm):
         return "vm-%d" % vm.rank
 
-    def _do_alloc_pkey(self, key_alloc_state):
-        """Helper to allocate a unique key using the key/value store"""
-        batch = Config().batch
-
-        if not key_alloc_state:
-            key_alloc_state = []
-        else:
-            key_alloc_state = yaml.safe_load(key_alloc_state)
-
-        jsonschema.validate(key_alloc_state,
-                            yaml.safe_load(pkey_allocation_schema))
-
-        num_keys_preclean = len(key_alloc_state)
-        # Cleanup completed jobs
-        try:
-            joblist = batch.list_all_jobs()
-            key_alloc_state = [ pk for pk in key_alloc_state
-                                 if int(pk['batchid']) in joblist ]
-        except Batch.BatchError:
-            pass
-
-        num_keys = len(key_alloc_state)
-        stray_keys = num_keys_preclean - num_keys
-        if stray_keys > 0:
-            logging.warning(
-                'Found {0} leftover Keys, will try to cleanup'.format(
-                    stray_keys))
-
-        total_keys = self._max_pkey - self._min_pkey + 1
-        if len(key_alloc_state) >= total_keys:
-            raise NetworkSetupError('Unable to find a free key')
-
-        key_index = len(key_alloc_state)
-        for i, allocated_key in enumerate(key_alloc_state):
-            if i != allocated_key['pkey_index']:
-                key_index = i
-                break
-
-        key_alloc_state.insert(key_index,
-                                      {'pkey_index': key_index,
-                                       'batchid': batch.batchid})
-
-
-        return yaml.dump(key_alloc_state), key_index
-
-    def _do_free_pkey(self, key_index, key_alloc_state):
-        """Helper to free a unique key using the key/value store"""
-        key_alloc_state = yaml.safe_load(key_alloc_state)
-        jsonschema.validate(key_alloc_state,
-                            yaml.safe_load(pkey_allocation_schema))
-        for i, allocated_key in enumerate(key_alloc_state):
-            if allocated_key['pkey_index'] == key_index:
-                key_alloc_state.pop(i)
-                break
-        else:
-            raise NetworkSetupError(
-                "key at index {0}, for network {1} "
-                "is no longer allocated".format(
-                    key_index, self.name))
-
-        return yaml.dump(key_alloc_state), None
-
     def _get_net_key_path(self, key):
         """Returns path in the key/value store for a per network instance
         key
@@ -505,8 +444,8 @@ class VPVNetwork(VNetwork):
         self._tap_prefix = settings["tap-prefix"]
         self._mtu = int(settings["mtu"])
         self._host_if_suffix = settings["host-if-suffix"]
-        self._min_pkey = 1024
-        self._max_pkey = 2 ** 16 - 1
+        self._min_key = 1024
+        self._max_key = 2 ** 16 - 1
         self._type = "pv"
 
     def init_node(self):
@@ -542,10 +481,18 @@ class VPVNetwork(VNetwork):
             logging.info("Node is master for PV network {0}".format(
                     self.name))
 
-            tun_id = self._min_pkey + batch.atom_update_key(
-                'global',
-                self._get_type_key_path('key_alloc_state'),
-                self._do_alloc_pkey)
+            try:
+                tun_id = self._min_key + batch.atom_update_key(
+                    'global',
+                    self._get_type_key_path('key_alloc_state'),
+                    do_alloc_key,
+                    self._min_key,
+                    self._max_key)
+            except PcoccError as e:
+                raise NetworkSetupError('{0}: {1}'.format(
+                    self.name,
+                    str(e)
+                ))
 
             batch.write_key(
                 'cluster',
@@ -667,11 +614,17 @@ class VPVNetwork(VNetwork):
 
         if master == Config().batch.node_rank:
             # Free tunnel key
-            Config().batch.atom_update_key(
-                'global',
-                self._get_type_key_path('key_alloc_state'),
-                self._do_free_pkey,
-                int(net_res['global']['tun_id']) - self._min_pkey)
+            try:
+                Config().batch.atom_update_key(
+                    'global',
+                    self._get_type_key_path('key_alloc_state'),
+                    do_free_key,
+                    int(net_res['global']['tun_id']) - self._min_key)
+            except PcoccError as e:
+                raise NetworkSetupError('{0}: {1}'.format(
+                    self.name,
+                    str(e)
+                ))
 
             # Cleanup keystore
             Config().batch.delete_dir(
@@ -1210,21 +1163,6 @@ required:
     - host_guids
 """
 
-"""Schema to validate the global pkey state in the key/value store"""
-pkey_allocation_schema = """
-type: array
-items:
-  type: object
-  properties:
-    pkey_index:
-      type: integer
-    batchid:
-       type: integer
-  required:
-    - pkey_index
-    - batchid
-"""
-
 class VHostIBNetwork(VNetwork):
     def __init__(self, name, settings):
         super(VHostIBNetwork, self).__init__(name)
@@ -1390,11 +1328,18 @@ class VIBNetwork(VHostIBNetwork):
         if master:
             logging.info("Node is master for IB network {0}".format(
                     self.name))
-
-            pkey_index = batch.atom_update_key(
-                'global',
-                self._get_net_key_path('pkey_alloc_state'),
-                self._do_alloc_pkey)
+            try:
+                pkey_index = batch.atom_update_key(
+                    'global',
+                    self._get_net_key_path('pkey_alloc_state'),
+                    do_alloc_key,
+                    self._min_pkey,
+                    self._max_pkey)
+            except PcoccError as e:
+                raise NetworkSetupError('{0}: {1}'.format(
+                    self.name,
+                    str(e)
+                ))
 
             batch.write_key(
                 'cluster',
@@ -1486,11 +1431,17 @@ class VIBNetwork(VHostIBNetwork):
             batch.delete_key('global', pkey_key)
 
             # Free pkey
-            pkey_index = batch.atom_update_key(
-                'global',
-                self._get_net_key_path('pkey_alloc_state'),
-                self._do_free_pkey,
-                net_res['pkey_index'])
+            try:
+                pkey_index = batch.atom_update_key(
+                    'global',
+                    self._get_net_key_path('pkey_alloc_state'),
+                    do_free_key,
+                    net_res['pkey_index'])
+            except PcoccError as e:
+                raise NetworkSetupError('{0}: {1}'.format(
+                    self.name,
+                    str(e)
+                ))
 
             # Cleanup keystore
             batch.delete_dir(

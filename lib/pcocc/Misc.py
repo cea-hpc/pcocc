@@ -26,8 +26,11 @@ import errno
 import socket
 import datetime
 import jsonschema
+import yaml
 
 from Backports import  enum
+from Config import Config
+from Error import PcoccError
 
 stop_threads = threading.Event()
 
@@ -162,3 +165,80 @@ def extend_validator_with_default(validator_class):
 
 
 DefaultValidatingDraft4Validator = extend_validator_with_default(jsonschema.Draft4Validator)
+
+"""Schema to validate the global key state in the key/value store"""
+key_allocation_schema = """
+type: array
+items:
+  type: object
+  properties:
+    pkey_index:
+      type: integer
+    batchid:
+       type: integer
+  required:
+    - pkey_index
+    - batchid
+"""
+
+def do_alloc_key(min_key, max_key, key_alloc_state):
+    """Helper to allocate a unique key using the key/value store"""
+    batch = Config().batch
+
+    if not key_alloc_state:
+        key_alloc_state = []
+    else:
+        key_alloc_state = yaml.safe_load(key_alloc_state)
+
+    jsonschema.validate(key_alloc_state,
+                        yaml.safe_load(key_allocation_schema))
+
+    num_keys_preclean = len(key_alloc_state)
+    # Cleanup completed jobs
+    try:
+        joblist = batch.list_all_jobs()
+        key_alloc_state = [ pk for pk in key_alloc_state
+                             if int(pk['batchid']) in joblist ]
+    except Batch.BatchError:
+        pass
+
+    num_keys = len(key_alloc_state)
+    stray_keys = num_keys_preclean - num_keys
+    if stray_keys > 0:
+        logging.warning(
+            'Found {0} leftover Keys, will try to cleanup'.format(
+                stray_keys))
+
+    total_keys = max_key - min_key + 1
+    if len(key_alloc_state) >= total_keys:
+        raise PcoccError('Unable to find a free key')
+
+    key_index = len(key_alloc_state)
+    for i, allocated_key in enumerate(key_alloc_state):
+        if i != allocated_key['pkey_index']:
+            key_index = i
+            break
+
+    key_alloc_state.insert(key_index,
+                                  {'pkey_index': key_index,
+                                   'batchid': batch.batchid})
+
+
+    return yaml.dump(key_alloc_state), key_index
+
+def do_free_key(key_index, key_alloc_state):
+    """Helper to free a unique key using the key/value store"""
+    key_alloc_state = yaml.safe_load(key_alloc_state)
+    jsonschema.validate(key_alloc_state,
+                        yaml.safe_load(key_allocation_schema))
+    for i, allocated_key in enumerate(key_alloc_state):
+        if allocated_key['pkey_index'] == key_index:
+            key_alloc_state.pop(i)
+            break
+    else:
+        raise PcoccError(
+            "key at index {0}"
+            "is no longer allocated".format(
+                key_index))
+
+    return yaml.dump(key_alloc_state), None

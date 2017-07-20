@@ -92,6 +92,9 @@ definitions:
           dns-server:
            type: string
            default-value: ''
+          ntp-server:
+           type: string
+           default-value: ''
           reverse-nat:
            type: object
           allow-outbound:
@@ -742,6 +745,7 @@ class VNATNetwork(VNetwork):
         self._dns_server = settings["dns-server"]
         self._dnsmasq_pid_filename = "/var/run/pcocc_dnsmasq.pid"
         self._bridge_hwaddr = settings["bridge-hwaddr"]
+        self._ntp_server = settings["ntp-server"]
 
         if settings["allow-outbound"] == 'none':
             self._allow_outbound = False
@@ -804,6 +808,15 @@ class VNATNetwork(VNetwork):
 
         if not self.has_dnsmasq():
             # Start a dnsmasq server to answer DHCP requests
+            dnsmasq_opts = ""
+            if self._ntp_server:
+                dnsmasq_opts+="--dhcp-option=option:ntp-server,{0} ".format(
+                    self._ntp_server)
+
+            if self._dns_server:
+                dnsmasq_opts+="--dhcp-option=option:dns-server,{0} ".format(
+                    self._dns_server)
+
             subprocess.check_call(
                 shlex.split("/usr/sbin/dnsmasq --strict-order "
                             "--bind-interfaces "
@@ -815,7 +828,7 @@ class VNATNetwork(VNetwork):
                             "--dhcp-host %s,%s "
                             "--dhcp-option=option:domain-name,%s "
                             "--dhcp-option=119,%s "
-                            "--dhcp-option=option:dns-server,%s  "
+                            "%s"
                             "--dhcp-option=option:netmask,%s "
                             "--dhcp-option=option:router,%s "
                             "-F %s,static " %(
@@ -825,7 +838,7 @@ class VNATNetwork(VNetwork):
                         self._vm_ip,
                         self._domain_name.split(',')[0],
                         self._domain_name,
-                        self._dns_server,
+                        dnsmasq_opts,
                         num_to_dotted_quad(make_mask(self._vm_network_bits)),
                         self._vm_network_gw,
                         self._vm_ip)))

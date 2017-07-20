@@ -879,14 +879,13 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
             subprocess.call(path, cwd=batch.cluster_state_dir)
 
     # TODO: This cmdline should be tunable
-    with open(os.devnull, "w") as fnull:
-        resource_definition = cluster.resource_definition
-        s_pjob = batch.run(cluster,
-                           ['-Q', '-X', '--resv-port'],
-                           ['pcocc'] +
-                           build_verbose_opt() +
-                           [ 'internal', 'run'] +
-                           ckpt_opt)
+    resource_definition = cluster.resource_definition
+    s_pjob = batch.run(cluster,
+                       ['-Q', '-X', '--resv-port'],
+                       ['pcocc'] +
+                       build_verbose_opt() +
+                       [ 'internal', 'run'] +
+                       ckpt_opt)
     try:
         cluster.wait_host_config()
     except PcoccError as err:

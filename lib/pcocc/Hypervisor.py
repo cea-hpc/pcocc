@@ -526,10 +526,18 @@ username={3}@pcocc
                         "exec: lzop -dc %s" % (dest_mem_file)]
 
         # Basic machine definition
-        cmdline += ['-machine', 'type=pc,accel=kvm']
-        cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,vgamem_mb=16']
+        try:
+            # Check if the kvm is usable
+            f =  open('/dev/kvm', 'w+')
+            cmdline += ['-machine', 'type=q35,accel=kvm']
+            cmdline += ['-cpu', 'host']
+        except:
+            cmdline += ['-machine', 'type=q35']
+        else:
+            f.close()
+
         cmdline += ['-rtc', 'base=utc']
-        cmdline += ['-cpu', 'host']
+        cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,vgamem_mb=16']
 
         self._set_vm_state('temporary-disk',
                            'creating disk file',
@@ -562,8 +570,9 @@ username={3}@pcocc
                 cmdline += ['-device', 'virtio-blk-pci,'
                             'drive=bootdisk,addr=06.0']
             elif vm.disk_model == 'ide':
+                cmdline += ['-device', 'ich9-ahci,id=ahci,addr=06.0']
                 cmdline += ['-device', 'ide-hd,'
-                            'drive=bootdisk,bus=ide.0,unit=1']
+                            'drive=bootdisk,bus=ahci.0']
             else:
                 raise HypervisorError('Unsupported disk model: '
                                       + str(vm.disk_model))
@@ -600,7 +609,7 @@ username={3}@pcocc
                         i)]
 
         if not '-boot' in vm.custom_args:
-            cmdline += ['-boot', 'c']
+            cmdline += ['-boot', 'order=cd']
 
         # Memory
         # FIXME: Reserve 15% if total_memory for qemu

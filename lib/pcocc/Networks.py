@@ -52,6 +52,7 @@ patternProperties:
       - $ref: '#/definitions/ib'
       - $ref: '#/definitions/bridged'
       - $ref: '#/definitions/hostib'
+      - $ref: '#/definitions/genericpci'
 additionalProperties: false
 
 definitions:
@@ -196,7 +197,6 @@ definitions:
         required:
          - host-bridge
          - tap-prefix
-
     additionalProperties: false
 
   hostib:
@@ -213,8 +213,30 @@ definitions:
         additionalProperties: false
         required:
          - host-device
-
     additionalProperties: false
+
+  genericpci:
+    properties:
+      type:
+          enum:
+            - genericpci
+
+      settings:
+        type: object
+        properties:
+          host-device-addrs:
+           type: array
+           items:
+             type: string
+          host-driver:
+           type: string
+        additionalProperties: false
+        required:
+         - host-device-addrs
+         - host-driver
+    additionalProperties: false
+
+  additionalProperties: false
 """
 
 class NetworkSetupError(PcoccError):
@@ -245,8 +267,8 @@ class VNetworkConfig(dict):
             validator.validate(net_config)
         except jsonschema.exceptions.ValidationError as err:
             message = "failed to parse configuration for network {0} \n\n".format(err.path[0])
-            best_error = jsonschema.exceptions.best_match(validator.iter_errors(net_config))
-            message += str(best_error)
+            best_error = max(err.context, key=jsonschema.exceptions.by_relevance(frozenset(['oneOf', 'anyOf', 'enum'])))
+            message += str(best_error.message)
 
             raise InvalidConfigurationError(message)
 
@@ -272,7 +294,8 @@ class VNetwork(object):
             return VBridgedNetwork(name, settings)
         if ntype == "hostib":
             return VHostIBNetwork(name, settings)
-
+        if ntype == "genericpci":
+            return VGenericPCI(name, settings)
 
         assert 0, "Unknown network type: " + ntype
 
@@ -678,6 +701,96 @@ class VPVNetwork(VNetwork):
             hw_suffix[i:i+2] for i in xrange(0, len(hw_suffix), 2))
 
         return hw_prefix + ':' + hw_suffix
+
+class VGenericPCI(VNetwork):
+    def __init__(self, name, settings):
+        super(VGenericPCI, self).__init__(name)
+        self._type = "genericpci"
+        self._device_addrs = settings["host-device-addrs"]
+        self._host_driver = settings["host-driver"]
+
+    def init_node(self):
+        for dev_addr in self._device_addrs:
+            pci_enable_driver(dev_addr, self._host_driver)
+            pci_enable_driver(dev_addr, 'vfio-pci')
+
+    def cleanup_node(self):
+        deleted_devs = []
+        bound_devices = pci_list_vfio_devices()
+        for dev_addr in bound_devices:
+            if dev_addr in self._device_addrs:
+                pci_unbind_vfio(dev_addr, self._host_driver)
+                deleted_devs += dev_addr
+
+        if len(deleted_devs) > 0:
+            logging.warning(
+                'Deleted {0} leftover PCI devices of type {1}'.format(
+                    len(deleted_devs), self.name))
+
+    def alloc_node_resources(self, cluster):
+        batch = Config().batch
+        net_res = {}
+
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            try:
+                bound_devices = pci_list_vfio_devices()
+                for dev_addr in self._device_addrs:
+                    if dev_addr not in bound_devices:
+                        break
+                else:
+                    raise NetworkSetupError('unable to find a free '
+                                            'PCI device of type {1}'.format(self.name))
+
+
+                pci_bind_vfio(dev_addr, batch.batchuser)
+                vm_label = self._vm_res_label(vm)
+                net_res[vm_label] = {'dev_addr': dev_addr}
+            except Exception as e:
+                self.dump_resources(net_res)
+                raise
+
+        self.dump_resources(net_res)
+
+    def free_node_resources(self, cluster):
+        net_res = None
+        batch = Config().batch
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            if not net_res:
+                net_res = self.load_resources()
+
+            vm_label = self._vm_res_label(vm)
+            dev_addr = net_res[vm_label]['dev_addr']
+
+            pci_unbind_vfio(dev_addr, self._host_driver)
+
+    def load_node_resources(self, cluster):
+        net_res = None
+        for vm in cluster.vms:
+            if not vm.is_on_node():
+                continue
+
+            if not self.name in vm.networks:
+                continue
+
+            if not net_res:
+                net_res = self.load_resources()
+
+            vm_label = self._vm_res_label(vm)
+            vm.add_vfio_if(self.name,
+                           net_res[vm_label]['dev_addr'])
+
 
 class VNATNetwork(VNetwork):
     def __init__(self, name, settings):
@@ -1217,19 +1330,19 @@ class VHostIBNetwork(VNetwork):
 
             try:
                 device_name = self._device_name
-                vf_name = find_free_vf(device_name)
+                vf_addr = find_free_vf(device_name)
 
-                vf_bind_vfio(vf_name, batch.batchuser)
+                pci_bind_vfio(vf_addr, batch.batchuser)
                 if (self._dev_vf_type == VFType.MLX4):
                     vf_allow_host_pkeys(device_name,
-                                        vf_name)
+                                        vf_addr)
                 else:
-                    vf_set_guid(device_name, vf_name,
+                    vf_set_guid(device_name, vf_addr,
                                 port_guid,
                                 node_guid)
 
                 vm_label = self._vm_res_label(vm)
-                net_res[vm_label] = {'vf_name': vf_name}
+                net_res[vm_label] = {'vf_addr': vf_addr}
             except Exception as e:
                 self.dump_resources(net_res)
                 raise
@@ -1252,13 +1365,13 @@ class VHostIBNetwork(VNetwork):
             vm_label = self._vm_res_label(vm)
 
             device_name = self._device_name
-            vf_name = net_res[vm_label]['vf_name']
+            vf_addr = net_res[vm_label]['vf_addr']
 
-            vf_unbind_vfio(vf_name)
+            vf_unbind_vfio(vf_addr)
             if (self._dev_vf_type == VFType.MLX4):
-                vf_clear_pkeys(device_name, vf_name)
+                vf_clear_pkeys(device_name, vf_addr)
             else:
-                vf_unset_guid(device_name, vf_name)
+                vf_unset_guid(device_name, vf_addr)
 
 
     def free_node_resources(self, cluster):
@@ -1278,7 +1391,7 @@ class VHostIBNetwork(VNetwork):
 
             vm_label = self._vm_res_label(vm)
             vm.add_vfio_if(self.name,
-                           net_res[vm_label]['vf_name'])
+                           net_res[vm_label]['vf_addr'])
 
 class VIBNetwork(VHostIBNetwork):
     def __init__(self, name, settings):
@@ -1391,14 +1504,14 @@ class VIBNetwork(VHostIBNetwork):
         for vm in net_vms:
             try:
                 device_name = self._device_name
-                vf_name = find_free_vf(device_name)
-                vf_bind_vfio(vf_name, batch.batchuser)
+                vf_addr = find_free_vf(device_name)
+                pci_bind_vfio(vf_addr, batch.batchuser)
 
                 if (self._dev_vf_type == VFType.MLX4):
                     # We may have to retry if opensm is slow to propagate PKeys
                     for i in range(5):
                         try:
-                            vf_set_pkey(device_name, vf_name, my_pkey)
+                            vf_set_pkey(device_name, vf_addr, my_pkey)
                             break
                         except NetworkSetupError:
                             if i == 4:
@@ -1407,12 +1520,12 @@ class VIBNetwork(VHostIBNetwork):
                             time.sleep(1 + i*2)
                             pass
                 else:
-                    vf_set_guid(device_name, vf_name,
+                    vf_set_guid(device_name, vf_addr,
                                 vm_get_guid(vm, my_pkey),
                                 vm_get_node_guid(vm, my_pkey))
 
                 vm_label = self._vm_res_label(vm)
-                net_res[vm_label] = {'vf_name': vf_name}
+                net_res[vm_label] = {'vf_addr': vf_addr}
             except Exception as e:
                 self.dump_resources(net_res)
                 raise
@@ -1783,8 +1896,9 @@ class VFType:
     MLX4 = 1
     MLX5 = 2
 
-def vf_enable_driver(device_name, driver_name):
-    device_path = "/sys/class/infiniband/%s/device/virtfn0" % (device_name)
+
+def pci_enable_driver(dev_addr, driver_name):
+    device_path = os.path.join("/sys/bus/pci/devices/", dev_addr)
     driver_path = os.path.join("/sys/bus/pci/drivers", driver_name, 'new_id')
 
     with open(os.path.join(device_path, 'vendor'), 'r') as f:
@@ -1796,6 +1910,14 @@ def vf_enable_driver(device_name, driver_name):
     with open(driver_path, 'w') as f:
         f.write('%s %s' % (vendor_id, device_id))
 
+def pci_list_vfio_devices():
+    return os.listdir("/sys/bus/pci/drivers/vfio-pci")
+
+def vf_enable_driver(device_name, driver_name):
+    device_path = "/sys/class/infiniband/%s/device/virtfn0" % (device_name)
+    dev_addr = os.path.basename(os.readlink(device_path))
+    pci_enable_driver(dev_addr, driver_name)
+
 def find_free_vf(device_name):
     return _perform_on_vfs(device_name, 'find')
 
@@ -1804,7 +1926,7 @@ def cleanup_all_vfs(device_name):
 
 def _perform_on_vfs(device_name, action, *args):
     device_path = "/sys/class/infiniband/%s/device" % (device_name)
-    bound_devices = os.listdir("/sys/bus/pci/drivers/vfio-pci")
+    bound_devices = pci_list_vfio_devices()
 
     vf_list = []
     for virtfn in os.listdir(device_path):
@@ -1815,15 +1937,15 @@ def _perform_on_vfs(device_name, action, *args):
 
         vf_id = m.group(1)
 
-        vf_name = os.path.basename(os.readlink(
+        vf_addr = os.path.basename(os.readlink(
             os.path.join(device_path, virtfn)))
 
-        if action == 'find' and vf_name not in bound_devices:
-            return vf_name
-        elif action == 'cleanup' and vf_name in bound_devices:
-            vf_unbind_vfio(vf_name)
-            vf_list.append(vf_name)
-        elif action == 'getid' and vf_name == args[0]:
+        if action == 'find' and vf_addr not in bound_devices:
+            return vf_addr
+        elif action == 'cleanup' and vf_addr in bound_devices:
+            pci_unbind_vfio(vf_addr)
+            vf_list.append(vf_addr)
+        elif action == 'getid' and vf_addr == args[0]:
             return int(vf_id)
 
 
@@ -1833,20 +1955,20 @@ def _perform_on_vfs(device_name, action, *args):
     elif action=='cleanup':
         return vf_list
 
-def vf_find_iommu_group(vf_name):
-    iommu_group = '/sys/bus/pci/drivers/vfio-pci/%s/iommu_group' % vf_name
+def pci_find_iommu_group(dev_addr):
+    iommu_group = '/sys/bus/pci/drivers/vfio-pci/%s/iommu_group' % dev_addr
     iommu_group = os.path.basename(os.readlink(iommu_group))
 
     return iommu_group
 
-def vf_bind_vfio(vf_name, batch_user):
-    with open('/sys/bus/pci/devices/{0}/driver/unbind'.format(vf_name), 'w') as f:
-            f.write(vf_name)
+def pci_bind_vfio(dev_addr, batch_user):
+    with open('/sys/bus/pci/devices/{0}/driver/unbind'.format(dev_addr), 'w') as f:
+            f.write(dev_addr)
 
     with open('/sys/bus/pci/drivers/vfio-pci/bind', 'w') as f:
-        f.write(vf_name)
+        f.write(dev_addr)
 
-    iommu_group = vf_find_iommu_group(vf_name)
+    iommu_group = pci_find_iommu_group(dev_addr)
 
     uid = pwd.getpwnam(batch_user).pw_uid
     # FIXME: This seems to be required to prevent a race
@@ -1854,12 +1976,12 @@ def vf_bind_vfio(vf_name, batch_user):
     time.sleep(0.1)
     os.chown(os.path.join('/dev/vfio/', iommu_group), uid, -1)
 
-def vf_unbind_vfio(vf_name):
+def pci_unbind_vfio(dev_addr, host_driver='pci-stub'):
     with open('/sys/bus/pci/drivers/vfio-pci/unbind', 'w') as f:
-        f.write(vf_name)
+        f.write(dev_addr)
 
-    with open('/sys/bus/pci/drivers/pci-stub/bind', 'w') as f:
-        f.write(vf_name)
+    with open('/sys/bus/pci/drivers/{0}/bind'.format(host_driver), 'w') as f:
+        f.write(dev_addr)
 
 def find_pkey_idx(device_name, pkey_value):
     pkey_idx_path = "/sys/class/infiniband/%s/ports/1/pkeys" % (
@@ -1879,14 +2001,14 @@ def find_pkey_idx(device_name, pkey_value):
     raise NetworkSetupError('pkey %s not found on device %s' % (
         hex(pkey_value), device_name))
 
-def vf_allow_host_pkeys(device_name, vf_name):
+def vf_allow_host_pkeys(device_name, vf_addr):
     device_path = "/sys/class/infiniband/{0}".format(device_name)
     num_ports = len(os.listdir(os.path.join(device_path, "ports")))
 
     for port in xrange(1, num_ports+1):
         pkeys_path = os.path.join(device_path, "ports", str(port),
                                   "pkeys")
-        pkey_idx_path = os.path.join(device_path, "iov", vf_name,
+        pkey_idx_path = os.path.join(device_path, "iov", vf_addr,
                                      "ports", str(port), "pkey_idx")
 
         idx = 0
@@ -1903,12 +2025,12 @@ def vf_allow_host_pkeys(device_name, vf_name):
                         f.write(pkey_idx)
                     idx+=1
 
-def vf_clear_pkeys(device_name, vf_name):
+def vf_clear_pkeys(device_name, vf_addr):
     device_path = '/sys/class/infiniband/{0}'.format(device_name)
     num_ports = len(os.listdir(os.path.join(device_path, 'ports')))
 
     for port in xrange(1, num_ports+1):
-        pkey_idx_path = os.path.join(device_path, 'iov', vf_name,
+        pkey_idx_path = os.path.join(device_path, 'iov', vf_addr,
                                      'ports', str(port), 'pkey_idx')
 
         for pkey_idx in os.listdir(pkey_idx_path):
@@ -1916,9 +2038,9 @@ def vf_clear_pkeys(device_name, vf_name):
             with open(this_pkey_idx_path, 'w') as f:
                 f.write('none')
 
-def vf_set_pkey(device_name, vf_name, pkey_value):
+def vf_set_pkey(device_name, vf_addr, pkey_value):
     pkey_idx_path = "/sys/class/infiniband/%s/iov/%s/ports/1/pkey_idx" % (
-        device_name, vf_name)
+        device_name, vf_addr)
 
     user_pkey_idx = find_pkey_idx(device_name, pkey_value)
     with open(os.path.join(pkey_idx_path, '0'), 'w') as f:
@@ -1928,9 +2050,9 @@ def vf_set_pkey(device_name, vf_name, pkey_value):
     with open(os.path.join(pkey_idx_path, '1'), 'w') as f:
         f.write(def_pkey_idx)
 
-def vf_unset_pkey(device_name, vf_name):
+def vf_unset_pkey(device_name, vf_addr):
     pkey_idx_path = "/sys/class/infiniband/%s/iov/%s/ports/1/pkey_idx" % (
-        device_name, vf_name)
+        device_name, vf_addr)
 
     with open(os.path.join(pkey_idx_path, '0'), 'w') as f:
         f.write('none')
@@ -1938,19 +2060,19 @@ def vf_unset_pkey(device_name, vf_name):
     with open(os.path.join(pkey_idx_path, '1'), 'w') as f:
         f.write('none')
 
-def vf_id_from_name(device, vf_name):
-    return _perform_on_vfs(device, 'getid', vf_name)
+def vf_id_from_addr(device, vf_addr):
+    return _perform_on_vfs(device, 'getid', vf_addr)
 
-def vf_unset_guid(device_name, vf_name):
-    vf_id = vf_id_from_name(device_name, vf_name)
-    sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(device_name,vf_id)
+def vf_unset_guid(device_name, vf_addr):
+    vf_id = vf_id_from_addr(device_name, vf_addr)
+    sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(device_name, vf_id)
 
     with open(os.path.join(sriov_path, 'policy'), 'w') as f:
         f.write('Down\n')
 
-def vf_set_guid(device_name, vf_name, guid, node_guid):
-    vf_id = vf_id_from_name(device_name, vf_name)
-    sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(device_name,vf_id)
+def vf_set_guid(device_name, vf_addr, guid, node_guid):
+    vf_id = vf_id_from_addr(device_name, vf_addr)
+    sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(device_name, vf_id)
 
     with open(os.path.join(sriov_path, 'policy'), 'w') as f:
         f.write('Follow\n')
@@ -1960,7 +2082,6 @@ def vf_set_guid(device_name, vf_name, guid, node_guid):
 
     with open(os.path.join(sriov_path, 'port'), 'w') as f:
         f.write(guid_hex_to_col(guid))
-
 
 def vm_get_guid(vm, pkey_id):
     pkey_high = pkey_id / 0x100

@@ -266,9 +266,19 @@ class VNetworkConfig(dict):
             validator = DefaultValidatingDraft4Validator(yaml.safe_load(network_config_schema))
             validator.validate(net_config)
         except jsonschema.exceptions.ValidationError as err:
-            message = "failed to parse configuration for network {0} \n\n".format(err.path[0])
-            best_error = max(err.context, key=jsonschema.exceptions.by_relevance(frozenset(['oneOf', 'anyOf', 'enum'])))
-            message += str(best_error.message)
+            message = "failed to parse configuration for network {0} \n".format(err.path[0])
+            sortfunc = jsonschema.exceptions.by_relevance(frozenset(['oneOf', 'anyOf', 'enum']))
+            best_errors = sorted(err.context, key=sortfunc, reverse=True)
+            for e in best_errors:
+                if (len(e.schema_path) == 4 and e.schema_path[1] == 'properties' and
+                    e.schema_path[2] ==  'type' and e.schema_path[3] == 'enum'):
+                    continue
+                else:
+                    message += str(e.message)
+                    break
+            else:
+                for e in best_errors:
+                    message += '\n' + str(e.message)
 
             raise InvalidConfigurationError(message)
 

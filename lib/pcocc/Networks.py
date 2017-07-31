@@ -1241,16 +1241,16 @@ class VNATNetwork(VNetwork):
             host_port = int(resources['host_port'])
             ipt_delete_rule_idemp("-d %s/32 -p tcp -m tcp"
                                   " --dport %s -j DNAT "
-                                  "--to-destination %s:22"
+                                  "--to-destination %s:%d"
                                   % (resolve_host(socket.gethostname()),
-                                     host_port, vm_nat_ip),
+                                     host_port, vm_nat_ip, self._vm_rnat_port),
                                   "PREROUTING", "nat")
 
             ipt_delete_rule_idemp("-d %s/32 -p tcp -m tcp"
                                   " --dport %s -j DNAT "
-                                  "--to-destination %s:22"
+                                  "--to-destination %s:%d"
                                   % (resolve_host(socket.gethostname()),
-                                     host_port, vm_nat_ip),
+                                     host_port, vm_nat_ip, self._vm_rnat_port),
                                   "OUTPUT", "nat")
 
 

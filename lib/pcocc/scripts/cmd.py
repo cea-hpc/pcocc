@@ -1041,7 +1041,7 @@ def pcocc_exec(index, jobid, jobname, user, script, cmd):
 
         if script:
             basename = os.path.basename(cmd[0])
-            cluster.vms[0].put_file(cmd[0],
+            cluster.vms[index].put_file(cmd[0],
                                     '/tmp/%s' % basename)
             cmd = ['bash', '/tmp/%s' % basename]
 

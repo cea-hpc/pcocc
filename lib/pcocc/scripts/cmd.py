@@ -173,11 +173,9 @@ def find_vm_ssh_opt(opts, regex, s_opts, v_opts, first_arg_only=True):
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
-@click.option('--user',
-              help='Select cluster among jobs of the specified user')
 @click.option('-p', '--print_opts', is_flag=True, help='Print remote-viewer options')
 @click.argument('vm', nargs=1, default='vm0')
-def pcocc_display(jobid, jobname, user, print_opts, vm):
+def pcocc_display(jobid, jobname, print_opts, vm):
     """Display the graphical output of a VM
 
     This requires the VM to have a remote display method defined in it's template.
@@ -187,8 +185,7 @@ def pcocc_display(jobid, jobname, user, print_opts, vm):
            pcocc display vm0
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc',
-                             batchuser=user)
+        config = load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]

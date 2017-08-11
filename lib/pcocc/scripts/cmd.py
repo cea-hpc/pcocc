@@ -114,7 +114,9 @@ def display_manpage(page):
         raise click.UsageError("No such help topic '" + page + "'\n"
                                "       use 'pcocc help' to list topics")
 
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     p.communicate()
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 @cli.command(name='help', short_help='Display man pages for a given subcommand')
 @click.argument('command', default='pcocc')

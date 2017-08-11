@@ -11,9 +11,9 @@ pcocc ckpt [OPTIONS] CKPT_DIR
 Description
 ***********
 
-Checkpoint the current state of a cluster. Both the disk image and memory of all VMs of the cluster are saved and the cluster is terminated. It is then possible to restart from this state using the \-\-restart-ckpt option of the alloc and batch commands.
+Checkpoint the current state of a cluster. Both the disk image and memory of all VMs of the cluster are saved and the cluster is terminated. It is then possible to restart from this state using the *\-\-restart-ckpt* option of the alloc and batch commands.
 
-CKPT_DIR should not already exist unless -F is specified. In that case, make sure you're not overwriting the checkpoint from which the cluster was restarted.
+**CKPT_DIR** should not already exist unless *-F* is specified. In that case, make sure you're not overwriting the checkpoint from which the cluster was restarted.
 
 .. warning::
     Qemu does not support checkpointing all types of virtual devices. In particular, it is not possible to checkpoint a VM with 9p exports mounted or attached to host devices such as an Infiniband virtual function.
@@ -50,4 +50,4 @@ To restore a virtual cluster, see :ref:`pcocc-alloc(1)<alloc>` or :ref:`pcocc-ba
 See also
 ********
 
-:ref:`pcocc-alloc(1)<alloc>`, :ref:`pcocc-batch(1)<batch>`, :ref:`pcocc-dump(1)<dump>`
+:ref:`pcocc-alloc(1)<alloc>`, :ref:`pcocc-batch(1)<batch>`, :ref:`pcocc-save(1)<save>`, :ref:`pcocc-dump(1)<dump>`

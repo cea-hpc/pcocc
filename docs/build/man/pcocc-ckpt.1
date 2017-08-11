@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-CKPT" "1" "Aug 10, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-CKPT" "1" "Aug 11, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-ckpt \- Checkpoint a virtual cluster
 .
@@ -35,9 +35,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 pcocc ckpt [OPTIONS] CKPT_DIR
 .SH DESCRIPTION
 .sp
-Checkpoint the current state of a cluster. Both the disk image and memory of all VMs of the cluster are saved and the cluster is terminated. It is then possible to restart from this state using the \-\-restart\-ckpt option of the alloc and batch commands.
+Checkpoint the current state of a cluster. Both the disk image and memory of all VMs of the cluster are saved and the cluster is terminated. It is then possible to restart from this state using the \fI\-\-restart\-ckpt\fP option of the alloc and batch commands.
 .sp
-CKPT_DIR should not already exist unless \-F is specified. In that case, make sure you\(aqre not overwriting the checkpoint from which the cluster was restarted.
+\fBCKPT_DIR\fP should not already exist unless \fI\-F\fP is specified. In that case, make sure you\(aqre not overwriting the checkpoint from which the cluster was restarted.
 .sp
 \fBWARNING:\fP
 .INDENT 0.0
@@ -94,7 +94,7 @@ disk\-vm0  disk\-vm1  memory\-vm0  memory\-vm1
 To restore a virtual cluster, see pcocc\-alloc(1) or pcocc\-batch(1)\&.
 .SH SEE ALSO
 .sp
-pcocc\-alloc(1), pcocc\-batch(1), pcocc\-dump(1)
+pcocc\-alloc(1), pcocc\-batch(1), pcocc\-save(1), pcocc\-dump(1)
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

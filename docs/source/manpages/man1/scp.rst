@@ -38,7 +38,7 @@ To copy a directory to vm0 of the job named *centos*::
   pcocc scp -J centos -r dir vm0:
 
 .. note::
-    As no user was specified to scp, it logs in as the current user on the host. Make sure it is defined in your VM.
+    By default, scp(1) uses the host username to log in. Depending on the VM configuration, it may be necessary to specify another username.
 
 To copy a file to vm1 of the default job as the demo user::
 
@@ -52,4 +52,4 @@ To copy a file from vm2 of the default job as root::
 See also
 ********
 
-:ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-nc(1)<nc>`, :ref:`pcocc-exec(1)<exec>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`, :ref:`pcocc-9pmount-tutorial.yaml(7)<9pmount>`
+scp(1), :ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-nc(1)<nc>`, :ref:`pcocc-exec(1)<exec>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`, :ref:`pcocc-9pmount-tutorial.yaml(7)<9pmount>`

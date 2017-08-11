@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-CONSOLE" "1" "Aug 10, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-CONSOLE" "1" "Aug 11, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-console \- Connect to a VM console
 .
@@ -76,11 +76,17 @@ pcocc console vm3
 .fi
 .UNINDENT
 .UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
 .INDENT 0.0
 .IP \(bu 2
-If you log while the VM is booting, you should see the startup messages appear in the interactive console. In this case, wait until the login prompt appears.
+If you connect while the VM is booting, you should see the startup messages appear in the interactive console. In this case, wait until the login prompt appears.
 .IP \(bu 2
 If the VM has already booted, you may need to push enter a few times for the login prompt to appear, as only new console output is displayed.
+.UNINDENT
+.UNINDENT
 .UNINDENT
 .SS See the console log
 .sp

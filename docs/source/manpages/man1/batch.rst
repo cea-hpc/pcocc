@@ -12,13 +12,11 @@ pcocc batch [OPTIONS] [BATCH_OPTIONS]... CLUSTER_DEFINITION
 Description
 ***********
 
-Instantiate or restore a virtual cluster in batch mode. A cluster definition is expressed as a list of templates and counts e.g.: pcocc batch tpl1:6,tpl2:2 instantiates a cluster with 6 VMs from template tpl1 and 2 VMs from template tpl2
+Instantiate or restore a virtual cluster in batch mode. A cluster definition is expressed as a list of templates and counts. For example, pcocc batch *tpl1:6,tpl2:2* instantiates a cluster with 6 VMs from template *tpl1* and 2 VMs from template *tpl2*. Resources  are relinquished when the VMs are powered off or when the batch script exits. Any data stored on ephemeral disks is lost after the job completes.
 
-Batch options are passed on to the underlying batch manager.
+Batch options are passed on to the underlying batch manager (see sbatch(1)). By default batch jobs are submitted with the name *pcocc* unless specified otherwise in the batch options. pcocc commands which target a virtual cluster look for a job named *pcocc* and will select it if there is only one match. Otherwise, the id or name of the batch job hosting the cluster must be specified.
 
-By default batch jobs are submitted with the name *pcocc* unless specified otherwise in the batch options
-
-pcocc commands which target a virtual cluster look for a job named *pcocc* and will select it if there is only one match. Otherwise, the id or name of the batch job hosting the cluster must be specified.
+It is possible to execute a script on the first physical compute node with the *-E* option or on the first VM with the *-b* option. The latter requires that the pcocc guest agent is running in the VM.  The cluster will be terminated once the script exits. As in a `pcocc-alloc(1)<alloc>` interactive shell, pcocc commands launched within a host script implicitely target the current pcocc cluster.
 
 Options
 *******

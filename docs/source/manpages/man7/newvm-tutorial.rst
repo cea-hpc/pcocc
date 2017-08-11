@@ -149,7 +149,7 @@ For a simple cluster, we don't want to deploy a DHCP or DNS server to manage add
 .. note::
     The MTU is set to 1450 compared to 1500 on the host network to account for encapsulation headers. More entries in /etc/hosts could be defined to account for more VMs.
 
-Moreover, we we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest in a network indepenant and OSagnostic fashion. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:`pcocc-save(1)<save>` command. We also make sure that the eth1 interface (corresponding to the private network) is up. Append the following content to your cloud-config file::
+Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest in a network indepenant and OS agnostic fashion. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:`pcocc-save(1)<save>` command. We also make sure that the eth1 interface (corresponding to the private network) is up. Append the following content to your cloud-config file::
 
     packages:
         - qemu-guest-agent
@@ -232,9 +232,9 @@ You can also look back at the serial console log with::
     pcocc console -l
 
 .. note::
-    The console is very helpful to follow the VM boot and cloud-init progress. Installing packages can take some time and in this example, the Qemu guest agent will only be available once the configuration process is complete. If you run into any issue, check the serial console log for error messages and make sure your YAML syntax is correct.
+    The console is very helpful to follow the VM boot and cloud-init progress. Installing packages can take some time, and in this example, the Qemu guest agent will only be available once the configuration process is complete. If you run into any issue, check the serial console log for error messages and make sure your YAML syntax is correct.
 
 Saving VM images
 ****************
 
-Instead of configuring your VM with cloud-init each time you instantiate them, you may want to create template from pre-configured images that already contain the necessary packages, configuration files, user defintions etc. pcocc allows you to create new images from a running VM with the ref:`pcocc-save(1)<save>` command.
+Instead of configuring your VMs with cloud-init each time you instantiate them, you may want to create templates from pre-configured images which already contain the necessary packages, configuration files, user defintions etc. pcocc allows you to create new images from a running VM with the ref:`pcocc-save(1)<save>` command.

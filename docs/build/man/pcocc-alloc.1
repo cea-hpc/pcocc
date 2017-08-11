@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-ALLOC" "1" "Aug 10, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-ALLOC" "1" "Aug 11, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-alloc \- Instantiate or restore a virtual cluster (interactive mode)
 .
@@ -35,15 +35,13 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 pcocc alloc [OPTIONS] [BATCH_OPTIONS]... CLUSTER_DEFINITION
 .SH DESCRITION
 .sp
-Instantiate or restore a virtual cluster in interactive mode. A cluster definition is expressed as a list of templates and counts e.g.: pcocc alloc tpl1:6,tpl2:2 instantiates a cluster with 6 VMs from template tpl1 and 2 VMs from template tpl2
+Instantiate or restore a virtual cluster in interactive mode. A cluster definition is expressed as a list of templates and counts. For example, pcocc alloc \fItpl1:6,tpl2:2\fP instantiates a cluster with 6 VMs from template \fItpl1\fP and 2 VMs from template \fItpl2\fP\&.
 .sp
-Batch options are passed on to the underlying batch manager.
+By default, an interactive shell is launched which allows to easily interact with the virtual cluster as all pcocc commands launched from the shell implicitly target the related virtual cluster. Resources are relinquished when either the VMs are powered off or the interactive shell exits (see below). Any data stored on ephemeral disks is lost after the allocation completes.
 .sp
-By default allocations are created with the name \fIpcocc\fP unless specified otherwise in the batch options.
+Batch options are passed on to the underlying batch manager (see salloc(1)). By default allocations are created with the name \fIpcocc\fP unless specified otherwise in the batch options. From outside the interactive shell, pcocc commands look for a job named \fIpcocc\fP and will target it if there is only one match. Otherwise, the id or name of the allocation hosting the cluster must be specified.
 .sp
-In interactive mode, a shell is launched which allows to easily interact with the virtual cluster as all pcocc commands launched from the shell will implicitly target this cluster. The virtual cluster will also be automatically terminated when the shell exits.
-.sp
-From outside this shell, pcocc commands look for a job named \fIpcocc\fP and will target it if there is only one match. Otherwise, the id or name of the allocation hosting the cluster must be specified.
+Instead of launching an interactive shell, it is possible to execute a script on the front\-end node with the \fI\-E\fP option. The cluster will be terminated once the script exits. As in the in interactive shell, pcocc commands launched within the script implicitely target the current cluster.
 .SH OPTIONS
 .INDENT 0.0
 .INDENT 3.5

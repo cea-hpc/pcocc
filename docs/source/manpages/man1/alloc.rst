@@ -11,16 +11,13 @@ pcocc alloc [OPTIONS] [BATCH_OPTIONS]... CLUSTER_DEFINITION
 Descrition
 ***********
 
-Instantiate or restore a virtual cluster in interactive mode. A cluster definition is expressed as a list of templates and counts e.g.: pcocc alloc tpl1:6,tpl2:2 instantiates a cluster with 6 VMs from template tpl1 and 2 VMs from template tpl2
+Instantiate or restore a virtual cluster in interactive mode. A cluster definition is expressed as a list of templates and counts. For example, pcocc alloc *tpl1:6,tpl2:2* instantiates a cluster with 6 VMs from template *tpl1* and 2 VMs from template *tpl2*.
 
-Batch options are passed on to the underlying batch manager.
+By default, an interactive shell is launched which allows to easily interact with the virtual cluster as all pcocc commands launched from the shell implicitly target the related virtual cluster. Resources are relinquished when either the VMs are powered off or the interactive shell exits (see below). Any data stored on ephemeral disks is lost after the allocation completes.
 
-By default allocations are created with the name *pcocc* unless specified otherwise in the batch options.
+Batch options are passed on to the underlying batch manager (see salloc(1)). By default allocations are created with the name *pcocc* unless specified otherwise in the batch options. From outside the interactive shell, pcocc commands look for a job named *pcocc* and will target it if there is only one match. Otherwise, the id or name of the allocation hosting the cluster must be specified.
 
-In interactive mode, a shell is launched which allows to easily interact with the virtual cluster as all pcocc commands launched from the shell will implicitly target this cluster. The virtual cluster will also be automatically terminated when the shell exits.
-
-From outside this shell, pcocc commands look for a job named *pcocc* and will target it if there is only one match. Otherwise, the id or name of the allocation hosting the cluster must be specified.
-
+Instead of launching an interactive shell, it is possible to execute a script on the front-end node with the *-E* option. The cluster will be terminated once the script exits. As in the in interactive shell, pcocc commands launched within the script implicitely target the current cluster.
 
 Options
 *******

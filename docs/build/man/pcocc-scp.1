@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-SCP" "1" "Aug 10, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-SCP" "1" "Aug 11, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-scp \- Transfer files to a VM via scp
 .
@@ -79,7 +79,7 @@ pcocc scp \-J centos \-r dir vm0:
 \fBNOTE:\fP
 .INDENT 0.0
 .INDENT 3.5
-As no user was specified to scp, it logs in as the current user on the host. Make sure it is defined in your VM.
+By default, scp(1) uses the host username to log in. Depending on the VM configuration, it may be necessary to specify another username.
 .UNINDENT
 .UNINDENT
 .sp
@@ -108,7 +108,7 @@ pcocc scp root@vm2:~/data ./data
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-ssh(1), pcocc\-nc(1), pcocc\-exec(1), pcocc\-networks.yaml(5), pcocc\-9pmount\-tutorial.yaml(7)
+scp(1), pcocc\-ssh(1), pcocc\-nc(1), pcocc\-exec(1), pcocc\-networks.yaml(5), pcocc\-9pmount\-tutorial.yaml(7)
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

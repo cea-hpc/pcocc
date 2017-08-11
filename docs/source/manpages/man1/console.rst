@@ -41,8 +41,9 @@ To connect to vm3 console in the default job::
 
     pcocc console vm3
 
-* If you log while the VM is booting, you should see the startup messages appear in the interactive console. In this case, wait until the login prompt appears.
-* If the VM has already booted, you may need to push enter a few times for the login prompt to appear, as only new console output is displayed.
+.. note::
+  * If you connect while the VM is booting, you should see the startup messages appear in the interactive console. In this case, wait until the login prompt appears.
+  * If the VM has already booted, you may need to push enter a few times for the login prompt to appear, as only new console output is displayed.
 
 
 See the console log

@@ -39,8 +39,7 @@ import psutil
 from Backports import subprocess_check_output
 from Error import PcoccError, InvalidConfigurationError
 from Config import Config
-from Misc import DefaultValidatingDraft4Validator
-from Misc import do_free_key, do_alloc_key
+from Misc import DefaultValidatingDraft4Validator, IDAllocator
 
 network_config_schema = """
 type: object
@@ -480,6 +479,8 @@ class VPVNetwork(VNetwork):
         self._min_key = 1024
         self._max_key = 2 ** 16 - 1
         self._type = "pv"
+        self._ida = IDAllocator(self._get_type_key_path('key_alloc_state'),
+                                self._max_key - self._min_key + 1)
 
     def init_node(self):
         pass
@@ -509,34 +510,19 @@ class VPVNetwork(VNetwork):
             #No vm on node, nothing to do
             return
 
-        # Master allocates a pkey and broadcasts to the others
         if batch.node_rank == master:
             logging.info("Node is master for PV network {0}".format(
                     self.name))
+        try:
+            tun_id = self._min_key + self._ida.coll_alloc_one(
+                master,
+                '{0}_key'.format(self.name))
+        except PcoccError as e:
+            raise NetworkSetupError('{0}: {1}'.format(
+                self.name,
+                str(e)
+            ))
 
-            try:
-                tun_id = self._min_key + batch.atom_update_key(
-                    'global',
-                    self._get_type_key_path('key_alloc_state'),
-                    do_alloc_key,
-                    self._min_key,
-                    self._max_key)
-            except PcoccError as e:
-                raise NetworkSetupError('{0}: {1}'.format(
-                    self.name,
-                    str(e)
-                ))
-
-            batch.write_key(
-                'cluster',
-                self._get_net_key_path('key'),
-                tun_id)
-        else:
-            tun_id = int(batch.read_key(
-                'cluster',
-                self._get_net_key_path('key'),
-                blocking=True,
-                timeout=30))
 
         bridge_created = False
         for vm in cluster.vms:
@@ -648,11 +634,7 @@ class VPVNetwork(VNetwork):
         if master == Config().batch.node_rank:
             # Free tunnel key
             try:
-                Config().batch.atom_update_key(
-                    'global',
-                    self._get_type_key_path('key_alloc_state'),
-                    do_free_key,
-                    int(net_res['global']['tun_id']) - self._min_key)
+                self._ida.free_one(int(net_res['global']['tun_id']) - self._min_key)
             except PcoccError as e:
                 raise NetworkSetupError('{0}: {1}'.format(
                     self.name,
@@ -1416,6 +1398,9 @@ class VIBNetwork(VHostIBNetwork):
         self._opensm_partition_tpl = settings["opensm-partition-tpl"]
         self._opensm_daemon = settings["opensm-daemon"]
 
+        self._ida = IDAllocator(self._get_type_key_path('key_alloc_state'),
+                                self._max_pkey - self._min_pkey + 1)
+
     def get_license(self, cluster):
         if self._license_name:
             for vm in cluster.vms:
@@ -1451,28 +1436,13 @@ class VIBNetwork(VHostIBNetwork):
         if master:
             logging.info("Node is master for IB network {0}".format(
                     self.name))
-            try:
-                pkey_index = batch.atom_update_key(
-                    'global',
-                    self._get_net_key_path('pkey_alloc_state'),
-                    do_alloc_key,
-                    self._min_pkey,
-                    self._max_pkey)
-            except PcoccError as e:
-                raise NetworkSetupError('{0}: {1}'.format(
-                    self.name,
-                    str(e)
-                ))
-
-            batch.write_key(
-                'cluster',
-                self._get_net_key_path('pkey'),
-                pkey_index)
-        else:
-            pkey_index = int(batch.read_key('cluster',
-                                            self._get_net_key_path('pkey'),
-                                            blocking=True,
-                                            timeout=30))
+        try:
+                pkey_index = self._ida.alloc_one(master, '{0}_pkey'.format(self.name))
+        except PcoccError as e:
+            raise NetworkSetupError('{0}: {1}'.format(
+                self.name,
+                str(e)
+            ))
 
         my_pkey = self._min_pkey + pkey_index
         logging.info("Using PKey 0x{0:04x} for network {1}".format(
@@ -1555,11 +1525,7 @@ class VIBNetwork(VHostIBNetwork):
 
             # Free pkey
             try:
-                pkey_index = batch.atom_update_key(
-                    'global',
-                    self._get_net_key_path('pkey_alloc_state'),
-                    do_free_key,
-                    net_res['pkey_index'])
+                self._ida.free_one(net_res['pkey_index'])
             except PcoccError as e:
                 raise NetworkSetupError('{0}: {1}'.format(
                     self.name,

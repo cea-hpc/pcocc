@@ -38,7 +38,7 @@ class pcocc_install(install):
     def finalize_options(self):
         self.distribution.data_files.append((os.path.join(self.sysconfdir, 'pcocc'),
                                              glob.glob('confs/*.yaml')))
-        self.distribution.data_files.append((os.path.join(self.sysconfdir, 'pcocc/examples/'),
+        self.distribution.data_files.append((os.path.join(self.sysconfdir, 'pcocc/helpers/examples/'),
                                              glob.glob('helpers/examples/*')))
         self.distribution.data_files.append((os.path.join(self.mandir, 'man1'),
                                              glob.glob('docs/build/man/*.1')))

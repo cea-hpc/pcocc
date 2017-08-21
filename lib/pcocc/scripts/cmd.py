@@ -33,15 +33,15 @@ import re
 import fcntl
 import time
 import threading
-import click
 import pwd
 import logging
 import pcocc
+from pcocc.scripts import click
 from pcocc import PcoccError, Config, Cluster, Hypervisor
 from pcocc.Backports import total_seconds, subprocess_check_output
 from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
-from Shine.TextTable import TextTable
+from pcocc.scripts.Shine.TextTable import TextTable
 
 helperdir = '/etc/pcocc/helpers'
 
@@ -120,8 +120,8 @@ def display_manpage(page):
 
 @cli.command(name='help', short_help='Display man pages for a given subcommand')
 @click.argument('command', default='pcocc')
-def help(command):
-        display_manpage(command)
+def pcocc_help(command):
+    display_manpage(command)
 
 @cli.group(hidden=True)
 def internal():
@@ -149,6 +149,7 @@ def find_vm_rnat_port(cluster, index, port=22):
 def find_vm_ssh_opt(opts, regex, s_opts, v_opts, first_arg_only=True):
     """Parse ssh/scp arguments to find the remote vm hostname"""
     skip = False
+    i = 0 
     for i, opt in enumerate(opts):
         if skip:
             skip = False
@@ -380,7 +381,7 @@ def validate_save_dir(dest_dir, force):
     return dest_dir
 
 def vm_name_to_index(name):
-    match = re.match('vm(\d+)$', name)
+    match = re.match(r'vm(\d+)$', name)
     if not match:
         raise click.UsageError("invalid vm name " + name)
 
@@ -661,12 +662,12 @@ def pcocc_console(jobid, jobname, log, vm):
 
             if s_ctl.stdin in rdy[2] or s_ctl.stdin in rdy[0]:
                 sys.stderr.write('Connection closed\n')
-                break;
+                break
 
             # Exit if Ctrl-C is pressed repeatedly
             if sys.stdin in rdy[0]:
-                buffer = os.read(self_stdin, 1024)
-                if struct.unpack('b', buffer[0:1])[0] == 3:
+                buf = os.read(self_stdin, 1024)
+                if struct.unpack('b', buf[0:1])[0] == 3:
                     if total_seconds(datetime.datetime.now() - last_int) > 2:
                         last_int = datetime.datetime.now()
                         int_count = 1
@@ -677,7 +678,7 @@ def pcocc_console(jobid, jobname, log, vm):
                         print '\nDetaching ...'
                         break
 
-                s_ctl.stdin.write(buffer)
+                s_ctl.stdin.write(buf)
 
         # Restore terminal now to let user interrupt the wait if needed
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW,
@@ -777,7 +778,7 @@ def pcocc_batch(restart_ckpt, batch_script, host_script, batch_options,
             wrpfile.write(
 """
 TEMP_BATCH_SCRIPT="/tmp/pcocc.batch.$$"
-cat <<\PCOCC_BATCH_SCRIPT_EOF >> "${TEMP_BATCH_SCRIPT}"
+cat <<PCOCC_BATCH_SCRIPT_EOF >> "${TEMP_BATCH_SCRIPT}"
 """)
             wrpfile.write(batch_script.read())
             wrpfile.write(
@@ -791,7 +792,7 @@ chmod u+x "$TEMP_BATCH_SCRIPT"
             wrpfile.write(
 """
 TEMP_HOST_SCRIPT="/tmp/pcocc.host.$$"
-cat <<\PCOCC_HOST_SCRIPT_EOF >> "${TEMP_HOST_SCRIPT}"
+cat <<PCOCC_HOST_SCRIPT_EOF >> "${TEMP_HOST_SCRIPT}"
 """)
             wrpfile.write(host_script.read())
             wrpfile.write(

@@ -16,6 +16,7 @@
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
-from Config import Config
-from Cluster import Cluster
-from Error import PcoccError
+from pcocc.Config import Config
+from pcocc.Cluster import Cluster
+from pcocc.Error import PcoccError
+

@@ -30,25 +30,24 @@ import datetime
 import logging
 import jsonschema
 import etcd
+import etcd.auth
 import atexit
 import binascii
 import stat
-import time
 import psutil
 import signal
 import argparse
 import uuid
 import threading
 
-from etcd import auth
 from ClusterShell.NodeSet  import NodeSet, NodeSetException
 from ClusterShell.NodeSet  import RangeSet
 
-from Config import Config
-from Backports import subprocess_check_output
-from Error import PcoccError, InvalidConfigurationError
-from Misc import fake_signalfd, wait_or_term_child, CHILD_EXIT,\
-                 datetime_to_epoch, stop_threads
+from .Config import Config
+from .Backports import subprocess_check_output
+from .Error import PcoccError, InvalidConfigurationError
+from .Misc import fake_signalfd, wait_or_term_child
+from .Misc import CHILD_EXIT, datetime_to_epoch, stop_threads
 
 class BatchError(PcoccError):
     """Generic exception for Batch related issues
@@ -93,7 +92,7 @@ class KeyCredentialError(BatchError):
         super(KeyCredentialError, self).__init__(
             'Keystore authentication error: ' + error)
 
-"""Schema to validate batch.yaml config file"""
+# Schema to validate batch.yaml config file
 batch_config_schema = """
 type: object
 properties:
@@ -185,7 +184,7 @@ class BatchManager(object):
 
         self.proc_type = proc_type
 
-    def find_job_by_name(self, user, batchname):
+    def find_job_by_name(self, user, batchname, host=None):
         """Return a jobid matching a user and batchname
 
         There must be one and only one job matching the specified criteria
@@ -492,7 +491,6 @@ class EtcdManager(BatchManager):
                      etcd.EtcdKeyNotFound,
                      etcd.EtcdAlreadyExist ):
                 logging.debug("Retrying atomic update")
-                pass
 
     @_retry_on_cred_expiry
     def make_dir(self, key_type, key):
@@ -690,9 +688,8 @@ class EtcdManager(BatchManager):
             # Try to generate a password
             try:
                 os.mkdir(self.pcocc_state_dir)
-            except Exception as e:
+            except OSError as e:
                 logging.debug(str(e))
-                pass
 
             try:
                 self._etcd_password = binascii.b2a_hex(
@@ -701,38 +698,38 @@ class EtcdManager(BatchManager):
                             os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0400)
                 os.write(f, self._etcd_password)
                 os.close(f)
-            except Exception as e:
+            except OSError as e:
                 raise KeyCredentialError('unable to generate password: ' + str(e))
 
     def init_cluster_keys(self):
         if self._etcd_auth_type != 'none':
-          role = '{0}-pcocc'.format(self.batchuser)
-          logging.info('Initializing etcd role {0}'.format(role))
-          u = etcd.auth.EtcdRole(self.keyval_client, role)
-          u.grant('/pcocc/cluster/*', 'R')
-          u.grant('/pcocc/global/public/*', 'R')
-          u.grant('/pcocc/cluster/users/{0}/*'.format(self.batchuser), 'RW')
-          u.grant('/pcocc/global/users/{0}/*'.format(self.batchuser), 'RW')
-          u.write()
+            role = '{0}-pcocc'.format(self.batchuser)
+            logging.info('Initializing etcd role {0}'.format(role))
+            u = etcd.auth.EtcdRole(self.keyval_client, role)
+            u.grant('/pcocc/cluster/*', 'R')
+            u.grant('/pcocc/global/public/*', 'R')
+            u.grant('/pcocc/cluster/users/{0}/*'.format(self.batchuser), 'RW')
+            u.grant('/pcocc/global/users/{0}/*'.format(self.batchuser), 'RW')
+            u.write()
 
-          logging.info('Initializing etcd user {0}'.format(self.batchuser))
+            logging.info('Initializing etcd user {0}'.format(self.batchuser))
 
-          u = etcd.auth.EtcdUser(self.keyval_client, self.batchuser)
-          try:
-              u.read()
-          except etcd.EtcdKeyNotFound:
-              pass
-          u.roles = list(u.roles) + [role]
-          if self._etcd_auth_type == 'password':
-              requested_cred = os.environ.get('SPANK_PCOCC_REQUEST_CRED', '')
-              if (len(requested_cred) == 2 * ETCD_PASSWORD_BYTES
-                  and u.password != requested_cred):
-                  logging.info('Updating password with ' + requested_cred)
-                  u.password = requested_cred
+            u = etcd.auth.EtcdUser(self.keyval_client, self.batchuser)
+            try:
+                u.read()
+            except etcd.EtcdKeyNotFound:
+                pass
+            u.roles = list(u.roles) + [role]
+            if self._etcd_auth_type == 'password':
+                requested_cred = os.environ.get('SPANK_PCOCC_REQUEST_CRED', '')
+                if (len(requested_cred) == 2 * ETCD_PASSWORD_BYTES
+                    and u.password != requested_cred):
+                    logging.info('Updating password with ' + requested_cred)
+                    u.password = requested_cred
 
-          u.write()
+            u.write()
 
-          self.make_dir('cluster/user', '')
+            self.make_dir('cluster/user', '')
 
     def cleanup_cluster_keys(self):
         try:
@@ -748,7 +745,7 @@ class EtcdManager(BatchManager):
         """ Populate environment variables with batch related info to propagate """
         os.putenv('PCOCC_JOB_ID', str(self.batchid))
 
-"""Schema to validate the global pkey state in the key/value store"""
+# Schema to validate the global pkey state in the key/value store
 local_job_allocation_schema = """
 type: object
 properties:
@@ -882,7 +879,7 @@ class LocalManager(EtcdManager):
                 alloc_opt.ncpus))
         os.environ['PCOCC_LOCAL_CPUS_PER_VM'] = str(alloc_opt.ncpus)
 
-        if not re.match('[a-zA-Z_]\w*', alloc_opt.jobname):
+        if not re.match(r'[a-zA-Z_]\w*', alloc_opt.jobname):
             raise AllocationError('invalid job-name: {0}'.format(
                 alloc_opt.jobname))
         os.environ['PCOCC_LOCAL_JOB_NAME'] = alloc_opt.jobname
@@ -913,8 +910,9 @@ class LocalManager(EtcdManager):
             pass
 
         if not jobid_in_use is None:
-            logging.warning('Job name {0} is already in use by'.format(alloc_opt.jobname,
-                                                                       jobid_in_use))
+            logging.warning('Job name {0} is already in use by {1}'.format(
+                    alloc_opt.jobname,
+                    jobid_in_use))
 
         self._run_pid = 0
         self._shutdown = False
@@ -1204,8 +1202,8 @@ class LocalManager(EtcdManager):
 
     def _uuid_to_batchid(self, user, uuid, job_alloc_state=None):
         if job_alloc_state is None:
-          job_alloc_state = self.read_key('global',
-                                          self._job_allocation_key())
+            job_alloc_state = self.read_key('global',
+                                            self._job_allocation_key())
 
         job_alloc_state = self._validate_job_state(job_alloc_state)
 
@@ -1236,7 +1234,6 @@ class LocalManager(EtcdManager):
         try:
             req_uuid = uuid.UUID(req_uuid)
         except Exception:
-            raise
             raise AllocationError('Invalid uuid')
 
         self.batchid = self.atom_update_key(
@@ -1258,11 +1255,11 @@ class LocalManager(EtcdManager):
 
             os.makedirs(self._cpuset_cluster())
         except OSError as e:
-             if e == errno.EEXIST:
-                 pass
-             else:
-                 raise BatchError(
-                     'Unable to set requested cpuset: ' + str(e))
+            if e == errno.EEXIST:
+                pass
+            else:
+                raise BatchError(
+                    'Unable to set requested cpuset: ' + str(e))
 
         with open(os.path.join(self._cpuset_cluster(), 'tasks'), 'w') as f:
             f.write(str(caller_pid))
@@ -1300,36 +1297,36 @@ class LocalManager(EtcdManager):
                 raise AllocationError('Wrong host for job {0}'.format(self.batchid))
 
         if not remote:
-          caller_pid = psutil.Process(os.getppid()).ppid()
-          try:
-              f = open(os.path.join(self._cpuset_cluster(), 'tasks'))
-          except IOError:
-              logging.warning('No cpuset for job {0}'.format(self.batchid))
-              f = None
+            caller_pid = psutil.Process(os.getppid()).ppid()
+            try:
+                f = open(os.path.join(self._cpuset_cluster(), 'tasks'))
+            except IOError:
+                logging.warning('No cpuset for job {0}'.format(self.batchid))
+                f = None
 
-          if f:
-              pids = f.read().splitlines()
+            if f:
+                pids = f.read().splitlines()
 
-              # Only the allocation process is allowed to delete resources
-              # while there are still active processes
-              if pids and (str(caller_pid) not in pids) and not force:
-                  raise BatchError('There are still running processes for job '
-                                   '{0} ({1})'.format(
-                                       self.batchid, ' '.join(pids)))
+                # Only the allocation process is allowed to delete resources
+                # while there are still active processes
+                if pids and (str(caller_pid) not in pids) and not force:
+                    raise BatchError('There are still running processes for job '
+                                     '{0} ({1})'.format(
+                            self.batchid, ' '.join(pids)))
 
-              for pid in pids:
-                  pid = int(pid)
-                  try:
-                      if ((psutil.Process(pid).username() == self.batchuser) and
-                          pid != caller_pid and pid != os.getppid()
-                          and pid != os.getpid()):
-                          os.kill(pid, signal.SIGKILL)
-                  except psutil.NoSuchProcess:
-                      pass
-                  except OSError as e:
-                      pass
+                for pid in pids:
+                    pid = int(pid)
+                    try:
+                        if ((psutil.Process(pid).username() == self.batchuser) and
+                            pid != caller_pid and pid != os.getppid()
+                            and pid != os.getpid()):
+                            os.kill(pid, signal.SIGKILL)
+                    except psutil.NoSuchProcess:
+                        pass
+                    except OSError as e:
+                        pass
 
-              f.close()
+                f.close()
 
         try:
             job_record = self.atom_update_key(
@@ -1456,17 +1453,20 @@ class SlurmManager(EtcdManager):
             self._init_cluster_dir()
 
 
-    def find_job_by_name(self, user, batchname):
+    def find_job_by_name(self, user, batchname, host=None):
         """Return a jobid matching a user and batchname
 
         There must be one and only one job matching the specified criteria
 
         """
+
+        cmd = [ 'squeue' , '-n', batchname, '-u', user,
+                '-h', '-o', '%i' ]
+        if host:
+            cmd += ['-w', host]
+
         try:
-            batchid = subprocess_check_output(['squeue', '-n',
-                                               batchname,
-                                               '-u', user,
-                                               '-h', '-o', '%i'])
+            batchid = subprocess_check_output(cmd)
         except subprocess.CalledProcessError as err:
             raise InvalidJobError('no valid match for name '+ batchname)
 

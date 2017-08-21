@@ -18,11 +18,9 @@
 
 import os
 import string
-import re
 import logging
-
-from Error import PcoccError
-from Singleton import Singleton
+import pcocc
+from pcocc.Singleton import Singleton
 from os.path import expanduser
 
 DEFAULT_CONF_DIR = os.path.join('/etc/pcocc')
@@ -45,9 +43,9 @@ class TemplatePath(string.Template):
 class Config(object):
     __metaclass__ = Singleton
     def __init__(self):
-        self.vnets = Networks.VNetworkConfig()
-        self.rsets = Resources.ResSetConfig()
-        self.tpls = Templates.TemplateConfig()
+        self.vnets = pcocc.Networks.VNetworkConfig()
+        self.rsets = pcocc.Resources.ResSetConfig()
+        self.tpls = pcocc.Templates.TemplateConfig()
 
         # Initalize later depending on what's provided in the config files
         self.batch = None
@@ -101,9 +99,9 @@ class Config(object):
             self.vnets[vnet].cleanup_node()
 
     def reset(self):
-        self.vnets = Networks.VNetworkConfig()
-        self.rsets = Resources.ResSetConfig()
-        self.tpls = Templates.TemplateConfig()
+        self.vnets = pcocc.Networks.VNetworkConfig()
+        self.rsets = pcocc.Resources.ResSetConfig()
+        self.tpls = pcocc.Templates.TemplateConfig()
         self.batch = None
 
     def resolve_path(self, path, vm=None):
@@ -111,7 +109,7 @@ class Config(object):
         tplvalues = {}
 
         try:
-           tplvalues['clusterdir'] = self.batch.cluster_state_dir
+            tplvalues['clusterdir'] = self.batch.cluster_state_dir
         except AttributeError:
             pass
 
@@ -148,8 +146,11 @@ class Config(object):
         elif self._verbose >= 2:
             logging.basicConfig(level=logging.DEBUG)
 
-import Networks
-import Resources
-import Templates
-import Batch
-import Hypervisor
+# Put at the end after Config is defined to prevent circular imports issues
+# when doing from x import Config. They will be imported before Config method
+# which require them are called.
+from . import Networks # pylint: disable=W0611
+from . import Resources # pylint: disable=W0611
+from . import Templates # pylint: disable=W0611
+from . import Batch
+from . import Hypervisor

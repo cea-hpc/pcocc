@@ -38,12 +38,13 @@ import datetime
 import random
 import binascii
 
-from pcocc.scripts import click
 from ClusterShell.NodeSet  import RangeSet
-from Backports import subprocess_check_output, enum
-from Error import PcoccError
-from Config import Config
-from Misc import fake_signalfd, wait_or_term_child, CHILD_EXIT, stop_threads, systemd_notify
+from .scripts import click
+from .Backports import subprocess_check_output, enum
+from .Error import PcoccError
+from .Config import Config
+from .Misc import fake_signalfd, wait_or_term_child
+from .Misc import stop_threads, systemd_notify
 
 lock = threading.Lock()
 
@@ -112,9 +113,12 @@ class RemoteMonitor(object):
         while select.select([self.s_mon.stdout.fileno()],[],[],0.0)[0]:
             a = os.read(self.s_mon.stdout.fileno(), QMP_READ_SIZE)
 
-    def read_filtered(self, event_list=[]):
+    def read_filtered(self, event_list=None):
         """Read from the monitor socket and discard all events not in the event_list array
         """
+        if event_list is None:
+            event_list = []
+
         while True:
             data = self.s_mon.stdout.readline()
             try:
@@ -343,7 +347,8 @@ class Qemu(object):
     def _setup_spice(self, vm):
         batch = Config().batch
         # TODO: Add TLS support for untrusted networks
-        spice_path = os.path.join(batch.cluster_state_dir, 'spice_vm{0}'.format(vm.rank))
+        spice_path = os.path.join(batch.cluster_state_dir, 
+                                  'spice_vm{0}'.format(vm.rank))
         sasldb_path = os.path.join(spice_path, 'saslpasswd.db')
         os.environ['SASL_CONF_PATH'] = spice_path
         os.mkdir(spice_path, 0700)
@@ -377,7 +382,8 @@ auxprop_plugin: sasldb
                                    socket.SOCK_STREAM)
         testsocket = socket.socket(socket.AF_INET,
                                    socket.SOCK_STREAM)
-
+        
+        spice_port = 0
         for spice_port in randrange:
             try:
                 locksocket.bind(('', spice_port + 1))
@@ -398,7 +404,7 @@ auxprop_plugin: sasldb
         else:
             raise HypervisorError('Unable to find a free port for remote display')
 
-        with open(os.path.join(spice_path, 'console.vv'.format(vm.rank)),
+        with open(os.path.join(spice_path, 'console.vv'),
                   'w') as f:
             f.write("""[virt-viewer]
 type=spice
@@ -627,31 +633,33 @@ username={3}@pcocc
                         (num_cores, len(cores_on_numa))]
 
         if autobind_cpumem:
-          start_cpu = 0
-          virt_to_phys_coreid = []
-          for i, numa_node in enumerate(sorted(cores_on_numa)):
-              numa_coreset = cores_on_numa[numa_node]
-              virt_to_phys_coreid += numa_coreset
-              ncores_on_node = len(numa_coreset)
-              # TODO: adjust the memory for irregular NUMA nodes
-              if qemu_version > 2:
-                  cmdline += ['-numa', 'node,memdev=ram-%d,cpus=%d-%d,nodeid=%d' % (
-                          i,
-                          start_cpu,
-                          start_cpu + ncores_on_node - 1,
-                          i)]
+            start_cpu = 0
+            virt_to_phys_coreid = []
+            for i, numa_node in enumerate(sorted(cores_on_numa)):
+                numa_coreset = cores_on_numa[numa_node]
+                virt_to_phys_coreid += numa_coreset
+                ncores_on_node = len(numa_coreset)
+                # TODO: adjust the memory for irregular NUMA nodes
+                if qemu_version > 2:
+                    cmdline += ['-numa', 'node,memdev=ram-%d,cpus=%d-%d,nodeid=%d' % (
+                            i,
+                            start_cpu,
+                            start_cpu + ncores_on_node - 1,
+                            i)]
 
-                  cmdline += ['-object', 'memory-backend-ram,size=%dM,policy=preferred,prealloc=yes,'
-                              'host-nodes=%d,id=ram-%d' % (
-                                  total_mem / len(cores_on_numa),
-                                  numa_node, i)]
+                    cmdline += ['-object', 
+                                'memory-backend-ram,size=%dM,policy=preferred,prealloc=yes,'
+                                'host-nodes=%d,id=ram-%d' % (
+                            total_mem / len(cores_on_numa),
+                            numa_node, i)]
 
-              else:
-                  cmdline += ['-numa', 'node,cpus=%d-%d,nodeid=%d' % (
-                          start_cpu,
-                          start_cpu + ncores_on_node - 1,
-                          i)]
-              start_cpu += ncores_on_node
+                else:
+                    cmdline += ['-numa', 'node,cpus=%d-%d,nodeid=%d' % (
+                            start_cpu,
+                            start_cpu + ncores_on_node - 1,
+                            i)]
+
+                start_cpu += ncores_on_node
         else:
             cmdline += ['-m', str(total_mem)]
 
@@ -839,21 +847,21 @@ username={3}@pcocc
                            None, vm.rank)
 
         if autobind_cpumem:
-          # Ask for vcpu thread info
-          s_mon.sendall('{ "execute": "query-cpus" }')
-          data = s_mon.recv(QMP_READ_SIZE)
-          ret = json.loads(data)
+            # Ask for vcpu thread info
+            s_mon.sendall('{ "execute": "query-cpus" }')
+            data = s_mon.recv(QMP_READ_SIZE)
+            ret = json.loads(data)
 
-          # Bind each vcpu thread on its physical cpu
-          for cpu_info in ret["return"]:
-              cpu_id = cpu_info["CPU"]
-              cpu_thread_id = cpu_info["thread_id"]
-              phys_coreid = subprocess_check_output(
-                  ['hwloc-calc' , '--po', '-I', 'PU',
-                   'core:%s'%(virt_to_phys_coreid[cpu_id])]  +
-                  topology_cache_args).strip()
-              subprocess_check_output(['taskset', '-p', '-c',
-                                       phys_coreid, str(cpu_thread_id)])
+            # Bind each vcpu thread on its physical cpu
+            for cpu_info in ret["return"]:
+                cpu_id = cpu_info["CPU"]
+                cpu_thread_id = cpu_info["thread_id"]
+                phys_coreid = subprocess_check_output(
+                    ['hwloc-calc' , '--po', '-I', 'PU',
+                     'core:%s'%(virt_to_phys_coreid[cpu_id])]  +
+                    topology_cache_args).strip()
+                subprocess_check_output(['taskset', '-p', '-c',
+                                         phys_coreid, str(cpu_thread_id)])
 
         s_mon.close()
 
@@ -931,7 +939,7 @@ username={3}@pcocc
             try:
                 rdy, _ , _  = select.select(listen_list, [], [])
             except select.error as e:
-                if e[0] == errno.EINTR:
+                if e.args[0] == errno.EINTR:
                     continue
                 else:
                     raise
@@ -1038,7 +1046,6 @@ username={3}@pcocc
             except Exception as e:
                 systemd_notify('Watchdog could not query guest at {0}'.format(
                     datetime.datetime.now()))
-                pass
 
             try:
                 s_ctl.terminate()
@@ -1272,7 +1279,7 @@ username={3}@pcocc
                             raise
 
             try:
-                if sproc.poll is None():
+                if sproc.poll() is None:
                     sproc.terminate()
             except Exception as e:
                 pass
@@ -1437,72 +1444,72 @@ username={3}@pcocc
         # Poll the I/O stream as long as the command is runnning
         # Return the command return value when it exits
         while 1:
-                rdy = select.select([s_ctl.stdout, s_io.stdout],
-                                    [], [])
+            rdy = select.select([s_ctl.stdout, s_io.stdout],
+                                [], [])
 
-                if s_io.stdout in rdy[0]:
-                    data = os.read(s_io.stdout.fileno(), 4096)
+            if s_io.stdout in rdy[0]:
+                data = os.read(s_io.stdout.fileno(), 4096)
 
-                    if data:
-                        print data,
+                if data:
+                    print data,
 
-                if s_ctl.stdout in rdy[0]:
-                    data = os.read(s_ctl.stdout.fileno(), 4096)
+            if s_ctl.stdout in rdy[0]:
+                data = os.read(s_ctl.stdout.fileno(), 4096)
 
-                    try:
-                        retval = json.loads(data)["return"]
-                        if retval != 0:
-                            sys.stderr.write("vm%d: exit %d\n"%(vm.rank,
-                                                                retval))
+                try:
+                    retval = json.loads(data)["return"]
+                    if retval != 0:
+                        sys.stderr.write("vm%d: exit %d\n"%(vm.rank,
+                                                            retval))
 
-                        # Make sure we read everything from the I/O pipe
-                        # before exiting
+                    # Make sure we read everything from the I/O pipe
+                    # before exiting
+                    self._flush_outstanding_io(s_io)
+
+                    s_ctl.terminate()
+                    s_ctl.communicate()
+                    s_io.terminate()
+                    s_io.communicate()
+
+                    return retval
+
+                except (ValueError, KeyError) as err:
+                    if not data:
+                        # Flush IO to prevent losing data
                         self._flush_outstanding_io(s_io)
 
-                        s_ctl.terminate()
-                        s_ctl.communicate()
-                        s_io.terminate()
-                        s_io.communicate()
+                        s_ctl.poll()
+                        if s_ctl.returncode == 0:
+                            # If the connexion was closed properly
+                            # it means qemu existed. We should do the same
+                            # sys.stderr.write("Agent closed\n")
+                            s_io.terminate()
+                            s_io.communicate()
+                            return 0
 
-                        return retval
+                        elif s_ctl.returncode and not cmd:
+                            # FIXME: This can happen when
+                            # resuming since we can not go through the
+                            # safe connect method because the agent may
+                            # already be busy.
+                            # We assume that qemu was not ready yet
+                            # and just retry
+                            # sys.stderr.write("Retrying connection\n")
+                            s_io.terminate()
+                            s_io.communicate()
+                            s_ctl = self.socket_connect(vm,
+                                           'serial_taskcontrolport_socket')
+                            s_io = self.socket_connect(vm,
+                                           'serial_taskioport_socket')
+                            time.sleep(5)
+                            continue
+                        else:
+                            # Should not happen
+                            sys.stderr.write('Connection did not exit\n')
 
-                    except (ValueError, KeyError) as err:
-                        if not data:
-                            # Flush IO to prevent losing data
-                            self._flush_outstanding_io(s_io)
-
-                            s_ctl.poll()
-                            if s_ctl.returncode == 0:
-                                # If the connexion was closed properly
-                                # it means qemu existed. We should do the same
-                                # sys.stderr.write("Agent closed\n")
-                                s_io.terminate()
-                                s_io.communicate()
-                                return 0
-
-                            elif s_ctl.returncode and not cmd:
-                                # FIXME: This can happen when
-                                # resuming since we can not go through the
-                                # safe connect method because the agent may
-                                # already be busy.
-                                # We assume that qemu was not ready yet
-                                # and just retry
-                                # sys.stderr.write("Retrying connection\n")
-                                s_io.terminate()
-                                s_io.communicate()
-                                s_ctl = self.socket_connect(vm,
-                                               'serial_taskcontrolport_socket')
-                                s_io = self.socket_connect(vm,
-                                               'serial_taskioport_socket')
-                                time.sleep(5)
-                                continue
-                            else:
-                                # Should not happen
-                                sys.stderr.write('Connection did not exit\n')
-
-                        raise AgentError("unexpected answer when "
-                                         "receiving exec output from VM agent: "
-                                         "%s -\n" % data)
+                    raise AgentError("unexpected answer when "
+                                     "receiving exec output from VM agent: "
+                                     "%s -\n" % data)
 
     def _flush_outstanding_io(self, subproc):
         # Make sure we read everything from the I/O pipe

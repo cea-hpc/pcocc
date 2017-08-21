@@ -28,10 +28,9 @@ import datetime
 import jsonschema
 import yaml
 
-from Batch import BatchError
-from Backports import  enum
-from Config import Config
-from Error import PcoccError
+from pcocc.Backports import  enum
+from pcocc.Config import Config
+from pcocc.Error import PcoccError
 
 stop_threads = threading.Event()
 
@@ -53,7 +52,7 @@ def _nanny_thread(child_proc, pipe, return_val):
         while True:
             pid, r = os.wait()
             if pid in child_proc:
-               break
+                break
     else:
         r = child_proc.wait()
         pid = child_proc.pid
@@ -84,7 +83,7 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout):
         try:
             rdy, _ , _ = select.select([child_r, sigfd], [], [], cur_timeout)
         except select.error as e:
-            if e[0] == errno.EINTR:
+            if e.args[0] == errno.EINTR:
                 continue
             else:
                 raise
@@ -150,9 +149,9 @@ def extend_validator_with_default(validator_class):
     validate_properties = validator_class.VALIDATORS["properties"]
 
     def set_defaults(validator, properties, instance, schema):
-        for property, subschema in properties.iteritems():
+        for prop, subschema in properties.iteritems():
             if "default-value" in subschema:
-                instance.setdefault(property, subschema["default-value"])
+                instance.setdefault(prop, subschema["default-value"])
 
         for error in validate_properties(
             validator, properties, instance, schema,
@@ -197,8 +196,8 @@ class IDAllocator(object):
     def coll_alloc_one(self, master, key):
         return self.coll_alloc(1, master, key)[0]
 
-    def free_one(self, id):
-        return self.free([id])
+    def free_one(self, old_id):
+        return self.free([old_id])
 
     def alloc(self, count):
         return Config().batch.atom_update_key(
@@ -238,7 +237,7 @@ class IDAllocator(object):
             self._do_free_ids,
             ids)
 
-    def _do_free_ids(id_indexes, id_alloc_state):
+    def _do_free_ids(self, id_indexes, id_alloc_state):
         """Helper to free unique ids using the key/value store"""
         id_alloc_state = yaml.safe_load(id_alloc_state)
         jsonschema.validate(id_alloc_state,
@@ -251,7 +250,7 @@ class IDAllocator(object):
 
         return yaml.dump(id_alloc_state), None
 
-    def _do_alloc_ids(count, id_alloc_state):
+    def _do_alloc_ids(self, count, id_alloc_state):
         """Helper to allocate unique ids using the key/value store"""
         batch = Config().batch
 
@@ -269,7 +268,7 @@ class IDAllocator(object):
             joblist = batch.list_all_jobs()
             id_alloc_state = [ pk for pk in id_alloc_state
                                  if int(pk['batchid']) in joblist ]
-        except BatchError:
+        except PcoccError:
             pass
 
         num_ids = len(id_alloc_state)

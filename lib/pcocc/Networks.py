@@ -21,13 +21,11 @@ import os
 import re
 import struct
 import socket
-import string
 import subprocess
 import shlex
 import signal
 import time
 import pwd
-import etcd
 import random
 import logging
 import tempfile
@@ -36,10 +34,10 @@ import stat
 import jsonschema
 import psutil
 
-from Backports import subprocess_check_output
-from Error import PcoccError, InvalidConfigurationError
-from Config import Config
-from Misc import DefaultValidatingDraft4Validator, IDAllocator
+from .Backports import subprocess_check_output
+from .Error import PcoccError, InvalidConfigurationError
+from .Config import Config
+from .Misc import DefaultValidatingDraft4Validator, IDAllocator
 
 network_config_schema = """
 type: object
@@ -428,10 +426,10 @@ class VBridgedNetwork(VNetwork):
                               self.name.upper())]
             except KeyError:
                 hwaddr = [ 0x52, 0x54, 0x00,
-		           random.randint(0x00, 0x7f),
-		           random.randint(0x00, 0xff),
-		           random.randint(0x00, 0xff) ]
-	        hwaddr = ':'.join(map(lambda x: "%02x" % x, hwaddr))
+                           random.randint(0x00, 0x7f),
+                           random.randint(0x00, 0xff),
+                           random.randint(0x00, 0xff) ]
+                hwaddr = ':'.join(map(lambda x: "%02x" % x, hwaddr))
 
             vm.add_eth_if(self.name,
                           net_res[vm_label]['tap_name'],
@@ -732,6 +730,8 @@ class VGenericPCI(VNetwork):
 
             try:
                 bound_devices = pci_list_vfio_devices()
+
+                dev_addr = ""
                 for dev_addr in self._device_addrs:
                     if dev_addr not in bound_devices:
                         break
@@ -827,7 +827,7 @@ class VNATNetwork(VNetwork):
                 pid = f.read()
                 try:
                     os.kill(int(pid), signal.SIGTERM)
-                except OSError,ValueError:
+                except (OSError ,ValueError):
                     pass
             os.remove(self._dnsmasq_pid_filename)
 
@@ -838,7 +838,7 @@ class VNATNetwork(VNetwork):
                 try:
                     os.kill(int(pid), 0)
                     return True
-                except OSError,ValueError:
+                except (OSError, ValueError):
                     return False
         else:
             return False
@@ -1249,7 +1249,7 @@ class VNATNetwork(VNetwork):
     get_rnat_host_port = staticmethod(get_rnat_host_port)
 
 
-"""Schema to validate individual pkey entries in the key/value store"""
+# Schema to validate individual pkey entries in the key/value store
 pkey_entry_schema = """
 type: object
 properties:
@@ -1437,12 +1437,12 @@ class VIBNetwork(VHostIBNetwork):
             logging.info("Node is master for IB network {0}".format(
                     self.name))
         try:
-                pkey_index = self._ida.alloc_one(master, '{0}_pkey'.format(self.name))
+            pkey_index = self._ida.alloc_one(master, '{0}_pkey'.format(self.name))
         except PcoccError as e:
             raise NetworkSetupError('{0}: {1}'.format(
-                self.name,
-                str(e)
-            ))
+                    self.name,
+                    str(e)
+                    ))
 
         my_pkey = self._min_pkey + pkey_index
         logging.info("Using PKey 0x{0:04x} for network {1}".format(
@@ -1459,7 +1459,7 @@ class VIBNetwork(VHostIBNetwork):
         # Master waits until all hosts have written their guids
         # and updates opensm
         if master:
-            logging.info("Collecting GUIDs from all hosts".format(
+            logging.info("Collecting GUIDs from all hosts for {0}".format(
                     self.name))
             global_guids = batch.wait_child_count('cluster',
                                                   self._get_net_key_path('guids'),
@@ -1471,7 +1471,7 @@ class VIBNetwork(VHostIBNetwork):
                                       in cluster.vms
                                       if self.name in vm.networks ]
 
-            logging.info("Requesting OpenSM update".format(
+            logging.info("Requesting OpenSM update for {0}".format(
                     self.name))
             batch.write_key('global', 'opensm/pkeys/' + str(hex(my_pkey)),
                             sm_config)
@@ -1498,7 +1498,6 @@ class VIBNetwork(VHostIBNetwork):
                                 raise
                             logging.warning("PKey not yet ready, sleeping...")
                             time.sleep(1 + i*2)
-                            pass
                 else:
                     vf_set_guid(device_name, vf_addr,
                                 vm_get_guid(vm, my_pkey),
@@ -1777,7 +1776,7 @@ def ip_has_tuntap():
     """Returns True if the iproute tool supports the tuntap command"""
     if ip_has_tuntap.ipversion==0:
         version_string = subprocess_check_output(['ip', '-V'])
-        match = re.search('iproute2-ss(\d+)', version_string)
+        match = re.search(r'iproute2-ss(\d+)', version_string)
         ip_has_tuntap.ipversion = int(match.group(1))
 
     return ip_has_tuntap.ipversion >= 100519
@@ -1939,7 +1938,7 @@ def pci_find_iommu_group(dev_addr):
 
 def pci_bind_vfio(dev_addr, batch_user):
     with open('/sys/bus/pci/devices/{0}/driver/unbind'.format(dev_addr), 'w') as f:
-            f.write(dev_addr)
+        f.write(dev_addr)
 
     with open('/sys/bus/pci/drivers/vfio-pci/bind', 'w') as f:
         f.write(dev_addr)

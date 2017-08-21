@@ -17,7 +17,6 @@
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
 
-import multiprocessing
 import sys
 import yaml
 import time
@@ -25,11 +24,11 @@ import logging
 from Queue import Queue
 from threading import Thread
 
-import Batch
-from Error import PcoccError
-from Config import Config
-from pcocc.scripts import click
-from pcocc import Hypervisor
+from . import Hypervisor
+from . import Batch
+from .Error import PcoccError
+from .Config import Config
+from .scripts import click
 
 class InvalidClusterError(PcoccError):
     """Exception raised when the cluster definition cannot be parsed
@@ -65,7 +64,7 @@ class Worker(Thread):
             try:
                 func(*args, **kargs)
             except Exception as e:
-                self.pool.exception=e
+                self.pool.exception = xe
             finally:
                 self.pool.tasks.task_done()
 
@@ -84,8 +83,8 @@ class ThreadPool:
         """Wait for completion of all the tasks in the queue"""
         self.tasks.join()
 
-        if not (self.exception is None):
-            raise self.exception
+        if self.exception is not None:
+            raise self.exception # pylint: disable=E0702
 
 def do_checkpoint_vm(vm, ckpt_dir):
     vm.checkpoint(ckpt_dir)
@@ -425,7 +424,7 @@ class Cluster(object):
 
         # The key store may not know the user yet in which case
         # we cannot query it to learn the config state.
-
+        i = 0
         for i in range(5):
             try:
                 host_states, index = batch.read_dir_index(

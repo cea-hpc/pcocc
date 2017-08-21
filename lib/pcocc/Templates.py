@@ -22,10 +22,10 @@ import re
 import errno
 import time
 
-from scripts.Shine.TextTable import TextTable
-from Config import Config
-from Error import InvalidConfigurationError
-from Backports import OrderedDict
+from .scripts.Shine.TextTable import TextTable
+from .Config import Config
+from .Error import InvalidConfigurationError
+from .Backports import OrderedDict
 
 # For each valid setting, is it required, whats the default value and is it
 # inheritable
@@ -234,16 +234,28 @@ class Template(object):
         # Validate that the resource set is valid
         rset = self.rset
 
+        if 'persistent-drives' in self.settings:
+            self._convert_drives_to_dict()
+
         # Convert mount-point option from string to newer dict format
         for mount in self.mount_points:
             if not isinstance(self.mount_points[mount], dict):
                 path = self.mount_points[mount]
                 self.mount_points[mount] = {'path': path}
 
+
+        # Value for absent image is None but accept YAML representations
+        # of False as well
+        if 'image' in self.settings and self.settings['image'] is False:
+            self.settings['image'] = None
+
+        self.validated = True
+
+    def _convert_drives_to_dict(self):
         # Convert drives to ordered dict format
         # and set default values
         ordered_drives = OrderedDict()
-        for drive in self.persistent_drives:
+        for drive in self.settings['persistent-drives']:
             # Dict syntax
             if isinstance(drive, dict):
                 path = drive.keys()[0]
@@ -263,14 +275,8 @@ class Template(object):
                     'cache': 'writeback'
                 }
 
-        self.persistent_drives = ordered_drives
+        self.settings['persistent-drives'] = ordered_drives
 
-        # Value for absent image is None but accept YAML representations
-        # of False as well
-        if self.image is False:
-            self.image = None
-
-        self.validated = True
 
     def _parent_template(self):
         if 'inherits' in self.settings:

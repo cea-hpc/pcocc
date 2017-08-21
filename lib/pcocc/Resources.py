@@ -17,8 +17,7 @@
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
 import yaml
-from Config import Config
-from Error import InvalidConfigurationError
+from .Error import InvalidConfigurationError
 
 class ResSetConfig(dict):
     def load(self, filename):

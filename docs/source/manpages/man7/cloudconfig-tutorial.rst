@@ -34,22 +34,22 @@ Setting up user credentials
 With cloud-init enabled VMs the first configuration task is often to define user credentials to login to the VM. This can be done with the following syntax::
 
     users:
-    - name : demo1
-      ssh-authorized-keys:
-        - key1 <ssh pub key 1>
-        - key2 <ssh pub key 2>
-    - name : demo2
-      ssh-authorized-keys:
-        - key3 <ssh pub key 3>
+      - name : demo1
+        ssh-authorized-keys:
+          - <ssh pub key 1>
+          - <ssh pub key 2>
+      - name : demo2
+        ssh-authorized-keys:
+          - <ssh pub key 3>
 
-This defines two demo users, with their respective public SSH keys. You can also provide sudo privileges to a user with the **sudo** parameter or define its numerical id with the **uid** parameter::
+This defines two demo users, with their respective public SSH keys which have to be copy/pasted in the appropriate fields. You can also provide sudo privileges to a user with the **sudo** parameter or define its numerical id with the **uid** parameter::
 
     users:
         - name: demo1
-        sudo: ['ALL=(ALL) NOPASSWD:ALL']
-        uid: 1247
-        ssh-authorized-keys:
-            - key1 ...
+          sudo: ['ALL=(ALL) NOPASSWD:ALL']
+          uid: 1247
+          ssh-authorized-keys:
+            - <ssh pub key 1>
 
 Running early boot commands
 ***************************
@@ -98,15 +98,16 @@ Writing files
 
 You can write arbitrary files in the VM filesystem. Files are written after packages have been installed which allows for customizing configuration files. For example to write a simple :file:`/etc/hosts` file for VMs on a private network::
 
-  - path: /etc/hosts
-    permissions: '0644'
-    content: |
-      #Host file
-      127.0.0.1   localhost localhost.localdomain
+  write_files:
+    - path: /etc/hosts
+      permissions: '0644'
+      content: |
+        #Host file
+        127.0.0.1   localhost localhost.localdomain
 
-      10.252.0.1 vm0
-      10.252.0.2 vm1
-      10.252.0.3 vm2
+        10.252.0.1 vm0
+        10.252.0.2 vm1
+        10.252.0.3 vm2
 
 Mounting filesystems
 *********************

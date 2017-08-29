@@ -87,6 +87,9 @@ class Config(object):
                         jobname, default_jobname, process_type,
                         batchuser)
 
+        if process_type == Batch.ProcessType.SETUP:
+            self.load_tracker()
+
         # We can add a config file to select/configure the hypervisor
         # here if we feel the need
         self.hyp = Hypervisor.Qemu()
@@ -111,6 +114,12 @@ class Config(object):
         self.batch = Batch.BatchManager.load(batch_config_file, jobid,
                                              jobname, default_jobname,
                                              process_type, batchuser)
+
+    def load_tracker(self):
+        self._init_run_dir()
+        self.tracker = Tracker(os.path.join(self._run_dir,
+                                            'net_tracker.db'))
+
     def config_node(self):
         for vnet in self.vnets:
             self.vnets[vnet].init_node()

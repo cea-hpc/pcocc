@@ -149,7 +149,7 @@ def find_vm_rnat_port(cluster, index, port=22):
 def find_vm_ssh_opt(opts, regex, s_opts, v_opts, first_arg_only=True):
     """Parse ssh/scp arguments to find the remote vm hostname"""
     skip = False
-    i = 0 
+    i = 0
     for i, opt in enumerate(opts):
         if skip:
             skip = False
@@ -1085,12 +1085,14 @@ def pcocc_setup(action, jobid, nolock, force):
         config.cleanup_node()
     elif action == 'create':
         config.load(process_type=ProcessType.SETUP)
+        config.tracker.reclaim(config.batch.list_all_jobs())
         config.batch.create_resources()
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)
         cluster.alloc_node_resources()
     elif action == 'delete':
         config.load(jobid=jobid, process_type=ProcessType.SETUP)
+        config.tracker.cleanup_ref(config.batch.batchid)
         config.batch.delete_resources(force)
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)

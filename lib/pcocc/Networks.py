@@ -33,16 +33,19 @@ import shutil
 import stat
 import jsonschema
 import psutil
+import tempfile
+from abc import ABCMeta, abstractmethod
 
 from .Backports import subprocess_check_output
 from .Error import PcoccError, InvalidConfigurationError
 from .Config import Config
 from .Misc import DefaultValidatingDraft4Validator, IDAllocator
 
+
 network_config_schema = """
 type: object
 patternProperties:
-  "^([a-zA-Z_0-9--])+$":
+  "^([a-zA-Z][a-zA-Z_0-9--]*)$":
     oneOf:
       - $ref: '#/definitions/nat'
       - $ref: '#/definitions/pv'
@@ -260,9 +263,10 @@ class VNetworkConfig(dict):
             raise InvalidConfigurationError(str(err))
 
         try:
-            validator = DefaultValidatingDraft4Validator(yaml.safe_load(network_config_schema))
+            validator = DefaultValidatingDraft4Validator(VNetwork.schema)
             validator.validate(net_config)
         except jsonschema.exceptions.ValidationError as err:
+            #FIXME when err.path doesnt exist (error at top level)
             message = "failed to parse configuration for network {0} \n".format(err.path[0])
             sortfunc = jsonschema.exceptions.by_relevance(frozenset(['oneOf', 'anyOf', 'enum']))
             best_errors = sorted(err.context, key=sortfunc, reverse=True)
@@ -284,13 +288,44 @@ class VNetworkConfig(dict):
                                          name,
                                          net_attr['settings'])
 
-class VNetwork(object):
-    """Base class for all network types"""
-    def __init__(self, name):
-        self.name = name
+class VNetworkClass(ABCMeta):
+    def __init__(cls, name, bases, dct):
+        if '_schema' in dct:
+            VNetwork.register_network(dct['_schema'], cls)
+        super(VNetworkClass, cls).__init__(name, bases, dct)
 
-    def create(ntype, name, settings):
+class VNetwork(object):
+    __metaclass__ = VNetworkClass
+
+    """Base class for all network types"""
+    _networks = {}
+    schema = ""
+
+    @classmethod
+    def register_network(cls, subschema, network_class):
+        if not cls.schema:
+            cls.schema = yaml.safe_load(network_config_schema)
+
+        subschema = yaml.safe_load(subschema)
+
+        types = subschema['properties']['type']['enum']
+
+        for t in types:
+            cls._networks[t] = network_class
+
+        cls.schema['patternProperties']\
+            ['^([a-zA-Z][a-zA-Z_0-9--]*)$']['oneOf'].append(
+                {'$ref': '#/definitions/{0}'.format(types[0])})
+
+        cls.schema['definitions'][types[0]] = subschema
+
+    @classmethod
+    def create(cls, ntype, name, settings):
         """Factory function to create subclasses"""
+        if ntype in cls._networks:
+            return cls._networks[ntype](name, settings)
+
+        # Old style networks
         if ntype == "pv":
             return VPVNetwork(name, settings)
         if ntype == "nat":
@@ -304,9 +339,10 @@ class VNetwork(object):
         if ntype == "genericpci":
             return VGenericPCI(name, settings)
 
-        assert 0, "Unknown network type: " + ntype
+        raise InvalidConfigurationError("Unknown network type: " + ntype)
 
-    create = staticmethod(create)
+    def __init__(self, name):
+        self.name = name
 
     def get_license(self, cluster):
         """Returns a list of batch licenses that must be allocated
@@ -357,7 +393,6 @@ class VNetwork(object):
 
         """
         return  'net/type/{0}/{1}'.format(self._type, key)
-
 
 class VBridgedNetwork(VNetwork):
     def __init__(self, name, settings):
@@ -454,7 +489,7 @@ class VBridgedNetwork(VNetwork):
 
         # Create and enable the tap
         tun_create_tap(tap_name, Config().batch.batchuser)
-        tun_enable_tap(tap_name)
+        dev_enable(tap_name)
         ip_set_mtu(tap_name, self._mtu)
         bridge_add_port(tap_name, self._host_bridge)
         return {'tap_name': tap_name}
@@ -463,7 +498,6 @@ class VBridgedNetwork(VNetwork):
         tap_name = resources['tap_name']
         # Delete the tap
         tun_delete_tap(tap_name)
-
 
 class VPVNetwork(VNetwork):
     def __init__(self, name, settings):
@@ -536,7 +570,7 @@ class VPVNetwork(VNetwork):
             if vm.is_on_node():
                 tap_name = find_free_dev_name(self._tap_prefix)
                 tun_create_tap(tap_name, tap_user)
-                tun_enable_tap(tap_name)
+                dev_enable(tap_name)
                 ip_set_mtu(tap_name, self._mtu)
                 port_id = ovs_add_port(tap_name, bridge_name)
 
@@ -545,8 +579,8 @@ class VPVNetwork(VNetwork):
                 # Incoming packets to the VM are directly
                 # sent to the destination tap
                 ovs_add_flow(bridge_name,
-                             "table=0,idle_timeout=0,hard_timeout=0,"
-                             "priority=3000,"
+                             0, 3000,
+                             "idle_timeout=0,hard_timeout=0,"
                              "dl_dst=%s,actions=output:%s"
                              % (hwaddr, port_id))
 
@@ -556,9 +590,10 @@ class VPVNetwork(VNetwork):
                 # directly to ARP requests and drop other broadcast
                 # packets as this is too inefficient
                 ovs_add_flow(bridge_name,
-                             "table=0,in_port=%s,"
+                             0, 2000,
+                             "in_port=%s,"
                              "idle_timeout=0,hard_timeout=0,"
-                             "priority=2000," "actions=flood" % (
+                             "actions=flood" % (
                         port_id))
 
 
@@ -584,8 +619,8 @@ class VPVNetwork(VNetwork):
                 # Directly forward packets for a remote VM to the
                 # correct destination
                 ovs_add_flow(bridge_name,
-                             "table=0,idle_timeout=0,hard_timeout=0,"
-                             "priority=3000,"
+                             0, 3000,
+                             "idle_timeout=0,hard_timeout=0,"
                              "dl_dst=%s,actions=output:%s"
                              % (hwaddr, host_tunnels[host]))
 
@@ -594,8 +629,9 @@ class VPVNetwork(VNetwork):
         # broadcast packets
         if local_ports:
             ovs_add_flow(bridge_name,
-                         "table=0,idle_timeout=0,hard_timeout=0,"
-                         "priority=1000," "actions=output:%s" % (
+                         0, 1000,
+                         "idle_timeout=0,hard_timeout=0,"
+                         "actions=output:%s" % (
                     ','.join([str(port) for port in local_ports])))
 
         net_res['global'] = {'bridge_name': bridge_name,
@@ -790,21 +826,37 @@ class VNATNetwork(VNetwork):
 
         self._type = "nat"
         self._bridge_name = settings["bridge"]
+
+        # Check nat bits >= vm bits
         self._nat_network = settings["nat-network"].split("/")[0]
         self._nat_network_bits = int(settings["nat-network"].split("/")[1])
-        self._vm_network_gw = settings["vm-network-gw"]
         self._vm_network = settings["vm-network"].split("/")[0]
         self._vm_network_bits = int(settings["vm-network"].split("/")[1])
+
+        # Remove (auto computed) vms first n ips, gw (host): last
+        self._vm_network_gw = settings["vm-network-gw"]
         self._vm_ip = settings["vm-ip"]
+
+        # Interface prefix (default to net name)
         self._tap_prefix = settings["tap-prefix"]
+
         self._mtu = int(settings["mtu"])
+
+        # prefix
         self._vm_hwaddr = settings["vm-hwaddr"]
+        self._bridge_hwaddr = settings["bridge-hwaddr"]
+
+        # remove (one per cluster)
+        self._dnsmasq_pid_filename = "/var/run/pcocc_dnsmasq.pid"
+
+        # defaults to pcocc.domain_name
         self._domain_name = settings["domain-name"]
         self._dns_server = settings["dns-server"]
-        self._dnsmasq_pid_filename = "/var/run/pcocc_dnsmasq.pid"
-        self._bridge_hwaddr = settings["bridge-hwaddr"]
         self._ntp_server = settings["ntp-server"]
 
+        # gateway type (none/per-host/per-cluster/external)
+
+        # Add ip/port range filters
         if settings["allow-outbound"] == 'none':
             self._allow_outbound = False
         elif settings["allow-outbound"] == 'all':
@@ -962,19 +1014,22 @@ class VNATNetwork(VNetwork):
         # Deliver ARP requests from each port to the bridge and only
         # to the bridge
         ovs_add_flow(self._bridge_name,
-                     "table=0,idle_timeout=0,hard_timeout=0,"
+                     0, 1000,
+                     "idle_timeout=0,hard_timeout=0,"
                      "dl_type=0x0806,nw_dst=%s,actions=local"
                      % (self._vm_network_gw))
 
         # Flood ARP answers from the bridge to each port
         ovs_add_flow(self._bridge_name,
-                     "table=0,in_port=local,idle_timeout=0,hard_timeout=0,"
+                     0, 1000,
+                     "in_port=local,idle_timeout=0,hard_timeout=0,"
                      "dl_type=0x0806,nw_dst=%s,actions=flood"%(self._vm_ip))
 
         # Flood DHCP answers from the bridge to each port
         ovs_add_flow(self._bridge_name,
-                     "table=0,idle_timeout=0,hard_timeout=0,"
-                     "priority=0,in_port=LOCAL,udp,tp_dst=68,actions=FLOOD")
+                     0, 0,
+                     "idle_timeout=0,hard_timeout=0,"
+                     "in_port=LOCAL,udp,tp_dst=68,actions=FLOOD")
 
 
 
@@ -1123,14 +1178,15 @@ class VNATNetwork(VNetwork):
 
         # Create and enable the tap
         tun_create_tap(tap_name, Config().batch.batchuser)
-        tun_enable_tap(tap_name)
+        dev_enable(tap_name)
 
         # Connect it to the bridge
         vm_port_id = ovs_add_port(tap_name, self._bridge_name)
 
         # Rewrite outgoing packets with the VM unique IP
         ovs_add_flow(self._bridge_name,
-                     "table=0,in_port=%d,idle_timeout=0,hard_timeout=0,"
+                     0, 1000,
+                     "in_port=%d,idle_timeout=0,hard_timeout=0,"
                      "dl_type=0x0800,nw_src=%s,actions=mod_nw_src:%s,local"
                      % (vm_port_id,
                         self._vm_ip,
@@ -1138,7 +1194,8 @@ class VNATNetwork(VNetwork):
 
         # Rewrite incoming packets with the VM real IP
         ovs_add_flow(self._bridge_name,
-                     "table=0,in_port=local,idle_timeout=0,hard_timeout=0,"
+                     0, 1000,
+                     "in_port=local,idle_timeout=0,hard_timeout=0,"
                      "dl_type=0x0800,nw_dst=%s,actions=mod_nw_dst:%s,output:%d"
                      % (vm_nat_ip,
                         self._vm_ip,
@@ -1146,7 +1203,8 @@ class VNATNetwork(VNetwork):
 
         # Handle DHCP requests from the VM locally
         ovs_add_flow(self._bridge_name,
-                     "table=0,in_port=%d,idle_timeout=0,hard_timeout=0,"
+                     0, 1000,
+                     "in_port=%d,idle_timeout=0,hard_timeout=0,"
                      "udp,tp_dst=67,priority=0,actions=local"
                      % (vm_port_id))
 
@@ -1240,13 +1298,12 @@ class VNATNetwork(VNetwork):
         # First IP is for the bridge
         return get_ip_on_network(self._nat_network, nat_id + 2)
 
+    @staticmethod
     def get_rnat_host_port(vm_rank, port):
         return Config().batch.read_key(
             'cluster',
             'rnat/{0}/{1}'.format(vm_rank, port),
             blocking=False)
-
-    get_rnat_host_port = staticmethod(get_rnat_host_port)
 
 
 # Schema to validate individual pkey entries in the key/value store
@@ -1623,6 +1680,16 @@ class VIBNetwork(VHostIBNetwork):
             batch.wait_key_index('global', 'opensm/pkeys', last_index,
                                  timeout=0)
 
+
+def netns_decorate(func):
+    def wrap_netns(*args, **kwargs):
+        if 'netns' in kwargs:
+            kwargs['exec_wrap'] = ['ip', 'netns', 'exec', kwargs['netns']]
+        else:
+            kwargs['exec_wrap'] = []
+        return func(*args, **kwargs)
+    return wrap_netns
+
 def device_vf_type(device_name):
     if device_name[:4] == 'mlx4':
         return VFType.MLX4
@@ -1650,6 +1717,26 @@ def network_mask(ip, bits):
 def address_in_network(ip, net):
     "Is an address in a network"
     return ip & net == net
+
+def mac_prefix_len(prefix):
+    return len(prefix.replace(':', ''))
+
+def mac_suffix_len(prefix):
+    return 12 - mac_prefix_len(prefix)
+
+def mac_suffix_count(prefix):
+    return 16 ** mac_suffix_len(prefix)
+
+def mac_gen_hwaddr(prefix, num):
+    max_id = mac_suffix_count(prefix)
+    if num < 0:
+        num = max_id + num
+    if num < 0 or num >= max_id:
+        raise ValueError('Invalid id for this MAC prefix')
+    suffix = ("%x"%(num)).zfill(mac_suffix_len(prefix))
+    suffix = ':'.join(
+        suffix[i:i+2] for i in xrange(0, len(suffix), 2))
+    return prefix + ':' + suffix
 
 def ovs_add_bridge(brname, hwaddr=None):
     cmd = ["ovs-vsctl", "--may-exist", "add-br", brname]
@@ -1683,9 +1770,30 @@ def ovs_bridge_exists(brname):
     else:
         return False
 
+def ovs_create_group(brname, group_id):
+    subprocess.check_call(["ovs-ofctl", "add-group", "-OOpenFlow13",
+                           brname,
+                           'group_id={0},type=all'.format(group_id)])
 
-def ovs_add_flow(brname, flow):
-    subprocess.check_call(["ovs-ofctl", "add-flow", brname, flow])
+def ovs_set_group_members(brname, group_id, members):
+    bucket=''
+    for m in members:
+        bucket += ',bucket=output:{0}'.format(m)
+
+    subprocess.check_call(["ovs-ofctl", "mod-group", "-OOpenFlow13",
+                           brname,
+                           'group_id={0},type=all'.format(group_id) + bucket])
+
+def ovs_add_flow(brname, table, priority, match, action=None, cookie=None):
+    if action:
+        action = "actions="+action
+
+    if cookie:
+        cookie = "cookie="+cookie
+
+    flow = 'table={0}, priority={1}, {2}, {3}'.format(
+        table, priority, match, action)
+    subprocess.check_call(["ovs-ofctl", "add-flow", "-OOpenFlow13", brname, flow])
 
 def ovs_del_flows(brname, flow):
     subprocess.check_call(["ovs-ofctl", "del-flows", brname] + flow.split())
@@ -1696,7 +1804,7 @@ def ovs_get_port_id(tapname, brname):
     if match:
         return int(match.group(1))
     else:
-        return -1
+        raise KeyError('{0} not found on {1}'.format(tapname, brname))
 
 def ovs_add_port(tapname, brname):
     subprocess.check_call(["ovs-vsctl", "add-port", brname, tapname])
@@ -1785,6 +1893,15 @@ def bridge_add_port(tapname, bridgename):
     subprocess.check_call(["ip", "link", "set", tapname, "master",
                            bridgename])
 
+@netns_decorate
+def veth_delete(name, **kwargs):
+    subprocess.check_call(kwargs['exec_wrap'] + ["ip", "link", "del", name],
+                          stdout=open(os.devnull))
+
+def veth_create_pair(name1, name2):
+    subprocess.check_call(["ip", "link", "add", name1, "type", "veth",
+                           "peer", "name", name2], stdout=open(os.devnull))
+
 def tun_create_tap(name, user):
     if ip_has_tuntap():
         subprocess.check_call(["ip", "tuntap", "add", name, "mode", "tap",
@@ -1793,29 +1910,54 @@ def tun_create_tap(name, user):
         subprocess.check_call(["tunctl", "-u", user, "-t", name],
                               stdout=open(os.devnull))
 
-def tun_enable_tap(name):
-    subprocess.check_call(["ip", "link", "set", name, "up"])
-
 def tun_delete_tap(name):
     if ip_has_tuntap():
         subprocess.check_call(["ip", "tuntap", "del", name, "mode", "tap"])
     else:
         subprocess.check_call(["tunctl", "-d", name])
 
-def ip_set_mtu(dev, mtu):
-    subprocess.check_call(["ip", "link", "set", dev, "mtu", "%d" % (mtu)])
+@netns_decorate
+def dev_enable(name, **kwargs):
+    subprocess.check_call(kwargs['exec_wrap'] +
+                          ["ip", "link", "set", name, "up"])
 
-def ip_add(ip, bits, dev):
-    subprocess_check_output(["ip", "addr", "add",
+def dev_set_hwaddr(name, hwaddr):
+    subprocess.check_call(["ip", "link", "set", name, "address", hwaddr])
+
+def dev_set_netns(name, netns):
+    subprocess.check_call(["ip", "link", "set", name, "netns", netns])
+
+def netns_create(name):
+    subprocess.check_call(["ip", "netns", "add", name])
+
+def netns_delete(name):
+    subprocess.check_call(["ip", "netns", "delete", name])
+
+@netns_decorate
+def ip_set_mtu(dev, mtu, **kwargs):
+    subprocess.check_call(kwargs['exec_wrap'] +
+                          ["ip", "link", "set", dev, "mtu", "%d" % (mtu)])
+
+
+@netns_decorate
+def ip_route_add(networkbits, gw, **kwargs):
+    subprocess_check_output(kwargs['exec_wrap'] +
+                            ["ip", "route", "add", networkbits, "via", gw],
+                            stderr=subprocess.STDOUT)
+
+@netns_decorate
+def ip_add(ip, bits, dev, **kwargs):
+    subprocess_check_output(kwargs['exec_wrap'] +
+                            ["ip", "addr", "add",
                              "%s/%d" % (ip, bits), "broadcast",
                              get_ip_on_network(
                 num_to_dotted_quad(network_mask(ip, bits)),
                 2**(32-bits) - 1), "dev", dev],
                             stderr=subprocess.STDOUT)
 
-def ip_add_idemp(ip, bits, dev):
+def ip_add_idemp(ip, bits, dev, **kwargs):
     try:
-        ip_add(ip, bits, dev)
+        ip_add(ip, bits, dev, **kwargs)
     except subprocess.CalledProcessError as err:
         if err.output != "RTNETLINK answers: File exists\n":
             raise
@@ -2088,3 +2230,6 @@ def chunks(array, n):
     """Yield successive n-sized chunks from array."""
     for i in range(0, len(array), n):
         yield array[i:i+n]
+
+# At the end to prevent circular includes
+import pcocc.EthNetwork

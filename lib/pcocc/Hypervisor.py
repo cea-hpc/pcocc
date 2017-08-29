@@ -772,7 +772,20 @@ username={3}@pcocc
 
             f = open(meta_data_file, 'w')
             f.write('instance-id: {0}\n'.format(vm.instance_id))
-            f.write('local-hostname: vm%d\n' % (vm.rank))
+
+            if hasattr(vm, 'domain_name'):
+                # Setting the fqdn as a hostname is not standard but
+                # its what cloud-init wants and its difficult to work
+                # around it.  Ideally we'd set the short hostname for
+                # and cloud-init would use it as a hostname without
+                # appending .localdomain. The fqdn should be
+                # determined by the resolver configuration (dns or
+                # host file).
+                f.write('local-hostname: vm{0}.{1}\n'.format(vm.rank, vm.domain_name))
+            else:
+                # For networks without managed DHCP/DNS set a hostname by default
+                f.write('local-hostname: vm%d\n' % (vm.rank))
+
             f.close()
 
             if vm.user_data:

@@ -31,10 +31,12 @@ Template parameters
  Instance ID to provide to cloud-init.
 **mount-points**
  A key/value mapping defining directories to export as 9p mount points (see :ref:`pcocc-9pmount-tutorial(7)<configvm>`). Each key defines a 9p mount tag and the associated value defines the directory to export. The following parameters are supported:
-**path**
- The host directory to export.
-**readonly**
- If set to true the export will be read-only.
+
+  **path**
+   The host directory to export.
+  **readonly**
+   If set to *true* the export will be read-only.
+
 **persistent-drives**
  A list of persistent drives to provide to the VMs. Each element of the list is a single key/value mapping where the key is the path to the VM disk file (in raw format), and the value defines parameters for the drive. VMs have direct access to the source data which means changes are persistent and the template should usually only be instantiated once at a time. When a virtual cluster contains VMs instianciated from templates with persistent drives, pcocc will try to properly shutdown the guest operating when the user relinquishes the resource allocation. For each drive, the following parameters can be configured:
 

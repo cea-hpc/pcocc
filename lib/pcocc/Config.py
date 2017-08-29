@@ -19,11 +19,15 @@
 import os
 import string
 import logging
+import errno
+import fcntl
 import pcocc
 from pcocc.Singleton import Singleton
 from os.path import expanduser
+from .NetUtils import Tracker
 
-DEFAULT_CONF_DIR = os.path.join('/etc/pcocc')
+DEFAULT_CONF_DIR = '/etc/pcocc'
+DEFAULT_RUN_DIR = '/var/run/pcocc'
 DEFAULT_USER_CONF_DIR = os.environ.get('PCOCC_USER_CONF_DIR', '%homedir/.pcocc/')
 PCOCC_DEBUG_FLAG = False
 CKPT_RETRY_COUNT = 1
@@ -40,6 +44,22 @@ class TemplatePath(string.Template):
     )
     """
 
+class Lock:
+    """Simple flock based Lock"""
+    def __init__(self, filename):
+        self.filename = filename
+        self.handle = open(filename, 'w')
+
+    def acquire(self):
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+
+    def release(self):
+        fcntl.flock(self.handle, fcntl.LOCK_UN)
+
+    def __del__(self):
+        self.handle.close()
+
+
 class Config(object):
     __metaclass__ = Singleton
     def __init__(self):
@@ -55,6 +75,7 @@ class Config(object):
         self.ckpt_retry_count = CKPT_RETRY_COUNT
         self.conf_dir = DEFAULT_CONF_DIR
         self._verbose = 0
+        self._run_dir = DEFAULT_RUN_DIR
 
     def load(self, conf_dir=DEFAULT_CONF_DIR, jobid=None, jobname=None,
              default_jobname=None, process_type=None, batchuser=None):
@@ -123,6 +144,23 @@ class Config(object):
             tplvalues['vm_rank'] = vm.rank
 
         return expanduser(tpl.safe_substitute(tplvalues))
+
+
+    def lock_node(self):
+        self._init_run_dir()
+        self._lock = Lock(os.path.join(self._run_dir, 'setup.lock'))
+        self._lock.acquire()
+
+    def release_node(self):
+        self._lock.release()
+
+    def _init_run_dir(self):
+        try:
+            os.makedirs(self._run_dir)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+        os.chmod(self._run_dir, 0700)
 
     @property
     def verbose(self):

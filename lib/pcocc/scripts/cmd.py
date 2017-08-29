@@ -1054,22 +1054,6 @@ def pcocc_exec(index, jobid, jobname, user, script, cmd):
     except PcoccError as err:
         handle_error(err)
 
-
-class Lock:
-    """Simple flock based Lock"""
-    def __init__(self, filename):
-        self.filename = filename
-        self.handle = open(filename, 'w')
-
-    def acquire(self):
-        fcntl.flock(self.handle, fcntl.LOCK_EX)
-
-    def release(self):
-        fcntl.flock(self.handle, fcntl.LOCK_UN)
-
-    def __del__(self):
-        self.handle.close()
-
 @internal.command(name='setup',
              short_help="For internal use")
 @click.argument('action', type=click.Choice(['init', 'cleanup', 'create', 'delete']))
@@ -1083,9 +1067,8 @@ def pcocc_setup(action, jobid, nolock, force):
     # Dont load user config, we run as a privileged user
     config = Config()
 
-    lock = Lock("/tmp/.pcocc_setup.lock")
     if not nolock:
-        lock.acquire()
+        config.lock_node()
 
     # Always raise verbosity for setup processes
     config.verbose = max(config.verbose, 1)
@@ -1095,27 +1078,27 @@ def pcocc_setup(action, jobid, nolock, force):
 
     if action == 'init':
         config.load(process_type=ProcessType.OTHER)
-        Config().batch.init_node()
+        config.batch.init_node()
         config.config_node()
     elif action == 'cleanup':
         config.load(process_type=ProcessType.OTHER)
         config.cleanup_node()
     elif action == 'create':
         config.load(process_type=ProcessType.SETUP)
-        Config().batch.create_resources()
+        config.batch.create_resources()
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)
         cluster.alloc_node_resources()
     elif action == 'delete':
         config.load(jobid=jobid, process_type=ProcessType.SETUP)
-        Config().batch.delete_resources(force)
+        config.batch.delete_resources(force)
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)
         cluster.free_node_resources()
 
-    if not nolock:
-        lock.release()
 
+    if not nolock:
+        config.release_node()
 
 @template.command(name='list',
              short_help="List all templates")

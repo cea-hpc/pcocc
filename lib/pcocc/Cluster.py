@@ -451,13 +451,15 @@ class Cluster(object):
         with click.progressbar(
             show_eta = False,
             show_percent = False,
+            file=sys.stderr,
             length = 2,
             label = 'Configuring hosts...',
             bar_template = '%(label)s (%(info)s)',
             item_show_func = lambda x: x['desc'] if x else '') as bar:
 
             bar.current_item = last_state
-            bar.update(0)
+            if sys.stderr.isatty():
+                bar.update(0)
 
             while True:
                 batch.wait_key_index(
@@ -471,6 +473,7 @@ class Cluster(object):
 
                 done, last_state = self._check_all_host_states(host_states)
                 bar.current_item = last_state
-                bar.update(1)
+                if sys.stderr.isatty():
+                    bar.update(1)
                 if done:
                     break

@@ -1013,7 +1013,9 @@ def pcocc_run(restart_ckpt):
         handle_error(err)
 
 @cli.command(name='exec',
-             short_help="Execute commands through the guest agent")
+             short_help="Execute commands through the guest agent",
+             context_settings=dict(ignore_unknown_options=True,
+                                   allow_interspersed_args=False))
 @click.option('-i', '--index', default=0, type=int,
               help='Index of the vm on which the command should be executed')
 @click.option('-j', '--jobid', type=int,
@@ -1024,7 +1026,7 @@ def pcocc_run(restart_ckpt):
               help='User id to use to execute the command')
 @click.option('-s', '--script', is_flag=True,
               help='Cmd is a shell script to be copied to /tmp and executed in place')
-@click.argument('cmd', nargs=-1, required=False)
+@click.argument('cmd', nargs=-1, required=False, type=click.UNPROCESSED)
 def pcocc_exec(index, jobid, jobname, user, script, cmd):
     """Execute commands through the guest agent
 

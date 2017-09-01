@@ -23,18 +23,17 @@ import tempfile
 import os
 import shlex
 
-from .Networks import VNetworkClass, VNetwork
-from .Backports import subprocess_check_output
+from .Networks import VNetwork
 from .Error import PcoccError, InvalidConfigurationError
 from .Config import Config
 from .Misc import IDAllocator
 from .NetUtils import OVSBridge, TAP, VEth, OVSCookie, IPTableRule, NetNameSpace
-from .NetUtils import NetPort, PidDaemon
+from .NetUtils import NetPort, PidDaemon, NetworkSetupError
 from .NetUtils import get_ip_on_network, mac_gen_hwaddr, resolve_host
 from .NetUtils import make_mask, dotted_quad_to_num, num_to_dotted_quad
 
 class VEthNetwork(VNetwork):
-    _schema = """
+    _schema = r"""
 properties:
   type:
       enum:
@@ -68,6 +67,9 @@ properties:
        type: string
       dns-search:
        type: string
+      dns-server:
+       type: string
+       pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
       ntp-server:
        type: string
       reverse-nat:
@@ -338,7 +340,8 @@ additionalProperties: false
                     # Deliver remote broadcasts from this tunnel to local VMs
                     int_br.add_flow(table=self._l2_forward_table,
                                     match='in_port={0},'
-                                    'dl_dst=01:00:00:00:00:00/01:00:00:00:00:00'.format(tunnel_port_id),
+                                    'dl_dst=01:00:00:00:00:00/01:00:00:00:00:00'.format(
+                                        tunnel_port_id),
                                     action='group=1')
 
                     # Deliver packets for the host interface on the virtual net
@@ -453,10 +456,7 @@ additionalProperties: false
 
     def free_node_resources(self, cluster):
         master = -1
-        for vm in self._net_vms(cluster):
-            if not vm.is_on_node():
-                continue
-
+        for _ in self._local_net_vms(cluster):
             net_res = self.load_resources()
             master = net_res['global']['master']
             break
@@ -482,13 +482,7 @@ additionalProperties: false
 
     def load_node_resources(self, cluster):
         net_res = None
-        for vm in cluster.vms:
-            if not vm.is_on_node():
-                continue
-
-            if not self.name in vm.networks:
-                continue
-
+        for vm in self._local_net_vms(cluster):
             if not net_res:
                 net_res = self.load_resources()
 
@@ -564,8 +558,6 @@ additionalProperties: false
                         match='dl_type=0x0800, '
                         'nw_dst={0}/{1}, '
                         'nw_src={0}/{1}'.format(self._int_network,
-                                                self._int_network_bits,
-                                                self._int_network,
                                                 self._int_network_bits),
                         action='goto_table={0}'.format(self._l2_forward_table))
 
@@ -637,8 +629,15 @@ additionalProperties: false
             dnsmasq_opts+="--dhcp-option=option:ntp-server,{0} ".format(
                 self._ntp_server)
 
-        if not self._allow_outbound:
+        if self._dns_server:
+            dnsmasq_opts+="--server={0} ".format(self._dns_server)
+
+        if not self._allow_outbound or self._dns_server:
             dnsmasq_opts+="--no-resolv "
+
+        search_opt = self._domain_name
+        if self._dns_search:
+            search_opt+= ',' + self._dns_search
 
         fd, dhcpconf = tempfile.mkstemp()
         with os.fdopen(fd, 'w') as f:
@@ -680,8 +679,8 @@ additionalProperties: false
                     netns = netns_name,
                     pid_file = pid_file,
                     hostsfile = dhcpconf,
-                    domainname = self._domain_name.split(',')[0],
-                    search = self._domain_name,
+                    domainname = self._domain_name.split(',')[0]+'.',
+                    search = search_opt,
                     mtu = self._mtu - 50,
                     dnssrv = self._int_host_ip,
                     addopts = dnsmasq_opts,
@@ -689,12 +688,6 @@ additionalProperties: false
                     router = self._int_gw_ip,
                     dhcpnetwork = self._int_network,
                     addnhosts = dnsconf)))
-
-
-    def _net_vms(self, cluster):
-        for vm in cluster.vms:
-            if self.name in vm.networks:
-                yield vm
 
     def _add_forwarding_entries(self, int_br, int_ip, hwaddr,
                                 ext_br, ext_ip, ext_port, ext_cookie):
@@ -872,7 +865,8 @@ additionalProperties: false
                                                             self._ext_network_bits),
                                  'POSTROUTING', 'nat'))
 
-        rules.append(IPTableRule('-s %s/%d ! -d %s/%d -p icmp --icmp-type echo-request -j MASQUERADE'
+        rules.append(IPTableRule('-s %s/%d ! -d %s/%d -p icmp '
+                                 '--icmp-type echo-request -j MASQUERADE'
                                  % (self._ext_network,
                                     self._ext_network_bits,
                                     self._ext_network,
@@ -961,6 +955,7 @@ additionalProperties: false
             self._domain_name = self._domain_name[:-1]
 
         self._dns_search = settings.get("dns-search", '')
+        self._dns_server = settings.get("dns-server", '')
         self._ntp_server = settings.get("ntp-server", '')
 
         # Add ip/port range filters
@@ -1008,3 +1003,10 @@ additionalProperties: false
             logging.warning('Deleted {0} leftover veth(s) for {1} network'.format(
                     count,
                     self.name))
+
+    @staticmethod
+    def get_rnat_host_port(vm_rank, port):
+        return Config().batch.read_key(
+            'cluster',
+            'rnat/{0}/{1}'.format(vm_rank, port),
+            blocking=False)

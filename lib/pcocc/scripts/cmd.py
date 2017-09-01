@@ -138,7 +138,7 @@ DEFAULT_SSH_OPTS = [ '-o', 'UserKnownHostsFile=/dev/null', '-o',
 
 def find_vm_rnat_port(cluster, index, port=22):
     cluster.wait_host_config()
-    host_port = pcocc.Networks.VNATNetwork.get_rnat_host_port(index, port)
+    host_port = pcocc.EthNetwork.VEthNetwork.get_rnat_host_port(index, port)
     if host_port:
         return host_port
     else:

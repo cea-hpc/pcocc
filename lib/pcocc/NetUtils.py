@@ -16,11 +16,31 @@
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
-import socket, struct, atexit, signal
-import os, re, shelve, json, logging, subprocess
+import atexit
+import logging
+import os
+import pwd
+import re
+import shelve
+import signal
+import socket
+import struct
+import subprocess
+import time
+
 from abc import ABCMeta, abstractmethod
+from .Error import PcoccError
+
+class NetworkSetupError(PcoccError):
+    def __init__(self, error):
+        super(NetworkSetupError, self).__init__(
+            'Failed to setup network on node: ' + error)
 
 class Tracker(object):
+    """
+    Keep track of node network configuration changes performed for each virtual
+    cluster and automatically roll them back after a cluster is no longer active.
+    """
     _trackable = {}
     @classmethod
     def register_trackable(cls, name, trackable_class):
@@ -80,7 +100,6 @@ class Tracker(object):
                     logging.warning('Deleted leftover {0}'.format(obj))
             except Exception as e:
                 logging.warning('Failed to delete {0}: {1} '.format(obj, e))
-                pass
 
             del self._tracked_objs[self._track_key(obj)]
         self._tracked_objs.sync()
@@ -117,8 +136,8 @@ class TrackableClass(ABCMeta):
 class TrackableObject(object):
     __metaclass__ = TrackableClass
 
-    def __init__(self):
-        pass
+    def __init__(self, name):
+        self._name = name
 
     @abstractmethod
     def __repr__(self):
@@ -158,13 +177,300 @@ class TrackableObject(object):
         else:
             return subprocess.check_output(cmd)
 
+class VFIODev(TrackableObject):
+    @classmethod
+    def list_cleanup(cls, dev_list, *args, **kwargs):
+        bound_devices = cls._list_vfio_devices()
+
+        count = 0
+        for dev_addr in bound_devices:
+            if dev_addr in dev_list:
+                cls(dev_addr, *args, **kwargs).delete()
+                count += 1
+
+        return count
+
+    @classmethod
+    def list_find_free(cls, dev_list, *args, **kwargs):
+        bound_devices = cls._list_vfio_devices()
+
+        dev_addr = None
+        for dev_addr in dev_list:
+            if dev_addr not in bound_devices:
+                break
+        else:
+            raise NetworkSetupError('Unable to find a free '
+                                    'PCI device among {0}'.format(dev_list))
+
+        return cls(dev_addr, *args, **kwargs)
+
+    def __init__(self, dev_addr, user='root', driver=None):
+        self._dev_addr = dev_addr
+        self._user = user
+        self._driver = driver
+
+    def __repr__(self):
+        return '{cls}(dev_addr={dev_addr}, user={user}, driver={driver})'.format(
+            cls = self.__class__.__name__,
+            dev_addr = self._dev_addr,
+            user = self._user,
+            driver = self._driver)
+
+    @property
+    def dev_addr(self):
+        return self._dev_addr
+
+    def dump_args(self):
+        return {'dev_addr': self._dev_addr, 'user': self._user, 'driver': self._driver}
+
+    def create(self):
+        self._bind_vfio()
+        self._log_create()
+        return self
+
+    def delete(self):
+        self._unbind_vfio()
+
+    def _bind_vfio(self):
+        with open('/sys/bus/pci/devices/{0}/driver/unbind'.format(self._dev_addr),
+                  'w') as f:
+            f.write(self._dev_addr)
+
+        with open('/sys/bus/pci/drivers/vfio-pci/bind', 'w') as f:
+            f.write(self._dev_addr)
+
+        uid = pwd.getpwnam(self._user).pw_uid
+        # FIXME: This seems to be required to prevent a race
+        # between char device creation and chown
+        time.sleep(0.1)
+        os.chown(os.path.join('/dev/vfio/', self._iommu_group), uid, -1)
+
+    def _unbind_vfio(self):
+        with open('/sys/bus/pci/drivers/vfio-pci/unbind', 'w') as f:
+            f.write(self._dev_addr)
+
+        with open('/sys/bus/pci/drivers/{0}/bind'.format(self._driver), 'w') as f:
+            f.write(self._dev_addr)
+
+    @property
+    def _iommu_group(self):
+        iommu_group_path = '/sys/bus/pci/drivers/vfio-pci/{0}/iommu_group'.format(
+            self._dev_addr)
+
+        return os.path.basename(os.readlink(iommu_group_path))
+
+    @staticmethod
+    def _list_vfio_devices():
+        return os.listdir("/sys/bus/pci/drivers/vfio-pci")
+
+class VFIOInfinibandVF(VFIODev):
+    @classmethod
+    def ibdev_cleanup(cls, ibdev_name, *args, **kwargs):
+        count = 0
+        for vf_addr in cls._ibdev_perform(ibdev_name, 'list'):
+            cls(vf_addr, ibdev_name, *args, **kwargs).delete()
+            count +=1
+
+        return count
+
+    @classmethod
+    def ibdev_find_free(cls, ibdev_name, *args, **kwargs):
+        vf_addr = cls._ibdev_perform(ibdev_name, 'find')
+
+        return cls(vf_addr, ibdev_name, *args, **kwargs)
+
+    @classmethod
+    def _ibdev_perform(cls, ibdev_name, action, *args):
+        device_path = "/sys/class/infiniband/%s/device" % (ibdev_name)
+        bound_devices = cls._list_vfio_devices()
+
+        vf_list = []
+        for virtfn in os.listdir(device_path):
+            m = re.match(r'virtfn(\d+)', virtfn)
+
+            if not re.match(r'virtfn(\d+)', virtfn):
+                continue
+
+            vf_id = m.group(1)
+
+            vf_addr = os.path.basename(os.readlink(
+                os.path.join(device_path, virtfn)))
+
+            if action == 'find' and vf_addr not in bound_devices:
+                return vf_addr
+            elif action == 'list' and vf_addr in bound_devices:
+                vf_list.append(vf_addr)
+            elif action == 'getid' and vf_addr == args[0]:
+                return int(vf_id)
+
+
+        if action == 'find':
+            raise NetworkSetupError('unable to find a free '
+                                    'VF for device %s' % ibdev_name)
+        elif action=='list':
+            return vf_list
+
+    def __init__(self, dev_addr, ibdev_name, user='root', port_guid=None,
+                 node_guid=None, pkey=None):
+
+        self._dev_addr = dev_addr
+        self._user = user
+        self._driver = 'pci-stub'
+        self._ibdev_name = ibdev_name
+        self._port_guid = port_guid
+        self._node_guid = node_guid
+        self._pkey = pkey
+
+    def __repr__(self):
+        return ('{cls}(dev_addr={dev_addr}, ibdev_name={ibdev_name}, '
+                'user={user}, port_guid={port_guid}, '
+                'node_guid={node_guid}, pkey={pkey})'.format(
+                    cls = self.__class__.__name__,
+                    dev_addr = self._dev_addr,
+                    ibdev_name = self._ibdev_name,
+                    user = self._user,
+                    port_guid = self._port_guid,
+                    node_guid = self._node_guid,
+                    pkey = self._pkey))
+
+    def create(self):
+        super(self.__class__, self).create()
+
+        if self._ibvf_type == IBVFType.MLX4:
+            if self._pkey:
+                for i in range(5):
+                    try:
+                        self._set_pkey()
+                        break
+                    except NetworkSetupError:
+                        if i == 4:
+                            raise
+                        logging.warning("PKey not yet ready, sleeping...")
+                        time.sleep(1 + i*2)
+            else:
+                self._allow_host_pkeys()
+        else:
+            self._set_guids()
+
+    def delete(self):
+        if self._ibvf_type == IBVFType.MLX4:
+            if self._pkey:
+                self._unset_pkey()
+            else:
+                self._clear_host_pkeys()
+        else:
+            self._unset_guids()
+
+        super(self.__class__, self).delete()
+
+    def dump_args(self):
+        return {'dev_addr': self._dev_addr, 'ibdev_name': self._ibdev_name,
+                'user': self._user, 'port_guid': self._port_guid,
+                'node_guid': self._node_guid, 'pkey': self._pkey}
+
+    @property
+    def _id(self):
+        return self._ibdev_perform(self._ibdev_name,
+                                   'getid', self._dev_addr)
+
+    @property
+    def _ibvf_type(self):
+        if self._ibdev_name[:4] == 'mlx4':
+            return IBVFType.MLX4
+        elif self._ibdev_name[:4] == 'mlx5':
+            return IBVFType.MLX5
+
+        raise NetworkSetupError('Cannot determine VF type for device {0}'.format(self._ibdev_name))
+
+    def _unset_guids(self):
+        sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(
+            self._ibdev_name,
+            self._id)
+
+        with open(os.path.join(sriov_path, 'policy'), 'w') as f:
+            f.write('Down\n')
+
+    def _set_guids(self):
+        sriov_path = '/sys/class/infiniband/{0}/device/sriov/{1}'.format(
+            self._ibdev_name, self._id)
+
+        with open(os.path.join(sriov_path, 'policy'), 'w') as f:
+            f.write('Follow\n')
+
+        with open(os.path.join(sriov_path, 'node'), 'w') as f:
+            f.write(guid_hex_to_col(self._node_guid))
+
+        with open(os.path.join(sriov_path, 'port'), 'w') as f:
+            f.write(guid_hex_to_col(self._port_guid))
+
+    def _set_pkey(self):
+        pkey_idx_path = "/sys/class/infiniband/%s/iov/%s/ports/1/pkey_idx" % (
+            self._ibdev_name, self._dev_addr)
+
+        user_pkey_idx = ibdev_find_pkey_idx(self._ibdev_name,
+                                      self._pkey)
+        with open(os.path.join(pkey_idx_path, '0'), 'w') as f:
+            f.write(user_pkey_idx)
+
+        def_pkey_idx = ibdev_find_pkey_idx(self._ibdev_name, 0xffff)
+        with open(os.path.join(pkey_idx_path, '1'), 'w') as f:
+            f.write(def_pkey_idx)
+
+    def _unset_pkey(self):
+        pkey_idx_path = "/sys/class/infiniband/%s/iov/%s/ports/1/pkey_idx" % (
+            self._ibdev_name, self._dev_addr)
+
+        with open(os.path.join(pkey_idx_path, '0'), 'w') as f:
+            f.write('none')
+
+        with open(os.path.join(pkey_idx_path, '1'), 'w') as f:
+            f.write('none')
+
+    def _allow_host_pkeys(self):
+        device_path = "/sys/class/infiniband/{0}".format(self._ibdev_name)
+        num_ports = len(os.listdir(os.path.join(device_path, "ports")))
+
+        for port in xrange(1, num_ports + 1):
+            pkeys_path = os.path.join(device_path, "ports", str(port),
+                                      "pkeys")
+            pkey_idx_path = os.path.join(device_path, "iov", self._dev_addr,
+                                         "ports", str(port), "pkey_idx")
+
+            idx = 0
+            for pkey_idx in os.listdir(pkeys_path):
+                p = os.path.join(pkeys_path, pkey_idx)
+                with open(p) as f:
+                    try:
+                        this_pkey_value = int(f.read().strip(), 0)
+                    except ValueError:
+                        continue
+
+                    if this_pkey_value:
+                        with open(os.path.join(pkey_idx_path, str(idx)), 'w') as f:
+                            f.write(pkey_idx)
+                        idx+=1
+
+    def _clear_host_pkeys(self):
+        device_path = '/sys/class/infiniband/{0}'.format(self._ibdev_name)
+        num_ports = len(os.listdir(os.path.join(device_path, 'ports')))
+
+        for port in xrange(1, num_ports+1):
+            pkey_idx_path = os.path.join(device_path, 'iov', self._dev_addr,
+                                         'ports', str(port), 'pkey_idx')
+
+            for pkey_idx in os.listdir(pkey_idx_path):
+                this_pkey_idx_path = os.path.join(pkey_idx_path, pkey_idx)
+                with open(this_pkey_idx_path, 'w') as f:
+                    f.write('none')
+
+
 class NetNameSpace(TrackableObject):
     def __init__(self, name):
         self._name = name
 
     def __repr__(self):
-        return '{cls}(name={name})'.format(cls=self.__class__.__name__,
-                                           name=self._name)
+        return '{cls}(name={name})'.format(cls = self.__class__.__name__,
+                                           name = self._name)
 
     def dump_args(self):
         return {'name': self._name}
@@ -182,8 +488,8 @@ class NetPort(TrackableObject):
         self._number = number
 
     def __repr__(self):
-        return '{cls}(number={number})'.format(cls=self.__class__.__name__,
-                                               number=self._number)
+        return '{cls}(number={number})'.format(cls = self.__class__.__name__,
+                                               number = self._number)
 
     def dump_args(self):
         return {'number': self._number}
@@ -215,18 +521,19 @@ class NetPort(TrackableObject):
             raise ValueError('no free port')
 
 class IPTableRule(TrackableObject):
-    def __init__(self, rule, chain, table=None, mode='A'):
+    def __init__(self, rule, chain, table=None, mode='append', rulenum=0):
         self._rule = rule
         self._chain = chain
         self._table = table
         self._mode = mode
+        self._rulenum = rulenum
 
     def __repr__(self):
         return '{cls}(rule={rule}, chain={chain}, table={table})'.format(
-            cls=self.__class__.__name__,
-            rule=self._rule,
-            chain=self._chain,
-            table=self._table
+            cls = self.__class__.__name__,
+            rule = self._rule,
+            chain = self._chain,
+            table = self._table
         )
 
     def dump_args(self):
@@ -239,7 +546,7 @@ class IPTableRule(TrackableObject):
         if not self.rule_exist(self._rule, self._chain, self._table):
             self.run(["iptables"] +
                      self._table_arg(self._table) +
-                     ["-{0}".format(self._mode), self._chain] +
+                     self._mode_arg(self._mode, self._rulenum, self._chain) +
                      self._rule.split())
         return self
 
@@ -247,7 +554,7 @@ class IPTableRule(TrackableObject):
         if self.rule_exist(self._rule, self._chain, self._table):
             self.run(["iptables"] +
                      self._table_arg(self._table) +
-                     ["-D", self._chain] +
+	             ["-D", self._chain] +
                      self._rule.split())
 
     @staticmethod
@@ -257,13 +564,15 @@ class IPTableRule(TrackableObject):
         else:
             return []
 
+    @staticmethod
+    def _mode_arg(mode, rulenum, chain):
+        if mode == 'append':
+            return ["-A", chain]
+        elif mode  == 'insert':
+            return ["-I", chain, str(rulenum)]
+
     @classmethod
     def rule_exist(cls, rule, chain, table = None):
-        if table:
-            table_args = ["-t", table]
-        else:
-            table_args = []
-
         try:
             cls.run(["iptables"] +
                     cls._table_arg(table) +
@@ -271,7 +580,7 @@ class IPTableRule(TrackableObject):
                     rule.split(), True, True)
 
             return True
-        except subprocess.CalledProcessError as err:
+        except subprocess.CalledProcessError:
             return False
 
 class OVSCookie(TrackableObject):
@@ -303,15 +612,16 @@ class OVSCookie(TrackableObject):
         return self
 
     def delete(self):
-        OVSBridge(self._bridge, self._netns).del_flows(cookie='{0}/-1'.format(self._value))
+        OVSBridge(self._bridge, self._netns).del_flows(cookie='{0}/-1'.format(
+                self._value))
 
 class PidDaemon(TrackableObject):
     def __init__(self, pid_file):
         self._pid_file = pid_file
 
     def __repr__(self):
-        return '{cls}(pid_file={pid_file})'.format(cls=self.__class__.__name__,
-                                           pid_file=self._pid_file)
+        return '{cls}(pid_file={pid_file})'.format(cls = self.__class__.__name__,
+                                               pid_file = self._pid_file)
 
     def dump_args(self):
         return {'pid_file': self._pid_file}
@@ -332,7 +642,7 @@ class PidDaemon(TrackableObject):
 
 class NetDev(TrackableObject):
     @classmethod
-    def prefix_cleanup(cls, prefix):
+    def prefix_cleanup(cls, prefix, *args, **kwargs):
         count = 0
 
         for dev_id in cls._find_used_dev_ids(prefix):
@@ -343,16 +653,16 @@ class NetDev(TrackableObject):
         return count
 
     @classmethod
-    def prefix_find_free(cls, prefix, **kwargs):
-        return cls(cls._find_free_dev_name(prefix),
-                   kwargs)
+    def prefix_find_free(cls, prefix, *args, **kwargs):
+        return cls(cls._find_free_dev_name(prefix), *args,
+                   **kwargs)
 
     def __repr__(self):
-        return '{cls}(name={name}, netns={netns})'.format(cls=self.__class__.__name__,
-                                                          name=self._name,
-                                                          netns=str(self._netns))
+        return '{cls}(name={name}, netns={netns})'.format(cls = self.__class__.__name__,
+                                                          name = self._name,
+                                                          netns = str(self._netns))
 
-    def __init__(self, name, netns):
+    def __init__(self, name, netns=None):
         self._name = name
         self._netns = netns
 
@@ -560,6 +870,15 @@ class TAP(NetDev):
 
         return self
 
+    def connect(self, bridge_name):
+        subprocess.check_call(["ip", "link", "set", self._name, "master",
+                               bridge_name])
+
+
+class IBVFType(object):
+    MLX4 = 1
+    MLX5 = 2
+
 def make_mask(num_bits):
     "return a mask of num_bits as a long integer"
     return ((2L<<num_bits-1) - 1) << (32 - num_bits)
@@ -606,3 +925,61 @@ def mac_gen_hwaddr(prefix, num):
     suffix = ':'.join(
         suffix[i:i+2] for i in xrange(0, len(suffix), 2))
     return prefix + ':' + suffix
+
+def bridge_exists(brname):
+    """ returns whether brname is a bridge (linux or ovs) """
+    return (os.path.exists('/sys/devices/virtual/net/{0}/bridge/'.format(brname)) or
+           ovs_bridge_exists(brname))
+
+def ovs_bridge_exists(brname):
+    match = re.search(r'Bridge {0}'.format(brname),
+                  subprocess.check_output(["ovs-vsctl", "show"]))
+    if match:
+        return True
+    else:
+        return False
+
+def pci_enable_driver(dev_addr, driver_name):
+    device_path = os.path.join("/sys/bus/pci/devices/", dev_addr)
+    driver_path = os.path.join("/sys/bus/pci/drivers", driver_name, 'new_id')
+
+    with open(os.path.join(device_path, 'vendor'), 'r') as f:
+        vendor_id=f.read()
+
+    with open(os.path.join(device_path, 'device'), 'r') as f:
+        device_id=f.read()
+
+    with open(driver_path, 'w') as f:
+        f.write('{0} {1}'.format(vendor_id, device_id))
+
+def ibdev_enable_vf_driver(ibdev_name, driver_name):
+    device_path = "/sys/class/infiniband/%s/device/virtfn0" % (ibdev_name)
+    dev_addr = os.path.basename(os.readlink(device_path))
+    pci_enable_driver(dev_addr, driver_name)
+
+def ibdev_find_pkey_idx(device_name, pkey_value):
+    pkey_idx_path = "/sys/class/infiniband/%s/ports/1/pkeys" % (
+        device_name)
+
+    for pkey_idx in os.listdir(pkey_idx_path):
+        this_pkey_idx_path = os.path.join(pkey_idx_path, pkey_idx)
+        with open(this_pkey_idx_path) as f:
+            try:
+                this_pkey_value = int(f.read().strip(), 0)
+            except ValueError:
+                continue
+
+            if this_pkey_value & 0x7fff == pkey_value & 0x7fff:
+                return pkey_idx
+
+    raise NetworkSetupError('pkey %s not found on device %s' % (
+        hex(pkey_value), device_name))
+
+def ibdev_get_guid(ibdev_name):
+    return subprocess.check_output(['ibstat', '-p',
+                                    ibdev_name]).splitlines()[0]
+
+
+def guid_hex_to_col(guid):
+    res = ':'.join(guid[c:c+2] for c in xrange(2, len(guid), 2))
+    return res

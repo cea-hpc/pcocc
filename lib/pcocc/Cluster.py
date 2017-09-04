@@ -64,16 +64,17 @@ class Worker(Thread):
             try:
                 func(*args, **kargs)
             except Exception as e:
-                self.pool.exception = xe
+                self.pool.exception = e
             finally:
                 self.pool.tasks.task_done()
 
-class ThreadPool:
+class ThreadPool(object):
     """Pool of threads consuming tasks from a queue"""
     def __init__(self, num_threads):
         self.tasks = Queue(num_threads)
         self.exception = None
-        for _ in range(num_threads): Worker(self)
+        for _ in range(num_threads):
+            Worker(self)
 
     def add_task(self, func, *args, **kargs):
         """Add a task to the queue"""
@@ -84,7 +85,7 @@ class ThreadPool:
         self.tasks.join()
 
         if self.exception is not None:
-            raise self.exception # pylint: disable=E0702
+            raise self.exception # pylint: disable-msg=E0702
 
 def do_checkpoint_vm(vm, ckpt_dir):
     vm.checkpoint(ckpt_dir)
@@ -279,7 +280,7 @@ class Cluster(object):
                 count += tpl_count
                 self.resource_definition += '%s:%d,' % (
                     Config().tpls[tpl_name].rset.name, tpl_count)
-        except KeyError as err:
+        except KeyError:
             raise InvalidClusterError(repr(self.definition))
 
         self.resource_definition = self.resource_definition[:-1]

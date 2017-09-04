@@ -30,7 +30,6 @@ import struct
 import errno
 import tempfile
 import re
-import fcntl
 import time
 import threading
 import pwd
@@ -233,8 +232,9 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc',
-                             batchuser=user)
+        load_config(jobid, jobname, default_batchname='pcocc',
+                    batchuser=user)
+
         cluster = load_batch_cluster()
 
         ssh_opts = list(ssh_opts)
@@ -270,7 +270,8 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts):
 def pcocc_scp(jobid, jobname, user, scp_opts):
     """Transfer files to a VM via scp
 
-       This requires the VM to have its ssh port reverse NAT'ed to the host in its NAT network configuration.
+       This requires the VM to have its ssh port reverse NAT'ed to the host in 
+       its NAT network configuration.
 
        \b
        Example usage:
@@ -278,8 +279,9 @@ def pcocc_scp(jobid, jobname, user, scp_opts):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc',
-                             batchuser=user)
+        load_config(jobid, jobname, default_batchname='pcocc',
+                    batchuser=user)
+
         cluster = load_batch_cluster()
 
         scp_opts = list(scp_opts)
@@ -321,15 +323,15 @@ def pcocc_nc(jobid, jobname, user, nc_opts):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc',
-                             batchuser=user)
+        load_config(jobid, jobname, default_batchname='pcocc',
+                    batchuser=user)
         cluster = load_batch_cluster()
 
         nc_opts = list(nc_opts)
         rgxp = r'^vm(\d+)$'
         if len(nc_opts) > 0 and re.match(rgxp, nc_opts[-1]):
             host_opts = [nc_opts[-1]]
-            vm_index = int(re.match(rgxp, nc_opts[-1]).group(1))
+            vm_index = int(re.match(rgxp, host_opts[-1]).group(1))
             vm_port = 31337
             last_opt = max(0, len(nc_opts) -1)
         elif len(nc_opts) > 1 and re.match(rgxp, nc_opts[-2]):
@@ -417,7 +419,7 @@ def pcocc_save(jobid, jobname, dest,  vm, safe):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc')
+        load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]
@@ -471,7 +473,7 @@ def pcocc_reset(jobid, jobname,  vm):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc')
+        load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]
@@ -502,7 +504,7 @@ def pcocc_monitor_cmd(jobid, jobname,  vm, cmd):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc')
+        load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]
@@ -534,7 +536,7 @@ def pcocc_dump(jobid, jobname,  vm, dumpfile):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc')
+        load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]
@@ -576,7 +578,7 @@ def pcocc_ckpt(jobid, jobname, force, ckpt_dir):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc')
+        load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
 
         dest_dir = validate_save_dir(ckpt_dir, force)
@@ -896,7 +898,6 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
             subprocess.call(path, cwd=batch.cluster_state_dir)
 
     # TODO: This cmdline should be tunable
-    resource_definition = cluster.resource_definition
     s_pjob = batch.run(cluster,
                        ['-Q', '-X', '--resv-port'],
                        ['pcocc'] +
@@ -968,7 +969,7 @@ def wait_timeout(s_proc):
     try:
         logging.error("Forcibly killing hypervisor processes...\n")
         s_proc.kill()
-    except Exception as e:
+    except Exception:
         pass
 
 @internal.command(name='pkeyd',
@@ -999,7 +1000,7 @@ def pcocc_run(restart_ckpt):
     signal.signal(signal.SIGTERM, clean_exit)
 
     try:
-        config = load_config(process_type=ProcessType.HYPERVISOR)
+        load_config(process_type=ProcessType.HYPERVISOR)
         cluster = load_batch_cluster()
 
         cluster.load_node_resources()
@@ -1035,9 +1036,8 @@ def pcocc_exec(index, jobid, jobname, user, script, cmd):
        not want to rely on a network connexion / ssh server.
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc')
+        load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
-        batch = config.batch
 
         if not user:
             user = pwd.getpwuid(os.getuid()).pw_name

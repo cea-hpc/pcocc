@@ -48,6 +48,7 @@ from .Backports import subprocess_check_output
 from .Error import PcoccError, InvalidConfigurationError
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import CHILD_EXIT, datetime_to_epoch, stop_threads
+from abc import ABCMeta, abstractmethod
 
 class BatchError(PcoccError):
     """Generic exception for Batch related issues
@@ -129,7 +130,7 @@ required:
   - settings
 """
 
-class ProcessType:
+class ProcessType(object):
     """Enum class defining the type of process wrt batch management"""
     # Privileged process for node setup
     SETUP = 1
@@ -147,6 +148,7 @@ ETCD_PASSWORD_BYTES = 16
 
 
 class BatchManager(object):
+    __metaclass__ = ABCMeta
     """Manages all interactions with the batch environment"""
     def load(batch_config_file, batchid, batchname, default_batchname,
              proc_type, batchuser):
@@ -184,6 +186,15 @@ class BatchManager(object):
 
         self.proc_type = proc_type
 
+        # "abstract" properties
+        self.batchid = 0
+        self.batchuser = None
+        self.nodeset = None
+        self.node_rank = None
+        self.cluster_state_dir = None
+        self.vm_state_dir_prefix = None
+        self.pcocc_state_dir = None
+
     def find_job_by_name(self, user, batchname, host=None):
         """Return a jobid matching a user and batchname
 
@@ -192,12 +203,19 @@ class BatchManager(object):
         """
         raise PcoccError("Not implemented")
 
+    @abstractmethod
     def run(self, cluster, run_opt, cmd):
         """Launch the VM tasks"""
         raise PcoccError("Not implemented")
 
+    @abstractmethod
     def alloc(self, cluster, alloc_opt, cmd):
         """Allocate an interactive job"""
+        raise PcoccError("Not implemented")
+
+    @abstractmethod
+    def _only_in_a_job(self):
+        """Called on each node at the resource deletion step"""
         raise PcoccError("Not implemented")
 
     def batch(self, cluster, alloc_opt, cmd):
@@ -215,6 +233,7 @@ class BatchManager(object):
     def delete_resources(self, force=False):
         """Called on each node at the resource deletion step"""
         pass
+
 
     @property
     def task_rank(self):
@@ -468,10 +487,7 @@ class EtcdManager(BatchManager):
                                                    realindex=True)
                 nargs = args + (value,)
                 new_value, ret = func(*nargs, **kwargs)
-                if value is None:
-                    exist=False
-                else:
-                    exist=True
+
                 logging.debug(
                     "Trying atomic update \"{1}\" for \"{0}\" ".format(
                         str(value).strip(),
@@ -483,8 +499,8 @@ class EtcdManager(BatchManager):
                     else:
                         self.write_key_new(key_type, key, new_value)
                 else:
-                    v = self.write_key_index(key_type, key, new_value,
-                                             index)
+                    self.write_key_index(key_type, key, new_value,
+                                         index)
 
                 return ret
             except ( etcd.EtcdCompareFailed,
@@ -886,7 +902,7 @@ class LocalManager(EtcdManager):
 
         if alloc_opt.coreset:
             try:
-                r = RangeSet(alloc_opt.coreset)
+                _ = RangeSet(alloc_opt.coreset)
             except:
                 raise AllocationError('invalid core-set: {0}'.format(
                     alloc_opt.coreset))
@@ -945,6 +961,7 @@ class LocalManager(EtcdManager):
         if s == CHILD_EXIT.KILL:
             raise PcoccError('VM launcher did not acknowlege VM shutdown ' +
                              'request after SIGTERM was received')
+        return r
 
     def _hearbeat_thread(self):
         while not stop_threads.wait(30):
@@ -1058,7 +1075,7 @@ class LocalManager(EtcdManager):
         return batchids
 
     def _update_heartbeat(self, ttl=60):
-        d = self.write_ttl('global/user',
+        _ = self.write_ttl('global/user',
                            'batch-local/heartbeat/{0}'.format(self.batchid),
                            '',
                            ttl)
@@ -1133,8 +1150,6 @@ class LocalManager(EtcdManager):
 
     def _do_alloc_job(self, user, batchname, uuid, definition, job_alloc_state):
         """Helper to allocate a jobname"""
-        batch = Config().batch
-
         job_alloc_state = self._validate_job_state(job_alloc_state)
 
         try:
@@ -1177,8 +1192,6 @@ class LocalManager(EtcdManager):
 
     def _do_free_job(self, user, uuid, job_alloc_state):
         """Helper to allocate a jobname"""
-        batch = Config().batch
-
         job_alloc_state = self._validate_job_state(job_alloc_state)
 
         batchid = self._uuid_to_batchid(user, uuid, job_alloc_state)
@@ -1323,7 +1336,7 @@ class LocalManager(EtcdManager):
                             os.kill(pid, signal.SIGKILL)
                     except psutil.NoSuchProcess:
                         pass
-                    except OSError as e:
+                    except OSError:
                         pass
 
                 f.close()
@@ -1413,10 +1426,10 @@ class SlurmManager(EtcdManager):
                                              str(self.batchid),
                                              '-u', self.batchuser,
                                              '-h', '-o', '%N']))
-            except subprocess.CalledProcessError as err:
+            except subprocess.CalledProcessError:
                 raise InvalidJobError('no valid match for id '+ str(self.batchid))
 
-            except NodeSetException as err:
+            except NodeSetException:
                 raise InvalidJobError('no valid match for id '+ str(self.batchid))
 
         # Define working directories
@@ -1467,7 +1480,7 @@ class SlurmManager(EtcdManager):
 
         try:
             batchid = subprocess_check_output(cmd)
-        except subprocess.CalledProcessError as err:
+        except subprocess.CalledProcessError:
             raise InvalidJobError('no valid match for name '+ batchname)
 
         if not batchid:
@@ -1475,7 +1488,7 @@ class SlurmManager(EtcdManager):
 
         try:
             return int(batchid)
-        except ValueError as err:
+        except ValueError:
             raise InvalidJobError('name %s is ambiguous' % batchname)
 
     def list_all_jobs(self):
@@ -1546,7 +1559,7 @@ class SlurmManager(EtcdManager):
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
             ret = subprocess.call(['salloc'] + alloc_opt + cmd)
-        except KeyboardInterrupt as err:
+        except KeyboardInterrupt:
             raise AllocationError("interrupted")
 
         return ret

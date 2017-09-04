@@ -44,7 +44,7 @@ class TemplatePath(string.Template):
     )
     """
 
-class Lock:
+class Lock(object):
     """Simple flock based Lock"""
     def __init__(self, filename):
         self.filename = filename

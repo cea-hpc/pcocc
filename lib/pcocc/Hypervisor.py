@@ -109,9 +109,9 @@ class RemoteMonitor(object):
     def flush_output(self):
         """Read everything from the monitor to start fresh
         """
-        a = os.read(self.s_mon.stdout.fileno(), 1)
+        _ = os.read(self.s_mon.stdout.fileno(), 1)
         while select.select([self.s_mon.stdout.fileno()],[],[],0.0)[0]:
-            a = os.read(self.s_mon.stdout.fileno(), QMP_READ_SIZE)
+            _ = os.read(self.s_mon.stdout.fileno(), QMP_READ_SIZE)
 
     def read_filtered(self, event_list=None):
         """Read from the monitor socket and discard all events not in the event_list array
@@ -214,8 +214,7 @@ class RemoteMonitor(object):
                 elif "return" in ret:
                     return
                 else:
-                    raise ImageSaveError('unexpected output from qemu: '
-                                         '%s , %s' % (line, r))
+                    raise ImageSaveError('unexpected output from qemu: ' + line)
             time.sleep(2)
 
     def system_reset(self):
@@ -347,7 +346,7 @@ class Qemu(object):
     def _setup_spice(self, vm):
         batch = Config().batch
         # TODO: Add TLS support for untrusted networks
-        spice_path = os.path.join(batch.cluster_state_dir, 
+        spice_path = os.path.join(batch.cluster_state_dir,
                                   'spice_vm{0}'.format(vm.rank))
         sasldb_path = os.path.join(spice_path, 'saslpasswd.db')
         os.environ['SASL_CONF_PATH'] = spice_path
@@ -382,17 +381,17 @@ auxprop_plugin: sasldb
                                    socket.SOCK_STREAM)
         testsocket = socket.socket(socket.AF_INET,
                                    socket.SOCK_STREAM)
-        
+
         spice_port = 0
         for spice_port in randrange:
             try:
                 locksocket.bind(('', spice_port + 1))
-            except Exception as e:
+            except Exception:
                 continue
 
             try:
                 testsocket.bind(('', spice_port))
-            except Exception as e:
+            except Exception:
                 locksocket.close()
                 locksocket = socket.socket(socket.AF_INET,
                                                socket.SOCK_STREAM)
@@ -543,7 +542,8 @@ username={3}@pcocc
             f.close()
 
         cmdline += ['-rtc', 'base=utc']
-        cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,vgamem_mb=16']
+        cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,'
+                    'vram_size=67108864,vgamem_mb=16']
 
         self._set_vm_state('temporary-disk',
                            'creating disk file',
@@ -647,7 +647,7 @@ username={3}@pcocc
                             start_cpu + ncores_on_node - 1,
                             i)]
 
-                    cmdline += ['-object', 
+                    cmdline += ['-object',
                                 'memory-backend-ram,size=%dM,policy=preferred,prealloc=yes,'
                                 'host-nodes=%d,id=ram-%d' % (
                             total_mem / len(cores_on_numa),
@@ -1056,14 +1056,14 @@ username={3}@pcocc
                 systemd_notify('Watchdog successful at {0}'.format(
                     datetime.datetime.now()), watchdog=True)
 
-            except Exception as e:
+            except Exception:
                 systemd_notify('Watchdog could not query guest at {0}'.format(
                     datetime.datetime.now()))
 
             try:
                 s_ctl.terminate()
                 s_ctl.communicate()
-            except Exception as e:
+            except Exception:
                 pass
 
         logging.info('Got thread termination event')
@@ -1162,12 +1162,8 @@ username={3}@pcocc
         s_mon.close_monitor()
 
     def save(self, vm, dest_img_file, full=False, freeze=VM_FREEZE_OPT.TRY):
-        batch = Config().batch
-        snapshot_path = batch.get_vm_state_path(vm.rank, 'image_snapshot')
-
         remote_host = vm.get_host()
         vm_image_path = vm.image_path
-
         use_fsfreeze = False
 
         if freeze != VM_FREEZE_OPT.NO:
@@ -1212,7 +1208,7 @@ username={3}@pcocc
                 img_info_output =  subprocess_check_output(['ssh', remote_host,
                                                             'qemu-img', 'info',
                                                             dest_img_file])
-            except (OSError, subprocess.CalledProcessError) as err:
+            except (OSError, subprocess.CalledProcessError):
                 raise ImageSaveError('unable to determine backing file')
 
             match = re.search(r'backing file: (.+)\n', img_info_output)
@@ -1238,15 +1234,11 @@ username={3}@pcocc
                 raise ImageSaveError('Unable to rebase disk')
 
     def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0, kill_atexit=True):
-        batch = Config().batch
-        remote_host = vm.get_host()
-
         # We need to make several tries because nc and qemu may drop or
         # input silently if we race with them
         # We assume that a broken pipe means nc/qemu was not ready and
         # everything we sent was lost, unless we already received data from
         # it which means something went wrong and we stop retrying
-        retry_connect = True
         while 1:
             s_ctl = self.socket_connect(vm, 'serial_{0}_socket'.format(port), kill_atexit)
             syn_id = random.randint(100000000,999999999)
@@ -1292,9 +1284,9 @@ username={3}@pcocc
                             raise
 
             try:
-                if sproc.poll() is None:
-                    sproc.terminate()
-            except Exception as e:
+                if s_ctl.poll() is None:
+                    s_ctl.terminate()
+            except Exception:
                 pass
 
             s_ctl.communicate()
@@ -1313,19 +1305,18 @@ username={3}@pcocc
         try:
             if not sproc.poll():
                 sproc.terminate()
-        except Exception as e:
+        except Exception:
             pass
 
         try:
             sproc.communicate()
-        except Exception as e:
+        except Exception:
             pass
 
         raise error
 
 
     def put_file(self, vm, source_file, dest_file):
-        batch = Config().batch
         s_ctl = self._get_agent_ctl_safe(vm)
 
         try:
@@ -1409,9 +1400,6 @@ username={3}@pcocc
         s_ctl.terminate()
 
     def exec_cmd(self, vm, cmd, user):
-        batch = Config().batch
-
-
         if cmd:
             s_ctl = self._get_agent_ctl_safe(vm)
         else:

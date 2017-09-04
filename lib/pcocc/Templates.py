@@ -122,7 +122,7 @@ class Template(object):
             resource_set = getattr(self, 'resource_set')
             try:
                 return Config().rsets[resource_set]
-            except KeyError as err:
+            except KeyError:
                 raise InvalidConfigurationError(
                     "template \"%s\" has an "
                     "invalid resource set: \"%s\"" % (self.name, resource_set))
@@ -156,7 +156,7 @@ class Template(object):
                              'value': 'value'}
 
         for setting in template_settings:
-            required, default, heritable = template_settings[setting]
+            _, default, _ = template_settings[setting]
 
             # Dont show settings with default value
             if not setting in self.settings and getattr(self, setting) == default:
@@ -232,7 +232,7 @@ class Template(object):
             parent.validate()
 
         # Validate that the resource set is valid
-        rset = self.rset
+        _ = self.rset
 
         if 'persistent-drives' in self.settings:
             self._convert_drives_to_dict()
@@ -283,7 +283,7 @@ class Template(object):
             try:
                 parent = Config().tpls[self.settings['inherits']]
                 return parent
-            except KeyError as err:
+            except KeyError:
                 raise InvalidConfigurationError(
                     "template \"%s\" inherits from "
                     "invalid template \"%s\"" %(

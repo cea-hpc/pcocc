@@ -341,8 +341,11 @@ class EtcdManager(BatchManager):
 
     def _init_vm_dir(self):
         self._only_in_a_job()
-        if not os.path.exists(self._get_vm_state_dir(self.task_rank)):
-            os.makedirs(self._get_vm_state_dir(self.task_rank), mode=0700)
+        try:
+            os.mkdir(self._get_vm_state_dir(self.task_rank), 0700)
+        except OSError as e:
+            raise PcoccError('Failed to create temporary directory for VM data: ' + str(e))
+
         atexit.register(self._clean_vm_dir)
 
     def _init_cluster_dir(self):

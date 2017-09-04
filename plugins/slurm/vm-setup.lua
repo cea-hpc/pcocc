@@ -49,20 +49,21 @@ function option_handler (v, arg, remote)
 end
 
 -- Unfortuntately slurm environment variables aren't set in this
--- context so we replicate them by hand
+-- context so we replicate them by hand.
 function replicate_slurm_vars (spank)
-      local tpn = spank:getenv ("SLURM_TASKS_PER_NODE")
-      local jobid = spank:getenv ("SLURM_JOB_ID")
+      local jobid = spank:get_item  ("S_JOB_ID")
       local jobuid = spank:get_item ("S_JOB_UID")
-      local nodelist = spank:getenv ("SLURM_NODELIST")
-      local credential = spank:getenv ("PCOCC_REQUEST_CRED")
-
-      posix.setenv("SPANK_PCOCC_REQUEST_CRED", credential, 1)
-      posix.setenv("SPANK_PCOCC_SETUP", vm_option, 1)
-      posix.setenv("SLURM_TASKS_PER_NODE", tpn, 1)
       posix.setenv("SLURM_JOB_ID", jobid, 1)
       posix.setenv("SLURM_JOB_UID", jobuid, 1)
+
+      local tpn = spank:getenv ("SLURM_STEP_TASKS_PER_NODE")
+      local nodelist = spank:getenv ("SLURM_STEP_NODELIST")
+      posix.setenv("SLURM_TASKS_PER_NODE", tpn, 1)
       posix.setenv("SLURM_NODELIST", nodelist, 1)
+
+      local credential = spank:getenv ("PCOCC_REQUEST_CRED")
+      posix.setenv("SPANK_PCOCC_REQUEST_CRED", credential, 1)
+      posix.setenv("SPANK_PCOCC_SETUP", vm_option, 1)
 end
 
 function slurm_spank_init(spank)

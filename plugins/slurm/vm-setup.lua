@@ -87,7 +87,7 @@ function pcocc_node_setup(spank)
       debug("%s",arg)
       path = arg:match("^pcocc_path=(.*)")
       if path then
-	 return path..'/bin/pcocc'
+         return path..'/bin/pcocc'
       end
    end
 
@@ -109,18 +109,18 @@ function slurm_spank_init_post_opt (spank)
       local rc, msg = spank:job_control_setenv ("PCOCC_SETUP", vm_option, 1)
 
       if rc == nil then
-	 SPANK.log_error ("Failed to propagate SETUP: %s", msg)
-	 return SPANK.FAILURE
+         SPANK.log_error ("Failed to propagate SETUP: %s", msg)
+         return SPANK.FAILURE
       end
    else
       -- Called on the node
       local stepid = spank:get_item ("S_JOB_STEPID")
       if stepid == 0 then
             debug("lua/vmsetup: init_post_op: remote context")
-      	    replicate_slurm_vars(spank)
+            replicate_slurm_vars(spank)
 
-      	    do_and_log_output("python "..pcocc_node_setup(spank).." internal setup init")
-      	    do_and_log_output("python "..pcocc_node_setup(spank).." internal setup create")
+            do_and_log_output(pcocc_node_setup(spank).." internal setup init")
+            do_and_log_output(pcocc_node_setup(spank).." internal setup create")
       end
    end
 
@@ -139,7 +139,7 @@ function slurm_spank_exit (spank)
       if stepid == 0 then
             debug("lua/vmsetup: exit: remote context")
       	    replicate_slurm_vars(spank)
-      	    do_and_log_output("python "..pcocc_node_setup(spank).." internal setup delete")
+      	    do_and_log_output(pcocc_node_setup(spank).." internal setup delete")
        end
    end
 

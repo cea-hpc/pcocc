@@ -660,7 +660,7 @@ additionalProperties: false
         Config().tracker.create_with_ref(Config().batch.batchid,
                                          PidDaemon(pid_file))
         subprocess.check_call(
-            shlex.split("ip netns exec {netns} /usr/sbin/dnsmasq --strict-order "
+            shlex.split("ip netns exec {netns} /usr/sbin/dnsmasq "
                         "--pid-file={pid_file} "
                         "--conf-file= "
                         "--leasefile-ro "

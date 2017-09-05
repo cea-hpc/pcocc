@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-NETWORKS.YAML" "5" "Aug 11, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-NETWORKS.YAML" "5" "Sep 05, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-networks.yaml \- Networks configuration file
 .
@@ -32,9 +32,26 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 ..
 .SH DESCRIPTION
 .sp
-\fB/etc/pcocc/networks.yaml\fP is a YAML formatted file defining virtual networks which can be provided to pcocc VMs within resource sets defined in the \fB/etc/pcocc/resources.yaml\fP configuration file. pcocc virtual networks are instantiated for each virtual cluster, which means that private virtual networks link a subset of the VMs within a virtual cluster (those instantiated from templates referencing the private virtual network).
+\fB/etc/pcocc/networks.yaml\fP is a YAML formatted file defining virtual networks available to pcocc VMs. Virtual networks are referenced through VM resource sets defined in the \fB/etc/pcocc/resources.yaml\fP configuration file. For each virtual cluster, private instances of the virtual networks referenced by its VMs are created, which means each virtual network instance is only shared by VMs within a single virtual cluster.
 .sp
-A network is defined by its name, type and settings, which are specific to each network type. Three types of networks are supported: NAT Ethernet, private Ethernet and private Infiniband.
+A network is defined by its name, type and settings, which are specific to each network type. Two types of networks are supported: Ethernet and Infiniband.
+.sp
+\fBWARNING:\fP
+.INDENT 0.0
+.INDENT 3.5
+Before editing this configuration file on a compute node, you should first make sure that no VMs are running on the node and execute the following command, as root:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc internal setup cleanup
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
 .SH SYNTAX
 .sp
 \fB/etc/pcocc/networks.yaml\fP contains a key/value mapping. Each key defines a network by its name and the associated value must contain two keys: \fBtype\fP which defines the type of network to define, and \fBsettings\fP which is a key/value mapping defining the parameters for this network.  This is summed up in the example below:
@@ -57,49 +74,69 @@ network1:
 .UNINDENT
 .sp
 The following networks are supported:
-.SH NAT NETWORK
+.SH ETHERNET NETWORK
 .sp
-A NAT Ethernet network is defined by using the type \fInat\fP\&. A VM connected to a network of this type receives an Ethernet interface connected to an isolated Ethernet network where it can only reach its host compute node which acts as a default gateway. The host will route outgoing packets from the VM using NAT and optionally route incoming packets from a host port to a selected port of the VM. For the pcocc ssh command to work, the VM must be connected to a NAT network which exposes the SSH port. A DHCP server is automatically started on the host to provide the network configuration to the VM on boot. The following parameters can be defined:
+A virtual Ethernet network is defined by using the network type \fIethernet\fP\&. A VM connected to a network of this type receives an Ethernet interface linked to an isolated virtual switch. All the VMs of a virtual cluster connected to a given network are linked to the same virtual switch. Connectivity is provided by encapsulating Ethernet packets from the VMs in IP tunnels between hypervisors. If the \fBnetwork\-layer\fP parameter is set to \fIL2\fP pcocc only provides Ethernet layer 2 connectivity between the VMs. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. If the \fBnetwork\-layer\fP is set to \fIL3\fP pcocc also manages IP addressing and optionally provide access to external networks through NAT. Reverse NAT can also be setup to allow connecting to a VM port such as the SSH port from the outside. DHCP and DNS servers are automatically setup on the private network to provide IP addresses for the VMs. The available parameters are:
 .INDENT 0.0
 .TP
-\fBnat\-network\fP
-IP range reserved for this network on the host network stack in CIDR notation. This network range should be unused on the host and not be routable.
+\fBdev\-prefix\fP
+Prefix to use when assigning names to virtual devices such as bridges and TAPs created on the host.
 .TP
-\fBvm\-network\fP
-IP range which will be assigned to VMs network interface in CIDR notation. on the host network in CIDR notation. This network range should be unused on the host and not be routable.
-.TP
-\fBvm\-network\-gw\fP
-IP which will be assigned to the host on the VM network to act as a default gateway and route VM packets to the outside via NAT.
-.TP
-\fBvm\-ip\fP
-IP on the VM network to assign to the VM via DHCP.
-.TP
-\fBvm\-hwaddr\fP
-MAC address of the Ethernet device exposed in the VM.
-.TP
-\fBbridge\fP
-Name of the bridge device to create on nodes for this network.
-.TP
-\fBbridge\-hwaddr\fP
-MAC address for the host bridge device.
-.TP
-\fBtap\-prefix\fP
-Prefix to use when assigning name to TAP devices created on the host.
+\fBnetwork\-layer\fP
+Whether pcocc should provide layer 3 services or only a layer 2 Ethernet network (see above). Can be set to:
+.INDENT 7.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+\fIL3\fP (default): Manage IP layer and provide services such as DHCP
+.IP \(bu 2
+\fIL2\fP: Only provide layer 2 connectivity
+.UNINDENT
+.UNINDENT
+.UNINDENT
 .TP
 \fBmtu\fP
-MTU for the VM network.
+MTU of the Ethernet network. (defaults to 1500)
+.UNINDENT
+.sp
+\fBWARNING:\fP
+.INDENT 0.0
+.INDENT 3.5
+Please note that the MTU of the Ethernet interfaces in the VMs have to be set 50 bytes lower than this value to account for the encapsulation headers. The DHCP server on a L3 network automatically provides an appropriate value.
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
 .TP
-\fBdomain\-name\fP
-The domain name to provide to VMs via DHCP.
+\fBmac\-prefix\fP
+Prefix to use when assigning MAC adressess to virtual Ethernet interfaces. MAC addresses are assigned to each VM in order starting from the MAC address constructed by appending zeros to the prefix. (defaults to 52:54:00)
+.TP
+\fBhost\-if\-suffix\fP
+Suffix to append to hostnames when establishing a remote tunnel if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by SLURM as computeXX can reached more efficiently via IPoIB at the computeXX\-ib address, the \fBhost\-if\-suffix\fP parameter can be set to \fI\-ib\fP so that the Ethernet tunnels between hypervisors transit over IPoIB.
+.UNINDENT
+.sp
+The following parameters only apply for a \fIL3\fP network:
+.INDENT 0.0
+.TP
+\fBint\-network\fP
+IP network range in CIDR notation from which IP addresses assigned to VM network interfaces via DHCP are be chosen. This network range should be unused on the host and not be routable. It is private to each virtual cluster and VMs get a fixed IP address depending on their rank in the virtual cluster. (defaults to 10.200.0.0/16)
+.TP
+\fBext\-network\fP
+IP network range in CIDR notation reserved for assigning unique VM IPs on the host network stack . This network range should be unused on the host and not be routable. (defaults to 10.201.0.0/16)
 .TP
 \fBdns\-server\fP
-The IP of a domain name resolver to provide to VMs via DHCP.
+The IP of a domain name resolver to forward DNS requests. (defaults to reading resolv.conf on the host)
+.TP
+\fBdomain\-name\fP
+The domain name to provide to VMs via DHCP. (defaults to pcocc.<host domain name>)
+.TP
+\fBdns\-search\fP:
+Comma separated DNS search list to provide to VMs via DHCP in addition to the domain name.
 .TP
 \fBntp\-server\fP
 The IP of a NTP server to provide to VMs via DHCP.
 .TP
 \fBallow\-outbound\fP
-Set to \fInone\fP to disallow VMs from establishing outbound connections.
+Set to \fInone\fP to prevent VMs from establishing outbound connections.
 .TP
 \fBreverse\-nat\fP
 A key/value mapping which can be defined to allow inbound connections to a VM port via reverse NAT of a host port. It contains the following keys:
@@ -116,79 +153,38 @@ Maximum port to select on the  host for reverse NATing.
 .UNINDENT
 .UNINDENT
 .sp
-The example below sums up the available parameters:
+The example below defines a managed network with reverse NAT for SSH access:
 .INDENT 0.0
 .INDENT 3.5
 .sp
 .nf
 .ft C
-# Provides acces to the host network via NAT
-type: nat
-settings:
-  # Network for VM packets from the host point of view
-  # Select a free network range from the host side
-  nat\-network: "10.255.0.0/16"
-  # Network for VM packets from the VMs point of view
-  # Select a free network range from VMs and host side
-  vm\-network: "10.254.0.0/16"
-  # IP of the default gateway for VMs
-  # Select an IP in the VM network
-  vm\-network\-gw: "10.254.0.1"
-  # IP of VM interface
-  # Select an IP in the VM network
-  vm\-ip: "10.254.0.2"
-  # MAC addr of the VM interface
-  vm\-hwaddr: "52:54:00:44:AE:5E"
-  # Name of a bridge which will be created on hosts
-  bridge: "natbr"
-  # Prefix for TAP devices created on hosts
-  tap\-prefix: "nattap"
-  # MTU of the network
-  mtu: 5000
-  # Domain name and DNS server to provide to VMs via DHCP
-  domain\-name: "vm.mydomain.com"
-  dns\-server: "10.19.213.2"
-  reverse\-nat:
-    # VM port to expose on the host
-    vm\-port: 22
-    # Range of free ports on the host to use for reverse NAT
-    min\-host\-port: 60222
-    max\-host\-port: 60322
+# Define an ethernet network NAT\(aqed to the host network
+# with a reverse NAT for the SSH port
+nat\-rssh:
+  type: ethernet
+  settings:
+    # Manage layer 3 properties such as VM IP adresses
+    network\-layer: "L3"
+
+    # Name prefix used for devices created for this network
+    dev\-prefix: "nat"
+
+    # MTU of the network
+    mtu: 1500
+
+    reverse\-nat:
+      # VM port to expose on the host
+      vm\-port: 22
+      # Range of free ports on the host to use for reverse NAT
+      min\-host\-port: 60222
+      max\-host\-port: 60322
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
-.SH PRIVATE ETHERNET NETWORK
 .sp
-A private Ethernet network is defined by using the type \fIpv\fP\&. A VM connected to a network of this type receives an Ethernet interface connected to an isolated Ethernet network where it can reach all the other VMs of its virtual cluster connected to the network. Connectivity is provided by encapsulating Ethernet packets from the VM in IP tunnels between hypervisors. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. See pcocc\-newvm\-tutorial(7) for a simple way to perform this configuration without setting up services. The available parameters parameters are:
-.INDENT 0.0
-.TP
-\fBmac\-prefix\fP
-Prefix for the MAC address assigned to virtual Ethernet devices. MAC adresses are assigned to each VM in order starting from the MAC adress constructed by appending zeros to the prefix.
-.TP
-\fBbridge\-prefix\fP
-Prefix to use when assigning names to bridge devices created on the host.
-.TP
-\fBtap\-prefix\fP
-Prefix to use when assigning names to TAP devices created on the host.
-.TP
-\fBmtu\fP
-MTU to use on this network. This should be set to the MTU of the host network used to relay packets between hypervisors.
-.UNINDENT
-.sp
-\fBWARNING:\fP
-.INDENT 0.0
-.INDENT 3.5
-Please note that the MTU of the Ethernet interfaces in the VMs have to be set 50 bytes lower than this value to account for the encapsulation headers.
-.UNINDENT
-.UNINDENT
-.INDENT 0.0
-.TP
-\fBhost\-if\-suffix\fP
-Suffix to append to hostnames when establishing a remote tunnel if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by SLURM as computeXX can reached more efficiently via IPoIB at the computeXX\-ib address, the \fBhost\-if\-suffix\fP parameter can be set to \fI\-ib\fP so that the Ethernet tunnels between hypervisors transit over IPoIB.
-.UNINDENT
-.sp
-The example below sums up the available parameters:
+The example below defines a private layer 2 network
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -197,26 +193,30 @@ The example below sums up the available parameters:
 # Define a private ethernet network isolated from the host
 pv:
   # Private ethernet network isolated from the host
-  # Ethernet (Layer 2) inter\-VM packets are relayed between hosts
-  # via a Layer 3 tunnel
-  type: pv
+  type: ethernet
   settings:
-    # Prefix for bridge devices created on the host
-    bridge\-prefix: "pvbr"
-    # Prefix for TAP devices created on the host
-    tap\-prefix: "pvtap"
-    # Network mtu
-    mtu: 5000
-    # Suffix to append to remote hostnames when tunneling
-    # Ethernet packets
-    host\-if\-suffix: ""
+    # Only manage Ethernet layer
+    network\-layer: "L2"
+
+    # Name prefix used for devices created for this network
+    dev\-prefix: "pv"
+
+    # MTU of the network
+    mtu: 1500
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .SH IB NETWORK
 .sp
-A private Infiniband network is defined by using the type \fIib\fP\&. An Infiniband partition is allocated for each virtual Infiniband network instantiated by a virtual cluster. VMs connected to Infiniband networks receive direct access to an Infiniband SRIOV virtual function restricted to using the allocated partition as well as the default partition, as limited members, which is required for IPoIB. This means that, for proper isolation of the virtual clusters, physical nodes should be set as limited members of the default partition and/or use other partitions for their communications.
+A virtual Infiniband network is defined by using the type \fIinfiniband\fP\&. An Infiniband partition is allocated for each virtual Infiniband network instantiated by a virtual cluster. VMs connected to Infiniband networks receive direct access to an Infiniband SRIOV virtual function restricted to using the allocated partition as well as the default partition, as limited members, which is required for IPoIB.
+.sp
+\fBWARNING:\fP
+.INDENT 0.0
+.INDENT 3.5
+This means that, for proper isolation of the virtual clusters, physical nodes should be set as limited members of the default partition and/or use other partitions for their communications.
+.UNINDENT
+.UNINDENT
 .sp
 pcocc makes use of a daemon on the OpenSM node which dynamically updates the partition configuration (which means pcocc has to be installed on the OpenSM node). The daemon generates the configuration from a template holding the static configuration to which it appends the dynamic configuration. Usually, you will want to copy your current configuration to the template file (/etc/opensm/partitions.conf.tpl in the example below) and have pcocc append its dynamic configuration to form the actual partition file referenced in the OpenSM configuration. The following parameters can be defined:
 .INDENT 0.0
@@ -248,7 +248,7 @@ The example below sums up the available parameters:
 .ft C
 ib:
   # Infiniband network based on SRIOV virtual functions
-  type: ib
+  type: infiniband
   settings:
     # Host infiniband device
     host\-device: "mlx5_0"
@@ -275,48 +275,27 @@ This is the default configuration file for reference:
 .sp
 .nf
 .ft C
-# Define a NAT Ethernet network named \(aqnat\-ssh\(aq
-nat\-ssh:
-  # Select the NAT network type
-  type: nat
+# Define an ethernet network NAT\(aqed to the host network
+# with a reverse NAT for the SSH port
+nat\-rssh:
+  type: ethernet
   settings:
-    # Network for VM packets from the host point of view
-    # Select a free network range from the host side
-    nat\-network: "10.255.0.0/16"
+    # Manage layer 3 properties such as VM IP adresses
+    network\-layer: "L3"
 
-    # Network for VM packets from the VMs point of view
-    # Select a free network range from VMs and host side
-    vm\-network: "10.254.0.0/16"
+    # Private IP range for VM interfaces on this ethernet network.
+    int\-network: "10.251.0.0/16"
 
-    # IP of the default gateway for VMs
-    # Select an IP in the VM network
-    vm\-network\-gw: "10.254.0.1"
+    # External IP range used to map private VM IPs to unique VM IPs on the
+    # host network stack for NAT.
+    ext\-network: "10.250.0.0/16"
 
-    # IP of VM interface
-    # Select an IP in the VM network
-    vm\-ip: "10.254.0.2"
-
-    # MAC addr of the VM interface
-    vm\-hwaddr: "52:54:00:44:AE:5E"
-
-    # Name of a bridge which will be created on hosts
-    bridge: "natbr"
-
-    # Prefix for TAP devices created on hosts
-    tap\-prefix: "nattap"
+    # Name prefix used for devices created for this network
+    dev\-prefix: "nat"
 
     # MTU of the network
     mtu: 1500
 
-    # Domain name and DNS server to provide to VMs via DHCP
-    domain\-name: "domain.name.com"
-    dns\-server: "0.0.0.0"
-
-    # Allow outbound connections
-    # Uncomment to prevent the VM from initiating connections
-    # allow\-outbound: "none"
-
-    # Optional directive: expose a VM port to the host
     reverse\-nat:
       # VM port to expose on the host
       vm\-port: 22
@@ -324,41 +303,48 @@ nat\-ssh:
       min\-host\-port: 60222
       max\-host\-port: 60322
 
-# Define a private Ethernet network named \(aqinternal\(aq isolated from the host
-internal:
-  # Private Ethernet network isolated from the host
-  # Ethernet (Layer 2) inter\-VM packets are relayed between hosts
-  # via a Layer 3 tunnel
-  type: pv
-  settings:
-    # Prefix for bridge devices created on the host
-    bridge\-prefix: "pvbr"
-    # Prefix for TAP devices created on the host
-    tap\-prefix: "pvtap"
-    # Network mtu
-    mtu: 1500
-    # Suffix to append to hostnames of remote hypervisors when
-    # tunneling Ethernet packets
+    # Suffix to append to remote hostnames when tunneling
+    # Ethernet packets
     host\-if\-suffix: ""
-    # Prefix for Ethernet interface MAC addresses
-    mac\-prefix: "52:54:00"
 
-# Define a private ifiniband network named \(aqib\(aq
+
+# Define a private ethernet network isolated from the host
+pv:
+  # Private ethernet network isolated from the host
+  type: ethernet
+  settings:
+    # Only manage Ethernet layer
+    network\-layer: "L2"
+
+    # Name prefix used for devices created for this network
+    dev\-prefix: "pv"
+
+    # MTU of the network
+    mtu: 1500
+
+    # Suffix to append to remote hostnames when tunneling
+    # Ethernet packets
+    host\-if\-suffix: ""
+
+
+# Define a private Infiniband network
 ib:
   # Infiniband network based on SRIOV virtual functions
-  type: \(aqib\(aq
+  type: infiniband
   settings:
     # Host infiniband device
-    host\-device: \(aqmlx4_0\(aq
-    # Range of PKeys to allocate for virtual clusters on this network
-    min\-pkey: \(aq0x2000\(aq
-    max\-pkey: \(aq0x3000\(aq
-    # Name of the opensm process
-    opensm\-daemon: \(aqopensm\(aq
+    host\-device: "mlx5_0"
+    # Range of PKeys to allocate for virtual clusters
+    min\-pkey: "0x2000"
+    max\-pkey: "0x3000"
+    # Resource manager token to request when allocating this network
+    license: "pkey"
+    # Name of opensm process
+    opensm\-daemon: "opensm"
     # Configuration file for opensm partitions
-    opensm\-partition\-cfg: \(aq/etc/opensm/partitions.conf\(aq
+    opensm\-partition\-cfg: /etc/opensm/partitions.conf
     # Template for generating the configuration file for opensm partitions
-    opensm\-partition\-tpl: \(aq/etc/opensm/partitions.conf.tpl\(aq
+    opensm\-partition\-tpl: /etc/opensm/partitions.conf.tpl
 .ft P
 .fi
 .UNINDENT

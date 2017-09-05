@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-NEWVM-TUTORIAL" "7" "Aug 11, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-NEWVM-TUTORIAL" "7" "Sep 05, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-newvm-tutorial \- How to import VM images and define VM templates
 .
@@ -141,19 +141,19 @@ Here is the content of \fBtemplates.yaml\fP for these three VMs (don\(aqt forget
 .ft C
 centos7\-cloud:
     image: "$VMDIR/centos7\-cloud"
-    resource\-set: "cluster"
+    resource\-set: "default"
     description: "Cloud enabled CentOS 7"
 
 ubuntu\-artful\-cloud:
     image: "$VMDIR/ubuntu\-artful\-cloud"
-    resource\-set: "cluster"
+    resource\-set: "default"
     description: "Cloud enabled Ubuntu 17.10"
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .sp
-We selected the \fIcluster\fP configuration as a \fBresource\-set\fP for these VMs. It should reference one of the resource sets defined in the \fB/etc/resources.yaml\fP file. Please refer to the resources.yaml and networks.yaml configuration files for more informations on this option.
+We selected the \fIdefault\fP configuration as a \fBresource\-set\fP for these VMs. It should reference one of the resource sets defined in the \fB/etc/resources.yaml\fP file. Please refer to the resources.yaml and networks.yaml configuration files for more informations on this option.
 .sp
 Following this step, you should be able to list your new virtual machines:
 .INDENT 0.0
@@ -164,8 +164,8 @@ Following this step, you should be able to list your new virtual machines:
 $ pcocc template list
 NAME                 DESCRIPTION                 RESOURCES    IMAGE
 \-\-\-\-                 \-\-\-\-\-\-\-\-\-\-\-                 \-\-\-\-\-\-\-\-\-    \-\-\-\-\-
-ubuntu\-artful\-cloud  Cloud enabled Ubuntu 17.10  cluster      /shared/vms/ubuntu\-artful\-cloud
-centos7\-cloud        Cloud enabled CentOS 7      cluster      /shared/vms/centos7\-cloud
+ubuntu\-artful\-cloud  Cloud enabled Ubuntu 17.10  default      /shared/vms/ubuntu\-artful\-cloud
+centos7\-cloud        Cloud enabled CentOS 7      default      /shared/vms/centos7\-cloud
 .ft P
 .fi
 .UNINDENT
@@ -200,61 +200,7 @@ users:
 .sp
 It creates a user named \fIdemo\fP able to use sudo without password and which can login via SSH with the specified key.
 .sp
-\fBWARNING:\fP
-.INDENT 0.0
-.INDENT 3.5
-Please note that indentation levels are significant in YAML and that tabs are not allowed. If you run into trouble you can use a validator at \fI\%https://coreos.com/validate/\fP\&.
-.UNINDENT
-.UNINDENT
-.sp
-For a simple cluster, we don\(aqt want to deploy a DHCP or DNS server to manage addresses on the private network. Instead, we define an \fB/etc/hosts\fP file and use a simple script which configures the Ethernet interface on the private Ethernet network with an IP derived on from the interface\(aqs MAC address. Append the following to your cloud\-config file:
-.INDENT 0.0
-.INDENT 3.5
-.sp
-.nf
-.ft C
-write_files:
-  \- path: /sbin/ifup\-local
-    permissions: \(aq0755\(aq
-    content: |
-      #!/bin/bash
-      VM_ID0=$(printf "%d\en" 0x$(cat /sys/class/net/eth1/address | cut \-d : \-f 6))
-      VM_ID1=$(printf "%d\en" 0x$(cat /sys/class/net/eth1/address | cut \-d : \-f 5))
-      VM_ID=$(( 256 * $VM_ID1 + $VM_ID0 ))
-      BYTE0=$((  $VM_ID / 255 ))
-      BYTE1=$(( ( $VM_ID % 255 ) + 1 ))
-
-      ifconfig eth1 "10.252.${BYTE0}.${BYTE1}/16" mtu 1450
-      hostname vm"${VM_ID}"
-
-   \- path: /etc/hosts
-     permissions: \(aq0644\(aq
-     content: |
-       #Host file
-       127.0.0.1   localhost localhost.localdomain
-
-       10.252.0.1 vm0
-       10.252.0.2 vm1
-       10.252.0.3 vm2
-       10.252.0.4 vm3
-       10.252.0.5 vm4
-       10.252.0.6 vm5
-       10.252.0.7 vm6
-       10.252.0.8 vm7
-       10.252.0.9 vm8
-.ft P
-.fi
-.UNINDENT
-.UNINDENT
-.sp
-\fBNOTE:\fP
-.INDENT 0.0
-.INDENT 3.5
-The MTU is set to 1450 compared to 1500 on the host network to account for encapsulation headers. More entries in /etc/hosts could be defined to account for more VMs.
-.UNINDENT
-.UNINDENT
-.sp
-Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest in a network indepenant and OS agnostic fashion. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:\fIpcocc\-save(1)<save>\fP command. We also make sure that the eth1 interface (corresponding to the private network) is up. Append the following content to your cloud\-config file:
+Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest without depending on networking. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:\fIpcocc\-save(1)<save>\fP command. Append the following content to your cloud\-config file:
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -266,7 +212,6 @@ packages:
 runcmd:
     # Make sure that the service is up on all distros
     \- systemctl start qemu\-guest\-agent
-    \- ifup eth1
 .ft P
 .fi
 .UNINDENT

@@ -105,9 +105,9 @@ You can write arbitrary files in the VM filesystem. Files are written after pack
         #Host file
         127.0.0.1   localhost localhost.localdomain
 
-        10.252.0.1 vm0
-        10.252.0.2 vm1
-        10.252.0.3 vm2
+        10.252.0.1 vm0-ib0
+        10.252.0.2 vm1-ib0
+        10.252.0.3 vm2-ib1
 
 Mounting filesystems
 *********************

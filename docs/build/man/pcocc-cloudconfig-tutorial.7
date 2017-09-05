@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Aug 11, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Sep 05, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-cloudconfig-tutorial \- How to configure cloud-init enabled VMs
 .
@@ -73,19 +73,19 @@ With cloud\-init enabled VMs the first configuration task is often to define use
 .nf
 .ft C
 users:
-\- name : demo1
-  ssh\-authorized\-keys:
-    \- key1 <ssh pub key 1>
-    \- key2 <ssh pub key 2>
-\- name : demo2
-  ssh\-authorized\-keys:
-    \- key3 <ssh pub key 3>
+  \- name : demo1
+    ssh\-authorized\-keys:
+      \- <ssh pub key 1>
+      \- <ssh pub key 2>
+  \- name : demo2
+    ssh\-authorized\-keys:
+      \- <ssh pub key 3>
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .sp
-This defines two demo users, with their respective public SSH keys. You can also provide sudo privileges to a user with the \fBsudo\fP parameter or define its numerical id with the \fBuid\fP parameter:
+This defines two demo users, with their respective public SSH keys which have to be copy/pasted in the appropriate fields. You can also provide sudo privileges to a user with the \fBsudo\fP parameter or define its numerical id with the \fBuid\fP parameter:
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -93,10 +93,10 @@ This defines two demo users, with their respective public SSH keys. You can also
 .ft C
 users:
     \- name: demo1
-    sudo: [\(aqALL=(ALL) NOPASSWD:ALL\(aq]
-    uid: 1247
-    ssh\-authorized\-keys:
-        \- key1 ...
+      sudo: [\(aqALL=(ALL) NOPASSWD:ALL\(aq]
+      uid: 1247
+      ssh\-authorized\-keys:
+        \- <ssh pub key 1>
 .ft P
 .fi
 .UNINDENT
@@ -185,15 +185,16 @@ You can write arbitrary files in the VM filesystem. Files are written after pack
 .sp
 .nf
 .ft C
-\- path: /etc/hosts
-  permissions: \(aq0644\(aq
-  content: |
-    #Host file
-    127.0.0.1   localhost localhost.localdomain
+write_files:
+  \- path: /etc/hosts
+    permissions: \(aq0644\(aq
+    content: |
+      #Host file
+      127.0.0.1   localhost localhost.localdomain
 
-    10.252.0.1 vm0
-    10.252.0.2 vm1
-    10.252.0.3 vm2
+      10.252.0.1 vm0\-ib0
+      10.252.0.2 vm1\-ib0
+      10.252.0.3 vm2\-ib1
 .ft P
 .fi
 .UNINDENT

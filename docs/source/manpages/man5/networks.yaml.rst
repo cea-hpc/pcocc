@@ -6,9 +6,15 @@
 Description
 ***********
 
-:file:`/etc/pcocc/networks.yaml` is a YAML formatted file defining virtual networks which can be provided to pcocc VMs within resource sets defined in the :file:`/etc/pcocc/resources.yaml` configuration file. pcocc virtual networks are instantiated for each virtual cluster, which means that private virtual networks link a subset of the VMs within a virtual cluster (those instantiated from templates referencing the private virtual network).
+:file:`/etc/pcocc/networks.yaml` is a YAML formatted file defining virtual networks available to pcocc VMs. Virtual networks are referenced through VM resource sets defined in the :file:`/etc/pcocc/resources.yaml` configuration file. For each virtual cluster, private instances of the virtual networks referenced by its VMs are created, which means each virtual network instance is only shared by VMs within a single virtual cluster.
 
-A network is defined by its name, type and settings, which are specific to each network type. Three types of networks are supported: NAT Ethernet, private Ethernet and private Infiniband.
+A network is defined by its name, type and settings, which are specific to each network type. Two types of networks are supported: Ethernet and Infiniband.
+
+.. warning::
+  Before editing this configuration file on a compute node, you should first make sure that no VMs are running on the node and execute the following command, as root::
+
+   pcocc internal setup cleanup
+
 
 Syntax
 ******
@@ -26,36 +32,45 @@ Syntax
 
 The following networks are supported:
 
-NAT network
-***********
-A NAT Ethernet network is defined by using the type *nat*. A VM connected to a network of this type receives an Ethernet interface connected to an isolated Ethernet network where it can only reach its host compute node which acts as a default gateway. The host will route outgoing packets from the VM using NAT and optionally route incoming packets from a host port to a selected port of the VM. For the pcocc ssh command to work, the VM must be connected to a NAT network which exposes the SSH port. A DHCP server is automatically started on the host to provide the network configuration to the VM on boot. The following parameters can be defined:
+Ethernet network
+****************
+A virtual Ethernet network is defined by using the network type *ethernet*. A VM connected to a network of this type receives an Ethernet interface linked to an isolated virtual switch. All the VMs of a virtual cluster connected to a given network are linked to the same virtual switch. Connectivity is provided by encapsulating Ethernet packets from the VMs in IP tunnels between hypervisors. If the **network-layer** parameter is set to *L2* pcocc only provides Ethernet layer 2 connectivity between the VMs. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. If the **network-layer** is set to *L3* pcocc also manages IP addressing and optionally provide access to external networks through NAT. Reverse NAT can also be setup to allow connecting to a VM port such as the SSH port from the outside. DHCP and DNS servers are automatically setup on the private network to provide IP addresses for the VMs. The available parameters are:
 
-**nat-network**
- IP range reserved for this network on the host network stack in CIDR notation. This network range should be unused on the host and not be routable.
-**vm-network**
- IP range which will be assigned to VMs network interface in CIDR notation. on the host network in CIDR notation. This network range should be unused on the host and not be routable.
-**vm-network-gw**
- IP which will be assigned to the host on the VM network to act as a default gateway and route VM packets to the outside via NAT.
-**vm-ip**
- IP on the VM network to assign to the VM via DHCP.
-**vm-hwaddr**
- MAC address of the Ethernet device exposed in the VM.
-**bridge**
- Name of the bridge device to create on nodes for this network.
-**bridge-hwaddr**
- MAC address for the host bridge device.
-**tap-prefix**
- Prefix to use when assigning name to TAP devices created on the host.
+**dev-prefix**
+ Prefix to use when assigning names to virtual devices such as bridges and TAPs created on the host.
+**network-layer**
+ Whether pcocc should provide layer 3 services or only a layer 2 Ethernet network (see above). Can be set to:
+
+   * *L3* (default): Manage IP layer and provide services such as DHCP
+   * *L2*: Only provide layer 2 connectivity
+
 **mtu**
- MTU for the VM network.
-**domain-name**
- The domain name to provide to VMs via DHCP.
+ MTU of the Ethernet network. (defaults to 1500)
+
+.. warning::
+ Please note that the MTU of the Ethernet interfaces in the VMs have to be set 50 bytes lower than this value to account for the encapsulation headers. The DHCP server on a L3 network automatically provides an appropriate value.
+
+**mac-prefix**
+ Prefix to use when assigning MAC adressess to virtual Ethernet interfaces. MAC addresses are assigned to each VM in order starting from the MAC address constructed by appending zeros to the prefix. (defaults to 52:54:00)
+**host-if-suffix**
+ Suffix to append to hostnames when establishing a remote tunnel if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by SLURM as computeXX can reached more efficiently via IPoIB at the computeXX-ib address, the **host-if-suffix** parameter can be set to *-ib* so that the Ethernet tunnels between hypervisors transit over IPoIB.
+
+The following parameters only apply for a *L3* network:
+
+**int-network**
+ IP network range in CIDR notation from which IP addresses assigned to VM network interfaces via DHCP are be chosen. This network range should be unused on the host and not be routable. It is private to each virtual cluster and VMs get a fixed IP address depending on their rank in the virtual cluster. (defaults to 10.200.0.0/16)
+**ext-network**
+ IP network range in CIDR notation reserved for assigning unique VM IPs on the host network stack . This network range should be unused on the host and not be routable. (defaults to 10.201.0.0/16)
 **dns-server**
- The IP of a domain name resolver to provide to VMs via DHCP.
+ The IP of a domain name resolver to forward DNS requests. (defaults to reading resolv.conf on the host)
+**domain-name**
+ The domain name to provide to VMs via DHCP. (defaults to pcocc.<host domain name>)
+**dns-search**:
+ Comma separated DNS search list to provide to VMs via DHCP in addition to the domain name.
 **ntp-server**
  The IP of a NTP server to provide to VMs via DHCP.
 **allow-outbound**
- Set to *none* to disallow VMs from establishing outbound connections.
+ Set to *none* to prevent VMs from establishing outbound connections.
 **reverse-nat**
  A key/value mapping which can be defined to allow inbound connections to a VM port via reverse NAT of a host port. It contains the following keys:
 
@@ -66,85 +81,55 @@ A NAT Ethernet network is defined by using the type *nat*. A VM connected to a n
  **max-host-port**
   Maximum port to select on the  host for reverse NATing.
 
-The example below sums up the available parameters::
 
-  # Provides acces to the host network via NAT
-  type: nat
-  settings:
-    # Network for VM packets from the host point of view
-    # Select a free network range from the host side
-    nat-network: "10.255.0.0/16"
-    # Network for VM packets from the VMs point of view
-    # Select a free network range from VMs and host side
-    vm-network: "10.254.0.0/16"
-    # IP of the default gateway for VMs
-    # Select an IP in the VM network
-    vm-network-gw: "10.254.0.1"
-    # IP of VM interface
-    # Select an IP in the VM network
-    vm-ip: "10.254.0.2"
-    # MAC addr of the VM interface
-    vm-hwaddr: "52:54:00:44:AE:5E"
-    # Name of a bridge which will be created on hosts
-    bridge: "natbr"
-    # Prefix for TAP devices created on hosts
-    tap-prefix: "nattap"
-    # MTU of the network
-    mtu: 5000
-    # Domain name and DNS server to provide to VMs via DHCP
-    domain-name: "vm.mydomain.com"
-    dns-server: "10.19.213.2"
-    reverse-nat:
-      # VM port to expose on the host
-      vm-port: 22
-      # Range of free ports on the host to use for reverse NAT
-      min-host-port: 60222
-      max-host-port: 60322
+The example below defines a managed network with reverse NAT for SSH access:
 
-Private Ethernet network
-************************
+.. code-block:: yaml
 
-A private Ethernet network is defined by using the type *pv*. A VM connected to a network of this type receives an Ethernet interface connected to an isolated Ethernet network where it can reach all the other VMs of its virtual cluster connected to the network. Connectivity is provided by encapsulating Ethernet packets from the VM in IP tunnels between hypervisors. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. See :ref:`pcocc-newvm-tutorial(7)<newvm>` for a simple way to perform this configuration without setting up services. The available parameters parameters are:
+  # Define an ethernet network NAT'ed to the host network
+  # with a reverse NAT for the SSH port
+  nat-rssh:
+    type: ethernet
+    settings:
+      # Manage layer 3 properties such as VM IP adresses
+      network-layer: "L3"
 
-**mac-prefix**
- Prefix for the MAC address assigned to virtual Ethernet devices. MAC adresses are assigned to each VM in order starting from the MAC adress constructed by appending zeros to the prefix.
-**bridge-prefix**
- Prefix to use when assigning names to bridge devices created on the host.
-**tap-prefix**
- Prefix to use when assigning names to TAP devices created on the host.
-**mtu**
- MTU to use on this network. This should be set to the MTU of the host network used to relay packets between hypervisors.
+      # Name prefix used for devices created for this network
+      dev-prefix: "nat"
 
-.. warning::
- Please note that the MTU of the Ethernet interfaces in the VMs have to be set 50 bytes lower than this value to account for the encapsulation headers.
+      # MTU of the network
+      mtu: 1500
 
-**host-if-suffix**
- Suffix to append to hostnames when establishing a remote tunnel if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by SLURM as computeXX can reached more efficiently via IPoIB at the computeXX-ib address, the **host-if-suffix** parameter can be set to *-ib* so that the Ethernet tunnels between hypervisors transit over IPoIB.
+      reverse-nat:
+        # VM port to expose on the host
+        vm-port: 22
+        # Range of free ports on the host to use for reverse NAT
+        min-host-port: 60222
+        max-host-port: 60322
 
-The example below sums up the available parameters::
+The example below defines a private layer 2 network ::
 
-    # Define a private ethernet network isolated from the host
-    pv:
-      # Private ethernet network isolated from the host
-      # Ethernet (Layer 2) inter-VM packets are relayed between hosts
-      # via a Layer 3 tunnel
-      type: pv
-      settings:
-        # Prefix for bridge devices created on the host
-        bridge-prefix: "pvbr"
-        # Prefix for TAP devices created on the host
-        tap-prefix: "pvtap"
-        # Network mtu
-        mtu: 5000
-        # Suffix to append to remote hostnames when tunneling
-        # Ethernet packets
-        host-if-suffix: ""
+  # Define a private ethernet network isolated from the host
+  pv:
+    # Private ethernet network isolated from the host
+    type: ethernet
+    settings:
+      # Only manage Ethernet layer
+      network-layer: "L2"
 
+      # Name prefix used for devices created for this network
+      dev-prefix: "pv"
+
+      # MTU of the network
+      mtu: 1500
 
 IB network
 **********
 
-A private Infiniband network is defined by using the type *ib*. An Infiniband partition is allocated for each virtual Infiniband network instantiated by a virtual cluster. VMs connected to Infiniband networks receive direct access to an Infiniband SRIOV virtual function restricted to using the allocated partition as well as the default partition, as limited members, which is required for IPoIB. This means that, for proper isolation of the virtual clusters, physical nodes should be set as limited members of the default partition and/or use other partitions for their communications.
+A virtual Infiniband network is defined by using the type *infiniband*. An Infiniband partition is allocated for each virtual Infiniband network instantiated by a virtual cluster. VMs connected to Infiniband networks receive direct access to an Infiniband SRIOV virtual function restricted to using the allocated partition as well as the default partition, as limited members, which is required for IPoIB.
+
+.. warning::
+ This means that, for proper isolation of the virtual clusters, physical nodes should be set as limited members of the default partition and/or use other partitions for their communications.
 
 pcocc makes use of a daemon on the OpenSM node which dynamically updates the partition configuration (which means pcocc has to be installed on the OpenSM node). The daemon generates the configuration from a template holding the static configuration to which it appends the dynamic configuration. Usually, you will want to copy your current configuration to the template file (/etc/opensm/partitions.conf.tpl in the example below) and have pcocc append its dynamic configuration to form the actual partition file referenced in the OpenSM configuration. The following parameters can be defined:
 
@@ -165,7 +150,7 @@ The example below sums up the available parameters::
 
     ib:
       # Infiniband network based on SRIOV virtual functions
-      type: ib
+      type: infiniband
       settings:
         # Host infiniband device
         host-device: "mlx5_0"
@@ -187,48 +172,27 @@ Sample configuration file
 
 This is the default configuration file for reference::
 
-    # Define a NAT Ethernet network named 'nat-ssh'
-    nat-ssh:
-      # Select the NAT network type
-      type: nat
+    # Define an ethernet network NAT'ed to the host network
+    # with a reverse NAT for the SSH port
+    nat-rssh:
+      type: ethernet
       settings:
-        # Network for VM packets from the host point of view
-        # Select a free network range from the host side
-        nat-network: "10.255.0.0/16"
+        # Manage layer 3 properties such as VM IP adresses
+        network-layer: "L3"
 
-        # Network for VM packets from the VMs point of view
-        # Select a free network range from VMs and host side
-        vm-network: "10.254.0.0/16"
+        # Private IP range for VM interfaces on this ethernet network.
+        int-network: "10.251.0.0/16"
 
-        # IP of the default gateway for VMs
-        # Select an IP in the VM network
-        vm-network-gw: "10.254.0.1"
+        # External IP range used to map private VM IPs to unique VM IPs on the
+        # host network stack for NAT.
+        ext-network: "10.250.0.0/16"
 
-        # IP of VM interface
-        # Select an IP in the VM network
-        vm-ip: "10.254.0.2"
-
-        # MAC addr of the VM interface
-        vm-hwaddr: "52:54:00:44:AE:5E"
-
-        # Name of a bridge which will be created on hosts
-        bridge: "natbr"
-
-        # Prefix for TAP devices created on hosts
-        tap-prefix: "nattap"
+        # Name prefix used for devices created for this network
+        dev-prefix: "nat"
 
         # MTU of the network
         mtu: 1500
 
-        # Domain name and DNS server to provide to VMs via DHCP
-        domain-name: "domain.name.com"
-        dns-server: "0.0.0.0"
-
-        # Allow outbound connections
-        # Uncomment to prevent the VM from initiating connections
-        # allow-outbound: "none"
-
-        # Optional directive: expose a VM port to the host
         reverse-nat:
           # VM port to expose on the host
           vm-port: 22
@@ -236,41 +200,48 @@ This is the default configuration file for reference::
           min-host-port: 60222
           max-host-port: 60322
 
-    # Define a private Ethernet network named 'internal' isolated from the host
-    internal:
-      # Private Ethernet network isolated from the host
-      # Ethernet (Layer 2) inter-VM packets are relayed between hosts
-      # via a Layer 3 tunnel
-      type: pv
-      settings:
-        # Prefix for bridge devices created on the host
-        bridge-prefix: "pvbr"
-        # Prefix for TAP devices created on the host
-        tap-prefix: "pvtap"
-        # Network mtu
-        mtu: 1500
-        # Suffix to append to hostnames of remote hypervisors when
-        # tunneling Ethernet packets
+        # Suffix to append to remote hostnames when tunneling
+        # Ethernet packets
         host-if-suffix: ""
-        # Prefix for Ethernet interface MAC addresses
-        mac-prefix: "52:54:00"
 
-    # Define a private ifiniband network named 'ib'
+
+    # Define a private ethernet network isolated from the host
+    pv:
+      # Private ethernet network isolated from the host
+      type: ethernet
+      settings:
+        # Only manage Ethernet layer
+        network-layer: "L2"
+
+        # Name prefix used for devices created for this network
+        dev-prefix: "pv"
+
+        # MTU of the network
+        mtu: 1500
+
+        # Suffix to append to remote hostnames when tunneling
+        # Ethernet packets
+        host-if-suffix: ""
+
+
+    # Define a private Infiniband network
     ib:
       # Infiniband network based on SRIOV virtual functions
-      type: 'ib'
+      type: infiniband
       settings:
         # Host infiniband device
-        host-device: 'mlx4_0'
-        # Range of PKeys to allocate for virtual clusters on this network
-        min-pkey: '0x2000'
-        max-pkey: '0x3000'
-        # Name of the opensm process
-        opensm-daemon: 'opensm'
+        host-device: "mlx5_0"
+        # Range of PKeys to allocate for virtual clusters
+        min-pkey: "0x2000"
+        max-pkey: "0x3000"
+        # Resource manager token to request when allocating this network
+        license: "pkey"
+        # Name of opensm process
+        opensm-daemon: "opensm"
         # Configuration file for opensm partitions
-        opensm-partition-cfg: '/etc/opensm/partitions.conf'
+        opensm-partition-cfg: /etc/opensm/partitions.conf
         # Template for generating the configuration file for opensm partitions
-        opensm-partition-tpl: '/etc/opensm/partitions.conf.tpl'
+        opensm-partition-tpl: /etc/opensm/partitions.conf.tpl
 
 
 See also

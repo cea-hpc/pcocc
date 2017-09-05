@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-RESOURCES.YAML" "5" "Aug 11, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-RESOURCES.YAML" "5" "Sep 05, 2017" "0.3.1" "pcocc"
 .SH NAME
 pcocc-resources.yaml \- Resource sets configuration file
 .
@@ -47,14 +47,14 @@ This is the default configuration file for reference. Please note that indentati
 # This configuration file holds system\-wide definitions of set of resources
 # which can be used by VM templates
 
-cluster:
-    networks:
-        \- nat\-rssh
-        \- pv
+default:
+  networks:
+    \- nat\-rssh
 
-standalone:
-    networks:
-        \- nat\-rssh
+ib\-cluster:
+  networks:
+    \- nat\-rssh
+    \- ib
 .ft P
 .fi
 .UNINDENT

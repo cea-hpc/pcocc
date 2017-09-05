@@ -74,23 +74,23 @@ Here is the content of :file:`templates.yaml` for these three VMs (don't forget 
 
     centos7-cloud:
         image: "$VMDIR/centos7-cloud"
-        resource-set: "cluster"
+        resource-set: "default"
         description: "Cloud enabled CentOS 7"
 
     ubuntu-artful-cloud:
         image: "$VMDIR/ubuntu-artful-cloud"
-        resource-set: "cluster"
+        resource-set: "default"
         description: "Cloud enabled Ubuntu 17.10"
 
-We selected the *cluster* configuration as a **resource-set** for these VMs. It should reference one of the resource sets defined in the :file:`/etc/resources.yaml` file. Please refer to the :ref:`resources.yaml <resources.yaml>` and :ref:`networks.yaml <networks.yaml>` configuration files for more informations on this option.
+We selected the *default* configuration as a **resource-set** for these VMs. It should reference one of the resource sets defined in the :file:`/etc/resources.yaml` file. Please refer to the :ref:`resources.yaml <resources.yaml>` and :ref:`networks.yaml <networks.yaml>` configuration files for more informations on this option.
 
 Following this step, you should be able to list your new virtual machines::
 
     $ pcocc template list
     NAME                 DESCRIPTION                 RESOURCES    IMAGE
     ----                 -----------                 ---------    -----
-    ubuntu-artful-cloud  Cloud enabled Ubuntu 17.10  cluster      /shared/vms/ubuntu-artful-cloud
-    centos7-cloud        Cloud enabled CentOS 7      cluster      /shared/vms/centos7-cloud
+    ubuntu-artful-cloud  Cloud enabled Ubuntu 17.10  default      /shared/vms/ubuntu-artful-cloud
+    centos7-cloud        Cloud enabled CentOS 7      default      /shared/vms/centos7-cloud
 
 Basic VM configuration
 **********************
@@ -111,45 +111,7 @@ The most basic cloud-config file which you can use is as follows::
 
 It creates a user named *demo* able to use sudo without password and which can login via SSH with the specified key.
 
-.. warning::
-    Please note that indentation levels are significant in YAML and that tabs are not allowed. If you run into trouble you can use a validator at https://coreos.com/validate/.
-
-For a simple cluster, we don't want to deploy a DHCP or DNS server to manage addresses on the private network. Instead, we define an :file:`/etc/hosts` file and use a simple script which configures the Ethernet interface on the private Ethernet network with an IP derived on from the interface's MAC address. Append the following to your cloud-config file::
-
-    write_files:
-      - path: /sbin/ifup-local
-        permissions: '0755'
-        content: |
-          #!/bin/bash
-          VM_ID0=$(printf "%d\n" 0x$(cat /sys/class/net/eth1/address | cut -d : -f 6))
-          VM_ID1=$(printf "%d\n" 0x$(cat /sys/class/net/eth1/address | cut -d : -f 5))
-          VM_ID=$(( 256 * $VM_ID1 + $VM_ID0 ))
-          BYTE0=$((  $VM_ID / 255 ))
-          BYTE1=$(( ( $VM_ID % 255 ) + 1 ))
-
-          ifconfig eth1 "10.252.${BYTE0}.${BYTE1}/16" mtu 1450
-          hostname vm"${VM_ID}"
-
-       - path: /etc/hosts
-         permissions: '0644'
-         content: |
-           #Host file
-           127.0.0.1   localhost localhost.localdomain
-
-           10.252.0.1 vm0
-           10.252.0.2 vm1
-           10.252.0.3 vm2
-           10.252.0.4 vm3
-           10.252.0.5 vm4
-           10.252.0.6 vm5
-           10.252.0.7 vm6
-           10.252.0.8 vm7
-           10.252.0.9 vm8
-
-.. note::
-    The MTU is set to 1450 compared to 1500 on the host network to account for encapsulation headers. More entries in /etc/hosts could be defined to account for more VMs.
-
-Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest in a network indepenant and OS agnostic fashion. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:`pcocc-save(1)<save>` command. We also make sure that the eth1 interface (corresponding to the private network) is up. Append the following content to your cloud-config file::
+Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest without depending on networking. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:`pcocc-save(1)<save>` command. Append the following content to your cloud-config file::
 
     packages:
         - qemu-guest-agent
@@ -157,7 +119,6 @@ Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest a
     runcmd:
         # Make sure that the service is up on all distros
         - systemctl start qemu-guest-agent
-        - ifup eth1
 
 To pass this cloud-config file to our VMs, we can specialize the generic templates. As a regular user you can then add the fllowing content to the :file:`~/.pcocc/templates.yaml` configuration file::
 

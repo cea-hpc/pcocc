@@ -22,14 +22,14 @@ This is the default configuration file for reference. Please note that indentati
     # This configuration file holds system-wide definitions of set of resources
     # which can be used by VM templates
 
-    cluster:
-        networks:
-            - nat-rssh
-            - pv
+    default:
+      networks:
+        - nat-rssh
 
-    standalone:
-        networks:
-            - nat-rssh
+    ib-cluster:
+      networks:
+        - nat-rssh
+        - ib
 
 See also
 ********

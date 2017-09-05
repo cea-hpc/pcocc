@@ -1,12 +1,13 @@
 # This configuration file holds system-wide definitions of set of resources
 # which can be used by VM templates
 
-cluster:
+default:
   networks:
     - nat-rssh
-    - pv
 
-standalone:
-  networks:
-    - nat-rssh
+# ib-cluster:
+#   networks:
+#     - nat-rssh
+#     - ib
+
 

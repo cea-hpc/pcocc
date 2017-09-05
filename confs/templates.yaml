@@ -6,7 +6,7 @@
 #   image: /path/to/images/myexample
 
 #   # Resources to allocate (as defined in resources.yaml)
-#   resource-set: cluster
+#   resource-set: default
 
 #   # Mount points to expose via virtio-9p (default: none)
 #   # mount-points:
@@ -28,4 +28,4 @@
 #   image: /path/to/images/myexample2
 
 #   # Resources to allocate (as defined in resources.yaml)
-#   resource-set: standalone
+#   resource-set: ib-cluster

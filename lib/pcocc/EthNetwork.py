@@ -188,9 +188,9 @@ additionalProperties: false
 
         key_id = self._alloc_tun_key(master)
 
-
         # Create internal bridge
         int_br = OVSBridge.prefix_find_free(self._int_br_prefix)
+        int_br.defer()
         tracker.create_with_ref(batch.batchid, int_br)
         int_br.set_mtu(self._mtu)
         int_br.enable()
@@ -202,7 +202,7 @@ additionalProperties: false
 
             # Reference to external bridge which should have already been created
             ext_br = OVSBridge(self._ext_br_name)
-
+            ext_br.defer()
             # Cookie to track entries on the shared external bridge
             ext_cookie = tracker.create_with_ref(batch.batchid,
                                                  OVSCookie(batch.batchid,
@@ -446,6 +446,10 @@ additionalProperties: false
                         'rnat/{0}/{1}'.format(vm.rank, self._vm_rnat_port),
                         host_port.number
                     )
+
+        int_br.push_flows()
+        if self._network_layer == 'L3':
+            ext_br.push_flows()
 
         net_res['global'] = {'int_br_name': int_br.name,
                              'key_id': key_id,

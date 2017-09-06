@@ -27,6 +27,7 @@ import socket
 import struct
 import subprocess
 import time
+import tempfile
 
 from abc import ABCMeta, abstractmethod
 from .Error import PcoccError
@@ -761,6 +762,8 @@ class NetDev(TrackableObject):
 class OVSBridge(NetDev):
     def __init__(self, name, netns=None):
         super(self.__class__, self).__init__(name, netns)
+        self._defer = False
+        self._deferred_flows = []
 
     def create(self):
         self._log_create()
@@ -776,10 +779,28 @@ class OVSBridge(NetDev):
         self.run_in_ns(['ovs-vsctl', 'set', 'bridge', self._name,
                         'other-config:hwaddr={0}'.format(hwaddr)])
 
+    def defer(self, enable=True):
+        if not enable and self._deferred_flows:
+            self.push_flows()
+
+        self._defer = enable
+
     def add_flow(self, match, action, table=0, priority=1000, cookie=None):
         flow = self._format_flow(match, action, table, priority, cookie)
 
-        self.run_in_ns(["ovs-ofctl", "add-flow", "-OOpenFlow13", self._name, flow])
+        if self._defer:
+            self._deferred_flows.append(flow)
+        else:
+            self.run_in_ns(["ovs-ofctl", "add-flow", "-OOpenFlow13",
+                            self._name, flow])
+
+    def push_flows(self):
+        fd, flowfile = tempfile.mkstemp()
+        with os.fdopen(fd, 'w') as f:
+            f.write('\n'.join(self._deferred_flows))
+        self.run_in_ns(["ovs-ofctl", "add-flows" , "-OOpenFlow13",
+                        self._name, flowfile])
+        self._deferred_flows = []
 
     def del_flows(self, match=None, action=None, table=None, priority=None, cookie=None):
         flow = self._format_flow(match, action, table, priority, cookie)

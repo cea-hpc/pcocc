@@ -1342,6 +1342,14 @@ username={3}@pcocc
             count = json.loads(data)["return"]["count"]
             eof = json.loads(data)["return"]["eof"]
 
+            fsize = os.stat(source_file).st_size
+            if count < fsize:
+                raise AgentError("Wrote only {0} out of {1} bytes of {2}".format(
+                    count, fsize, source_file))
+
+            if eof:
+                raise AgentError("Unexepected EOF writing {0}".format(source_file))
+
             s_ctl.stdin.write('{"execute":"guest-file-close",'
                               '"arguments":{"handle":%d}}' %
                               handle)
@@ -1350,6 +1358,9 @@ username={3}@pcocc
             ret = json.loads(data)["return"]
             if ret:
                 raise ValueError
+
+            logging.debug('Agent wrote {source} to {dest} ({size} bytes)'.format(
+                source=source_file, dest=dest_file, size=count))
 
         except IOError as err:
             raise AgentError("failed to communicate:  %s" % err)

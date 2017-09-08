@@ -1,0 +1,13 @@
+hosteth:
+  type: bridged-ethernet
+  settings:
+   host-bridge: br0
+   tap-prefix: ethtap
+   mtu: 1500
+
+	!!!
+
+hostib:
+  type: host-infiniband
+  settings:
+   host-device: mlx5_0

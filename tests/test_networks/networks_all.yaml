@@ -1,0 +1,55 @@
+nat-rssh:
+  type: ethernet
+  settings:
+    network-layer: "L3"
+    int-network: "10.251.0.0/16"
+    ext-network: "10.250.0.0/16"
+    dev-prefix: "nat"
+    mtu: 1500
+    reverse-nat:
+      vm-port: 22
+      min-host-port: 60222
+      max-host-port: 60322
+    host-if-suffix: "-ib"
+
+
+pv:
+  type: ethernet
+  settings:
+    network-layer: "L2"
+    dev-prefix: "pv"
+    mtu: 1500
+    host-if-suffix: ""
+    ext-network: "10.250.0.0/16"
+
+ib:
+  type: infiniband
+  settings:
+    host-device: "mlx5_0"
+    min-pkey: "0x2000"
+    max-pkey: "0x3000"
+    license: "pkey"
+    opensm-daemon: "opensm"
+    opensm-partition-cfg: /etc/opensm/partitions.conf
+    opensm-partition-tpl: /etc/opensm/partitions.conf.tpl
+
+gpu:
+  type: genericpci
+  settings:
+   host-device-addrs:
+     - 0000:00:04
+     - 0000:00:06
+     - 0000:00:07
+   host-driver: nvidia
+
+hostib:
+  type: host-infiniband
+  settings:
+   host-device: mlx5_0
+
+hosteth:
+  type: bridged-ethernet
+  settings:
+   host-bridge: br0
+   tap-prefix: ethtap
+   mtu: 1500

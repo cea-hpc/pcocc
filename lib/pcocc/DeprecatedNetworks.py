@@ -52,7 +52,7 @@ additionalProperties: false
         self._mac_prefix = settings.get("mac-prefix", "52:54:00")
         self._bridge_prefix = settings["bridge-prefix"]
         self._tap_prefix = settings["tap-prefix"]
-        self._mtu = int(settings["mtu"])
+        self._mtu = int(settings.get("mtu", 1500))
         self._host_if_suffix = settings["host-if-suffix"]
         self._min_key = 1024
         self._max_key = 2 ** 16 - 1
@@ -338,44 +338,36 @@ additionalProperties: false
         self._type = "ethernet"
         self._bridge_name = settings["bridge"]
 
-        # Check nat bits >= vm bits
+
         self._nat_network = settings["nat-network"].split("/")[0]
         self._nat_network_bits = int(settings["nat-network"].split("/")[1])
         self._vm_network = settings["vm-network"].split("/")[0]
         self._vm_network_bits = int(settings["vm-network"].split("/")[1])
 
-        # Remove (auto computed) vms first n ips, gw (host): last
+
         self._vm_network_gw = settings["vm-network-gw"]
         self._vm_ip = settings["vm-ip"]
-
-        # Interface prefix (default to net name)
         self._tap_prefix = settings["tap-prefix"]
 
-        self._mtu = int(settings["mtu"])
+        self._mtu = int(settings.get("mtu", 1500))
 
-        # prefix
-        self._vm_hwaddr = settings["vm-hwaddr"]
-        self._bridge_hwaddr = settings["bridge-hwaddr"]
 
-        # remove (one per cluster)
+        self._vm_hwaddr = settings.get("vm-hwaddr", "52:54:00:44:AE:5E")
+        self._bridge_hwaddr = settings.get("bridge-hwaddr", "52:54:00:C0:C0:C0")
         self._dnsmasq_pid_filename = "/var/run/pcocc_dnsmasq.pid"
+        self._domain_name = settings.get('domain-name', '')
+        self._dns_server = settings.get('dns-server', '')
+        self._ntp_server = settings.get('ntp-server', '')
+        self._allow_outbound = settings.get('allow-outbound', 'all')
 
-        # defaults to pcocc.domain_name
-        self._domain_name = settings["domain-name"]
-        self._dns_server = settings["dns-server"]
-        self._ntp_server = settings["ntp-server"]
-
-        # gateway type (none/per-host/per-cluster/external)
-
-        # Add ip/port range filters
-        if settings["allow-outbound"] == 'none':
+        if self._allow_outbound == 'none':
             self._allow_outbound = False
-        elif settings["allow-outbound"] == 'all':
+        elif self._allow_outbound == 'all':
             self._allow_outbound = True
         else:
             raise InvalidConfigurationError(
                 '%s is not a valid value '
-                'for allow-outbound' % settings["allow-outbound"])
+                'for allow-outbound' % self._allow_outbound)
 
         if "reverse-nat" in settings:
             self._vm_rnat_port = int(settings["reverse-nat"]["vm-port"])

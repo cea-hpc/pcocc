@@ -38,7 +38,7 @@ additionalProperties: false
 
         self._host_bridge = settings["host-bridge"]
         self._tap_prefix = settings["tap-prefix"]
-        self._mtu = int(settings["mtu"])
+        self._mtu = int(settings.get("mtu", 1500))
 
 
     def init_node(self):

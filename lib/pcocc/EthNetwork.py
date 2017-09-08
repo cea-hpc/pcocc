@@ -944,12 +944,15 @@ additionalProperties: false
         self._host_if_suffix = settings.get('host-if-suffix', '')
         self._mtu = int(settings.get("mtu", 1500))
 
-        self._ext_network = settings["ext-network"].split("/")[0]
-        self._ext_network_bits = int(settings["ext-network"].split("/")[1])
-        self._int_network = settings["int-network"].split("/")[0]
-        self._int_network_bits = int(settings["int-network"].split("/")[1])
+        ext_network = settings.get('ext-network', '10.201.0.0/16')
+        self._ext_network = ext_network.split("/")[0]
+        self._ext_network_bits = int(ext_network.split("/")[1])
 
-        self._network_layer = settings["network-layer"]
+        int_network = settings.get('int-network', '10.200.0.0/16')
+        self._int_network = int_network.split("/")[0]
+        self._int_network_bits = int(int_network.split("/")[1])
+
+        self._network_layer = settings.get("network-layer", "L3")
 
         # defaults to pcocc.dnsdomainname
         self._domain_name = settings.get('domain-name', 'pcocc.{0}'.format(
@@ -962,15 +965,17 @@ additionalProperties: false
         self._dns_server = settings.get("dns-server", '')
         self._ntp_server = settings.get("ntp-server", '')
 
-        # Add ip/port range filters
-        if settings["allow-outbound"] == 'none':
+        # TODO: Add ip/port range filters
+        self._allow_outbound = settings.get('allow-outbound', 'all')
+
+        if self._allow_outbound == 'none':
             self._allow_outbound = False
-        elif settings["allow-outbound"] == 'all':
+        elif self._allow_outbound == 'all':
             self._allow_outbound = True
         else:
             raise InvalidConfigurationError(
                 '%s is not a valid value '
-                'for allow-outbound' % settings["allow-outbound"])
+                'for allow-outbound' % self._allow_outbound)
 
         if "reverse-nat" in settings:
             self._vm_rnat_port = int(settings["reverse-nat"]["vm-port"])

@@ -1,0 +1,5 @@
+hostib:
+  type: host-infiniband
+  settings:
+   host-device: mlx5_0
+   foo: 'bar'

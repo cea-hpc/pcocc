@@ -22,7 +22,6 @@ import yaml
 from abc import ABCMeta, abstractmethod
 from .Error import  InvalidConfigurationError
 from .Config import Config
-from .Misc import DefaultValidatingDraft4Validator
 from .NetUtils import NetworkSetupError
 
 network_config_schema = """
@@ -54,25 +53,32 @@ class VNetworkConfig(dict):
             raise InvalidConfigurationError(str(err))
 
         try:
-            validator = DefaultValidatingDraft4Validator(VNetwork.schema)
-            validator.validate(net_config)
+            jsonschema.Draft4Validator(VNetwork.schema).validate(net_config)
         except jsonschema.exceptions.ValidationError as err:
-            #FIXME when err.path doesnt exist (error at top level)
-            message = "failed to parse configuration for network {0} \n".format(err.path[0])
-            sortfunc = jsonschema.exceptions.by_relevance(frozenset(['oneOf', 'anyOf', 'enum']))
-            best_errors = sorted(err.context, key=sortfunc, reverse=True)
-            for e in best_errors:
+            type_errs = []
+
+            #Top level error in a network name
+            if not err.context:
+                raise InvalidConfigurationError(err.message)
+
+            # Iterate over all context errors in the anyof schemas
+            for e in sorted(err.context, key=lambda e: e.schema_path):
+                # Check for network type error
                 if (len(e.schema_path) == 4 and e.schema_path[1] == 'properties' and
                     e.schema_path[2] ==  'type' and e.schema_path[3] == 'enum'):
-                    continue
-                else:
-                    message += str(e.message)
-                    break
-            else:
-                for e in best_errors:
-                    message += '\n' + str(e.message)
+                    type_errs.append(e)
 
-            raise InvalidConfigurationError(message)
+            # Errors relevant to the requested network type
+            rel_errs = [ e for e in err.context if e.schema_path[0] not in
+                         [ t.schema_path[0] for t in type_errs ] ]
+
+            # No relevant network type: not among valid network types
+            if not rel_errs:
+                raise InvalidConfigurationError('\n'.join([e.message for e in type_errs]))
+
+            # Most significant error among requested network type
+            best_err = jsonschema.exceptions.best_match(rel_errs)
+            raise InvalidConfigurationError(best_err.message)
 
         for name, net_attr in net_config.iteritems():
             self[name] = VNetwork.create(net_attr['type'],
@@ -211,4 +217,5 @@ import pcocc.EthNetwork  # pylint: disable=W0611
 import pcocc.IBNetwork  # pylint: disable=W0611
 import pcocc.HostIBNetwork  # pylint: disable=W0611
 import pcocc.BridgedNetwork  # pylint: disable=W0611
+import pcocc.GenPCINetwork  # pylint: disable=W0611
 import pcocc.DeprecatedNetworks  # pylint: disable=W0611

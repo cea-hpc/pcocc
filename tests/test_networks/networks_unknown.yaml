@@ -1,0 +1,6 @@
+hosteth:
+  type: xxx
+  settings:
+   host-bridge: br0
+   tap-prefix: ethtap
+   mtu: 1500

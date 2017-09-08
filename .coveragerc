@@ -1,0 +1,3 @@
+[run]
+omit = *pcocc/scripts/click/*
+       *pcocc/scripts/Shine/*

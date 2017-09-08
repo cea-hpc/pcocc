@@ -142,31 +142,8 @@ epoch = datetime.datetime.utcfromtimestamp(0)
 def datetime_to_epoch(dt):
     return int((dt - epoch).total_seconds())
 
+#Schema to validate the global key state in the key/value store
 
-
-def extend_validator_with_default(validator_class):
-    """Customize jsonschema validator to apply default values"""
-    validate_properties = validator_class.VALIDATORS["properties"]
-
-    def set_defaults(validator, properties, instance, schema):
-        for prop, subschema in properties.iteritems():
-            if "default-value" in subschema:
-                instance.setdefault(prop, subschema["default-value"])
-
-        for error in validate_properties(
-            validator, properties, instance, schema,
-        ):
-            yield error
-            break
-
-    return jsonschema.validators.extend(
-        validator_class, {"properties" : set_defaults},
-    )
-
-
-DefaultValidatingDraft4Validator = extend_validator_with_default(jsonschema.Draft4Validator)
-
-"""Schema to validate the global key state in the key/value store"""
 id_allocation_schema = """
 type: array
 items:

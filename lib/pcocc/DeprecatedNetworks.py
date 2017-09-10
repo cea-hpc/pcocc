@@ -89,8 +89,8 @@ additionalProperties: false
             return
 
         if batch.node_rank == master:
-            logging.info("Node is master for PV network {0}".format(
-                    self.name))
+            logging.info("Node is master for PV network %s",
+                         self.name)
         try:
             tun_id = self._min_key + self._ida.coll_alloc_one(
                 master,
@@ -247,7 +247,7 @@ additionalProperties: false
         # Look for remaining bridges to cleanup
         for bridge_id in find_used_dev_ids(self._bridge_prefix):
             logging.warning(
-                'Deleting leftover bridge for {0} network'.format(self.name))
+                'Deleting leftover bridge for %s network', self.name)
             # Delete the bridge
             bridge_name = dev_name_from_id(self._bridge_prefix,
                                            bridge_id)
@@ -257,7 +257,7 @@ additionalProperties: false
         # Look for remaining taps to cleanup
         for tap_id in find_used_dev_ids(self._tap_prefix):
             logging.warning(
-                'Deleting leftover tap for {0} network'.format(self.name))
+                'Deleting leftover tap for %s network', self.name)
 
             # Delete the tap
             tap_name = dev_name_from_id(self._tap_prefix,
@@ -606,7 +606,7 @@ additionalProperties: false
         # Look for remaining taps to cleanup
         for tap_id in find_used_dev_ids(self._tap_prefix):
             logging.warning(
-                'Deleting leftover tap for {0} network'.format(self.name))
+                'Deleting leftover tap for %s network', self.name)
 
             # Delete the tap
             tun_delete_tap(dev_name_from_id(self._tap_prefix,
@@ -817,7 +817,7 @@ def netns_decorate(func):
 
 def make_mask(num_bits):
     "return a mask of num_bits as a long integer"
-    return ((2L<<num_bits-1) - 1) << (32 - num_bits)
+    return ((2<<num_bits-1) - 1) << (32 - num_bits)
 
 def dotted_quad_to_num(ip):
     "convert decimal dotted quad string to long integer"

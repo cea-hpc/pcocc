@@ -342,7 +342,7 @@ class EtcdManager(BatchManager):
     def _init_vm_dir(self):
         self._only_in_a_job()
         try:
-            os.mkdir(self._get_vm_state_dir(self.task_rank), 0700)
+            os.mkdir(self._get_vm_state_dir(self.task_rank), 0o700)
         except OSError as e:
             raise PcoccError('Failed to create temporary directory for VM data: ' + str(e))
 
@@ -492,9 +492,9 @@ class EtcdManager(BatchManager):
                 new_value, ret = func(*nargs, **kwargs)
 
                 logging.debug(
-                    "Trying atomic update \"{1}\" for \"{0}\" ".format(
+                    "Trying atomic update \"%s\" for \"%s\" ",
                         str(value).strip(),
-                        str(new_value).strip()))
+                        str(new_value).strip())
 
                 if value is None:
                     if new_value is None:
@@ -714,7 +714,7 @@ class EtcdManager(BatchManager):
                 self._etcd_password = binascii.b2a_hex(
                     os.urandom(ETCD_PASSWORD_BYTES))
                 f = os.open(pwd_path,
-                            os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0400)
+                            os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o400)
                 os.write(f, self._etcd_password)
                 os.close(f)
             except OSError as e:
@@ -723,7 +723,7 @@ class EtcdManager(BatchManager):
     def init_cluster_keys(self):
         if self._etcd_auth_type != 'none':
             role = '{0}-pcocc'.format(self.batchuser)
-            logging.info('Initializing etcd role {0}'.format(role))
+            logging.info('Initializing etcd role %s', role)
             u = etcd.auth.EtcdRole(self.keyval_client, role)
             u.grant('/pcocc/cluster/*', 'R')
             u.grant('/pcocc/global/public/*', 'R')
@@ -731,7 +731,7 @@ class EtcdManager(BatchManager):
             u.grant('/pcocc/global/users/{0}/*'.format(self.batchuser), 'RW')
             u.write()
 
-            logging.info('Initializing etcd user {0}'.format(self.batchuser))
+            logging.info('Initializing etcd user %s', self.batchuser)
 
             u = etcd.auth.EtcdUser(self.keyval_client, self.batchuser)
             try:
@@ -929,9 +929,9 @@ class LocalManager(EtcdManager):
             pass
 
         if not jobid_in_use is None:
-            logging.warning('Job name {0} is already in use by {1}'.format(
+            logging.warning('Job name %s is already in use by %s',
                     alloc_opt.jobname,
-                    jobid_in_use))
+                    jobid_in_use)
 
         self._run_pid = 0
         self._shutdown = False
@@ -1052,7 +1052,7 @@ class LocalManager(EtcdManager):
                     f.close()
 
                 if not pids:
-                    logging.warning('Trying to clean orphan job {0}'.format(batchid))
+                    logging.warning('Trying to clean orphan job %s', batchid)
                     subprocess.call(['pcocc'] + Config().verbose_opt +
                                      ['internal', 'setup', 'delete', '-j', batchid, '--nolock'])
 
@@ -1071,10 +1071,10 @@ class LocalManager(EtcdManager):
                     batchids.append(int(os.path.split(child.key)[-1]))
                 except:
                     logging.warning('Invalid heartbeat entry for '
-                                    'user {0}: {1}'.format(
+                                    'user %s: %s',
                                         self.batchuser,
                                         child.key
-                                    ))
+                                    )
         return batchids
 
     def _update_heartbeat(self, ttl=60):
@@ -1106,8 +1106,8 @@ class LocalManager(EtcdManager):
 
                 batchids.append(batchid)
             else:
-                logging.warning('list_all_jobs: ignoring stale job {0} on {1} '.format(
-                    batchid, job['host']))
+                logging.warning('list_all_jobs: ignoring stale job %s on %s ',
+                    batchid, job['host'])
 
         return batchids
 
@@ -1317,7 +1317,7 @@ class LocalManager(EtcdManager):
             try:
                 f = open(os.path.join(self._cpuset_cluster(), 'tasks'))
             except IOError:
-                logging.warning('No cpuset for job {0}'.format(self.batchid))
+                logging.warning('No cpuset for job %s', self.batchid)
                 f = None
 
             if f:
@@ -1355,8 +1355,9 @@ class LocalManager(EtcdManager):
             self._update_heartbeat(0)
         except:
             logging.error('No allocation record to delete '
-                          'matching job {0} for user {1}'.format(self.batchid,
-                                                                 self.batchuser))
+                          'matching job %s for user %s',
+                          self.batchid,
+                          self.batchuser)
         if remote:
             logging.warning('Exiting without performing host resource cleanup for '
                             'forced remote job deletion')
@@ -1624,11 +1625,11 @@ class SlurmManager(EtcdManager):
         # Else, try a per node basis:
         match = re.search(r'MinMemoryNode=(\d+)M', raw_output)
         if match:
-            return int(match.group(1)) / self.num_cores
+            return int(match.group(1)) // self.num_cores
 
         match = re.search(r'MinMemoryNode=(\d+)G', raw_output)
         if match:
-            return int(match.group(1)) * 1024 / self.num_cores
+            return int(match.group(1)) * 1024 // self.num_cores
 
         raise BatchError("Failed to read memory per core")
 

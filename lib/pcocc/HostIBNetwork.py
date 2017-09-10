@@ -43,8 +43,8 @@ additionalProperties: false
         deleted_vfs = VFIOInfinibandVF.ibdev_cleanup(self._device_name)
         if deleted_vfs > 0:
             logging.warning(
-                'Deleted {0} leftover VFs for {1} network'.format(
-                    deleted_vfs, self.name))
+                'Deleted %s leftover VFs for %s network',
+                deleted_vfs, self.name)
 
     @staticmethod
     def _gen_guid_suffix():

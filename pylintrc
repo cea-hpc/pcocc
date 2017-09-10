@@ -144,9 +144,7 @@ enable=import-error,
        old-ne-operator,
        backtick,
        old-raise-syntax,
-       metaclass-assignment,
        next-method-called,
-       dict-iter-method,
        dict-view-method,
        indexing-exception,
        raising-string,
@@ -225,6 +223,8 @@ enable=import-error,
 # protected-access (requires some refactoring)
 # attribute-defined-outside-init (requires some refactoring)
 # super-init-not-called (requires some cleanup)
+# metaclass-assignment (for python 3, needs cleanup)
+# dict-iter-method (for python 3, needs cleanup)
 # locally-disabled,
 # fixme,
 # no-self-use,

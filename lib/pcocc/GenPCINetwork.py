@@ -46,8 +46,8 @@ additionalProperties: false
 
         if deleted_devs > 0:
             logging.warning(
-                'Deleted {0} leftover PCI devices of type {1}'.format(
-                    len(deleted_devs), self.name))
+                'Deleted %s leftover PCI devices of type %s',
+                len(deleted_devs), self.name)
 
     def alloc_node_resources(self, cluster):
         batch = Config().batch

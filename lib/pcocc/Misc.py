@@ -40,7 +40,7 @@ def fake_signalfd(sigs):
     for sig in sigs:
         def _fake_sigfd_handler(signum, frame):
             logging.debug("Signalfd handler injecting "
-                          "event for signal {0}".format(signum))
+                          "event for signal %s", signum)
             os.write(sig_w, 'x')
         signal.signal(sig, _fake_sigfd_handler)
     return sig_r
@@ -58,7 +58,7 @@ def _nanny_thread(child_proc, pipe, return_val):
         pid = child_proc.pid
 
     logging.debug("Nanny thread detected termination "
-                  "of pid {0}".format(pid))
+                  "of pid %s", pid)
     return_val['val'] = r
     return_val['pid'] = pid
     os.write(pipe, 'x')
@@ -101,7 +101,7 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout):
 
             cur_timeout = timeout
             logging.debug("Wait/Term child: "
-                          "Sending sig {0} to {1}".format(sig, child_proc))
+                          "Sending sig %s to %s", sig, child_proc)
             try:
                 if isinstance(child_proc, int):
                     os.kill(child_proc, sig)
@@ -252,12 +252,12 @@ class IDAllocator(object):
         stray_ids = num_ids_preclean - num_ids
         if stray_ids > 0:
             logging.warning(
-                'Found {0} leftover Ids, will try to cleanup'.format(
-                    stray_ids))
+                'Found %s leftover Ids, will try to cleanup',
+                    stray_ids)
 
         if num_ids + count > self.num_ids:
-            raise PcoccError('Not enough free ids in {0}'.format(
-                self.key_path))
+            raise PcoccError('Not enough free ids in %s' %
+                             self.key_path)
 
         id_indexes = []
         i = 0

@@ -15,6 +15,7 @@
 #
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
+from __future__ import division
 
 import os
 import time
@@ -37,6 +38,7 @@ import signal
 import datetime
 import random
 import binascii
+
 
 from ClusterShell.NodeSet  import RangeSet
 from .scripts import click
@@ -350,7 +352,7 @@ class Qemu(object):
                                   'spice_vm{0}'.format(vm.rank))
         sasldb_path = os.path.join(spice_path, 'saslpasswd.db')
         os.environ['SASL_CONF_PATH'] = spice_path
-        os.mkdir(spice_path, 0700)
+        os.mkdir(spice_path, 0o700)
 
         spice_password = binascii.b2a_hex(os.urandom(16))
         s_exec = subprocess.Popen(['saslpasswd2', '-f',
@@ -472,11 +474,11 @@ username={3}@pcocc
             topology_cache_args = []
 
         if vm.emulator_cores >= num_cores:
-            logging.warning('VM {0} was only given {1} cores, '
-                            'but its template requires {2} for the emulator. '
-                            'Reducing emulator cores to {3}'.format(
-                    vm.rank, num_cores, vm.emulator_cores,
-                    num_cores - 1))
+            logging.warning('VM %s was only given %s cores, '
+                            'but its template requires %s for the emulator. '
+                            'Reducing emulator cores to %s',
+                            vm.rank, num_cores, vm.emulator_cores,
+                            num_cores - 1)
             emulator_cores = num_cores - 1
         else:
             emulator_cores = vm.emulator_cores
@@ -606,7 +608,7 @@ username={3}@pcocc
             cmdline += ['-device',
                         'virtio-blk-pci,id=ioth-datadisk{0},multifunction=on,'
                         'drive=datadisk{0},addr={1:02d}.{2}'.format(
-                            i, i/3+7, i%3)]
+                            i, i//3+7, i%3)]
             cmdline += ['-drive',
                         'file={0},cache={1},id=datadisk{2},'
                         'if=none'.format(
@@ -650,7 +652,7 @@ username={3}@pcocc
                     cmdline += ['-object',
                                 'memory-backend-ram,size=%dM,policy=preferred,prealloc=yes,'
                                 'host-nodes=%d,id=ram-%d' % (
-                            total_mem / len(cores_on_numa),
+                            total_mem // len(cores_on_numa),
                             numa_node, i)]
 
                 else:
@@ -711,11 +713,8 @@ username={3}@pcocc
 
             # Fail early if the mount point is not accessible as Qemu will
             # refuse to start anyway
-            try:
-                if ( not os.path.isdir(host_path) or
-                     not os.access(host_path, os.R_OK|os.X_OK)):
-                    raise
-            except:
+            if ( not os.path.isdir(host_path) or
+                 not os.access(host_path, os.R_OK|os.X_OK)):
                 raise HypervisorError('unable to access mount '
                                       'point {0}'.format(host_path))
 
@@ -883,8 +882,8 @@ username={3}@pcocc
         pcocc_socket_path = batch.get_vm_state_path(vm.rank,
                                                    'pcocc_console_socket')
 
-        logging.debug('Connecting to qemu console {0}'.format(
-                qemu_socket_path))
+        logging.debug('Connecting to qemu console %s',
+                      qemu_socket_path)
         qemu_console_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             qemu_console_sock.settimeout(30)
@@ -1107,9 +1106,9 @@ username={3}@pcocc
                 status = ret["return"]["status"]
                 if status == "active":
                     remain_mb = (int(ret["return"]["ram"]["remaining"])
-                                 / (1024 * 1024))
+                                 // (1024 * 1024))
                     tot_mb = (int(ret["return"]["ram"]["total"])
-                              / (1024 * 1024))
+                              // (1024 * 1024))
                     remain_pct = 100. * remain_mb / tot_mb
 
                     if remain_mb > 0:
@@ -1243,7 +1242,7 @@ username={3}@pcocc
             s_ctl = self.socket_connect(vm, 'serial_{0}_socket'.format(port), kill_atexit)
             syn_id = random.randint(100000000,999999999)
             qga_cmd = '{"execute":"guest-sync", "arguments": { "id": %d }}\n\n' % syn_id
-            logging.debug("Sending agent sync {0}".format(qga_cmd))
+            logging.debug("Sending agent sync %s", qga_cmd)
 
             # TODO: Remove this wait. For now, without it, some of the data we
             # send is lost
@@ -1359,8 +1358,8 @@ username={3}@pcocc
             if ret:
                 raise ValueError
 
-            logging.debug('Agent wrote {source} to {dest} ({size} bytes)'.format(
-                source=source_file, dest=dest_file, size=count))
+            logging.debug('Agent wrote %s to %s (%s bytes)',
+                          source_file, dest_file, count)
 
         except IOError as err:
             raise AgentError("failed to communicate:  %s" % err)

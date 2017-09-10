@@ -110,8 +110,8 @@ required:
 
         # Master allocates a pkey and broadcasts to the others
         if batch.node_rank == master:
-            logging.info("Node is master for IB network {0}".format(
-                    self.name))
+            logging.info("Node is master for IB network %s",
+                         self.name)
         try:
             pkey_index = self._ida.coll_alloc_one(master, '{0}_pkey'.format(self.name))
         except PcoccError as e:
@@ -121,9 +121,9 @@ required:
                     ))
 
         my_pkey = self._min_pkey + pkey_index
-        logging.info("Using PKey 0x{0:04x} for network {1}".format(
-            my_pkey,
-            self.name))
+        logging.info("Using PKey 0x%04x for network %s",
+                     my_pkey,
+                     self.name)
 
         # Write guids needed for our host
         host_guid = ibdev_get_guid(self._device_name)
@@ -135,8 +135,8 @@ required:
         # Master waits until all hosts have written their guids
         # and updates opensm
         if batch.node_rank == master:
-            logging.info("Collecting GUIDs from all hosts for {0}".format(
-                    self.name))
+            logging.info("Collecting GUIDs from all hosts for %s",
+                         self.name)
             global_guids = batch.wait_child_count('cluster',
                                                   self._get_net_key_path('guids'),
                                                   len(net_hosts))
@@ -147,8 +147,8 @@ required:
                                       in cluster.vms
                                       if self.name in vm.networks ]
 
-            logging.info("Requesting OpenSM update for {0}".format(
-                    self.name))
+            logging.info("Requesting OpenSM update for %s",
+                         self.name)
             batch.write_key('global', 'opensm/pkeys/' + str(hex(my_pkey)),
                             sm_config)
 
@@ -241,12 +241,12 @@ required:
                                         yaml.safe_load(self._pkey_entry_schema))
                     pkeys[pkey] = config
                 except yaml.YAMLError as e:
-                    logging.warning("Misconfigured PKey {0}: {1}".format(
-                             pkey, e))
+                    logging.warning("Misconfigured PKey %s: %s",
+                                    pkey, e)
                     continue
                 except jsonschema.ValidationError as e:
-                    logging.warning("Misconfigured PKey {0}: {1}".format(
-                            pkey, e))
+                    logging.warning("Misconfigured PKey %s: %s",
+                                    pkey, e)
                     continue
 
             tmp = tempfile.NamedTemporaryFile(delete=False)
@@ -297,18 +297,18 @@ def chunks(array, n):
         yield array[i:i+n]
 
 def vm_get_port_guid(vm, pkey_id):
-    pkey_high = pkey_id / 0x100
+    pkey_high = pkey_id // 0x100
     pkey_low = pkey_id % 0x100
-    vm_high = vm.rank / 0x100
+    vm_high = vm.rank // 0x100
     vm_low = vm.rank % 0x100
 
     return '0xc0cc{0:02x}{1:02x}00{2:02x}{3:02x}00'.format(pkey_high, pkey_low,
                                                         vm_high, vm_low)
 
 def vm_get_node_guid(vm, pkey_id):
-    pkey_high = pkey_id / 0x100
+    pkey_high = pkey_id // 0x100
     pkey_low = pkey_id % 0x100
-    vm_high = vm.rank / 0x100
+    vm_high = vm.rank // 0x100
     vm_low = vm.rank % 0x100
 
     return '0xd0cc{0:02x}{1:02x}00{2:02x}{3:02x}00'.format(pkey_high, pkey_low,

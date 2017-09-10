@@ -111,9 +111,9 @@ additionalProperties: false
         # Look for remaining taps to cleanup
         count = TAP.prefix_cleanup(self._tap_prefix)
         if count:
-            logging.warning('Deleted {0} leftover TAP(s) for {1} network'.format(
+            logging.warning('Deleted %s leftover TAP(s) for %s network',
                     count,
-                    self.name))
+                    self.name)
 
     def _alloc_vm_res(self, vm):
         tracker = Config().tracker

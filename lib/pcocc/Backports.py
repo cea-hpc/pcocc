@@ -19,11 +19,6 @@
 """Some useful functions from future Python"""
 import subprocess
 
-def total_seconds(td):
-    """ Returns a the number of seconds in a timedelta """
-    return (td.microseconds +
-            (td.seconds + td.days * 24 * 3600) * 10**6) / 10**6
-
 def subprocess_check_output(*popenargs, **kwargs):
     r"""Run command with arguments and return its output as a byte string.
 

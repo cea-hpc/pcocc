@@ -50,11 +50,11 @@ class Tracker(object):
     def __init__(self, store_file):
         self._tracked_objs = shelve.open(store_file)
         for track_key, _ in self.list_objs():
-            logging.info('Tracker loaded obj {0} from {1}'.format(
-                    track_key, store_file))
+            logging.info('Tracker loaded obj %s from %s',
+                         track_key, store_file)
 
-        logging.info('Tracker index is at {0}'.format(
-                self._track_index))
+        logging.info('Tracker index is at %s',
+                     self._track_index)
 
         atexit.register(self._tracked_objs.close)
 
@@ -96,11 +96,11 @@ class Tracker(object):
             try:
                 obj.delete()
                 if reverse:
-                    logging.info('Deleted {0}'.format(obj))
+                    logging.info('Deleted %s', obj)
                 else:
-                    logging.warning('Deleted leftover {0}'.format(obj))
+                    logging.warning('Deleted leftover %s', obj)
             except Exception as e:
-                logging.warning('Failed to delete {0}: {1} '.format(obj, e))
+                logging.warning('Failed to delete %s: %s', obj, e)
 
             del self._tracked_objs[self._track_key(obj)]
         self._tracked_objs.sync()
@@ -158,7 +158,7 @@ class TrackableObject(object):
         pass
 
     def _log_create(self):
-        logging.info('Created {0}'.format(self))
+        logging.info('Created %s', self)
 
     @classmethod
     def run(cls, cmd, quiet=False, err_quiet=False):
@@ -335,7 +335,7 @@ class VFIOInfinibandVF(VFIODev):
                     pkey = self._pkey))
 
     def create(self):
-        super(self.__class__, self).create()
+        super(VFIOInfinibandVF, self).create()
 
         if self._ibvf_type == IBVFType.MLX4:
             if self._pkey:
@@ -362,7 +362,7 @@ class VFIOInfinibandVF(VFIODev):
         else:
             self._unset_guids()
 
-        super(self.__class__, self).delete()
+        super(VFIOInfinibandVF, self).delete()
 
     def dump_args(self):
         return {'dev_addr': self._dev_addr, 'ibdev_name': self._ibdev_name,
@@ -761,7 +761,7 @@ class NetDev(TrackableObject):
 
 class OVSBridge(NetDev):
     def __init__(self, name, netns=None):
-        super(self.__class__, self).__init__(name, netns)
+        super(OVSBridge, self).__init__(name, netns)
         self._defer = False
         self._deferred_flows = []
 
@@ -866,7 +866,7 @@ class OVSBridge(NetDev):
 
 class VEth(NetDev):
     def __init__(self, name, peername=None, netns=None):
-        super(self.__class__, self).__init__(name, netns)
+        super(VEth, self).__init__(name, netns)
 
         if not peername:
             peername = name+'b'
@@ -882,7 +882,7 @@ class VEth(NetDev):
 
 class TAP(NetDev):
     def __init__(self, name, netns=None):
-        super(self.__class__, self).__init__(name, netns)
+        super(TAP, self).__init__(name, netns)
 
     def create(self):
         self._log_create()
@@ -902,7 +902,7 @@ class IBVFType(object):
 
 def make_mask(num_bits):
     "return a mask of num_bits as a long integer"
-    return ((2L<<num_bits-1) - 1) << (32 - num_bits)
+    return ((2<<num_bits-1) - 1) << (32 - num_bits)
 
 def dotted_quad_to_num(ip):
     "convert decimal dotted quad string to long integer"

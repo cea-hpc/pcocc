@@ -169,7 +169,7 @@ class Config(object):
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
-        os.chmod(self._run_dir, 0700)
+        os.chmod(self._run_dir, 0o700)
 
     @property
     def verbose(self):

@@ -37,7 +37,7 @@ import logging
 import pcocc
 from pcocc.scripts import click
 from pcocc import PcoccError, Config, Cluster, Hypervisor
-from pcocc.Backports import total_seconds, subprocess_check_output
+from pcocc.Backports import subprocess_check_output
 from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from pcocc.scripts.Shine.TextTable import TextTable
@@ -49,7 +49,7 @@ def handle_error(err):
 
     click.secho(str(err), fg='red', err=True)
     if Config().debug:
-        raise
+        raise err
     sys.exit(-1)
 
 def cleanup(spr, terminal_settings):
@@ -670,7 +670,7 @@ def pcocc_console(jobid, jobname, log, vm):
             if sys.stdin in rdy[0]:
                 buf = os.read(self_stdin, 1024)
                 if struct.unpack('b', buf[0:1])[0] == 3:
-                    if total_seconds(datetime.datetime.now() - last_int) > 2:
+                    if (datetime.datetime.now() - last_int).total_seconds() > 2:
                         last_int = datetime.datetime.now()
                         int_count = 1
                     else:

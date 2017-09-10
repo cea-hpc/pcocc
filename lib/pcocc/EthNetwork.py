@@ -183,8 +183,8 @@ additionalProperties: false
         # Compute master node
         master = min(hosts)
         if batch.node_rank == master:
-            logging.info("Node is master for PV network {0}".format(
-                self.name))
+            logging.info("Node is master for PV network %s",
+                         self.name)
 
         key_id = self._alloc_tun_key(master)
 
@@ -658,8 +658,8 @@ additionalProperties: false
                         net_vms_attrs[vm.rank]['int_ip'],
                         'vm{0}.{1}'.format(vm.rank, self._domain_name)))
 
-        os.chmod(dhcpconf, 0644)
-        os.chmod(dnsconf, 0644)
+        os.chmod(dhcpconf, 0o644)
+        os.chmod(dnsconf, 0o644)
         pid_file = '/var/run/pcocc_dnsmasq_{0}.pid'.format(netns_name)
         Config().tracker.create_with_ref(Config().batch.batchid,
                                          PidDaemon(pid_file))
@@ -992,26 +992,25 @@ additionalProperties: false
         # Look for remaining bridges to cleanup
         count = OVSBridge.prefix_cleanup(self._int_br_prefix)
         if count:
-            logging.warning(
-                'Deleted {0} leftover bridge(s) for {1} network'.format(
-                    count,
-                    self.name))
+            logging.warning('Deleted %s leftover bridge(s) for %s network',
+                            count,
+                            self.name)
 
     def _cleanup_stray_taps(self):
         # Look for remaining taps to cleanup
         count = TAP.prefix_cleanup(self._tap_prefix)
         if count:
-            logging.warning('Deleted {0} leftover TAP(s) for {1} network'.format(
-                    count,
-                    self.name))
+            logging.warning('Deleted %s leftover TAP(s) for %s network',
+                            count,
+                            self.name)
 
     def _cleanup_stray_veths(self):
         # Look for remaining veths to cleanup
         count = VEth.prefix_cleanup(self._veth_prefix)
         if count:
-            logging.warning('Deleted {0} leftover veth(s) for {1} network'.format(
-                    count,
-                    self.name))
+            logging.warning('Deleted %s leftover veth(s) for %s network',
+                            count,
+                            self.name)
 
     @staticmethod
     def get_rnat_host_port(vm_rank, port):

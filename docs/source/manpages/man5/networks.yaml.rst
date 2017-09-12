@@ -24,7 +24,7 @@ Syntax
     # Define a network named 'network1'
     network1:
         # Select the network type
-        type: nat
+        type: ethernet
         # Define settings for nat networks
         settings:
             setting1: 'foo'
@@ -34,7 +34,7 @@ The following networks are supported:
 
 Ethernet network
 ****************
-A virtual Ethernet network is defined by using the network type *ethernet*. A VM connected to a network of this type receives an Ethernet interface linked to an isolated virtual switch. All the VMs of a virtual cluster connected to a given network are linked to the same virtual switch. Connectivity is provided by encapsulating Ethernet packets from the VMs in IP tunnels between hypervisors. If the **network-layer** parameter is set to *L2* pcocc only provides Ethernet layer 2 connectivity between the VMs. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. If the **network-layer** is set to *L3* pcocc also manages IP addressing and optionally provide access to external networks through NAT. Reverse NAT can also be setup to allow connecting to a VM port such as the SSH port from the outside. DHCP and DNS servers are automatically setup on the private network to provide IP addresses for the VMs. The available parameters are:
+A virtual Ethernet network is defined by using the network type *ethernet*. A VM connected to a network of this type receives an Ethernet interface linked to an isolated virtual switch. All the VMs of a virtual cluster connected to a given network are linked to the same virtual switch. Connectivity is provided by encapsulating Ethernet packets from the VMs in IP tunnels between hypervisors. If the **network-layer** parameter is set to *L2* pcocc only provides Ethernet layer 2 connectivity between the VMs. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. If the **network-layer** is set to *L3* pcocc also manages IP addressing and optionally provides access to external networks through NAT. Reverse NAT can also be setup to allow connecting to a VM port such as the SSH port from the outside. DHCP and DNS servers are automatically setup on the private network to provide IP addresses for the VMs. The available parameters are:
 
 **dev-prefix**
  Prefix to use when assigning names to virtual devices such as bridges and TAPs created on the host.
@@ -48,7 +48,7 @@ A virtual Ethernet network is defined by using the network type *ethernet*. A VM
  MTU of the Ethernet network. (defaults to 1500)
 
 .. warning::
- Please note that the MTU of the Ethernet interfaces in the VMs have to be set 50 bytes lower than this value to account for the encapsulation headers. The DHCP server on a L3 network automatically provides an appropriate value.
+ Please note that the MTU of the Ethernet interfaces in the VMs has to be set 50 bytes lower than this value to account for the encapsulation headers. The DHCP server on a L3 network automatically provides an appropriate value.
 
 **mac-prefix**
  Prefix to use when assigning MAC adressess to virtual Ethernet interfaces. MAC addresses are assigned to each VM in order starting from the MAC address constructed by appending zeros to the prefix. (defaults to 52:54:00)
@@ -58,9 +58,9 @@ A virtual Ethernet network is defined by using the network type *ethernet*. A VM
 The following parameters only apply for a *L3* network:
 
 **int-network**
- IP network range in CIDR notation from which IP addresses assigned to VM network interfaces via DHCP are be chosen. This network range should be unused on the host and not be routable. It is private to each virtual cluster and VMs get a fixed IP address depending on their rank in the virtual cluster. (defaults to 10.200.0.0/16)
+ IP network range in CIDR notation reserved for assigning IP addresses to VM network interfaces via DHCP. This network range should be unused on the host and not be routable. It is private to each virtual cluster and VMs get a fixed IP address depending on their rank in the virtual cluster. (defaults to 10.200.0.0/16)
 **ext-network**
- IP network range in CIDR notation reserved for assigning unique VM IPs on the host network stack . This network range should be unused on the host and not be routable. (defaults to 10.201.0.0/16)
+ IP network range in CIDR notation reserved for assigning unique VM IPs on the host network stack. This network range should be unused on the host and not be routable. (defaults to 10.201.0.0/16)
 **dns-server**
  The IP of a domain name resolver to forward DNS requests. (defaults to reading resolv.conf on the host)
 **domain-name**
@@ -77,9 +77,9 @@ The following parameters only apply for a *L3* network:
  **vm-port**
   The VM port to make accessible.
  **min-host-port**
-  Minimum port to select on the  host for reverse NATing.
+  Minimum port to select on the host for reverse NATing.
  **max-host-port**
-  Maximum port to select on the  host for reverse NATing.
+  Maximum port to select on the host for reverse NATing.
 
 
 The example below defines a managed network with reverse NAT for SSH access:
@@ -247,4 +247,4 @@ This is the default configuration file for reference::
 See also
 ********
 
-:ref:`pcocc-template(1)<template>`, :ref:`pcocc-templates.yaml(5)<templates.yaml>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`, :ref:`pcocc-resources.yaml(5)<resources.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`, :ref:`pcocc-configvm-tutorial(7)<configvm>`
+:ref:`pcocc-template(1)<template>`, :ref:`pcocc-templates.yaml(5)<templates.yaml>`, :ref:`pcocc-resources.yaml(5)<resources.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`, :ref:`pcocc-configvm-tutorial(7)<configvm>`

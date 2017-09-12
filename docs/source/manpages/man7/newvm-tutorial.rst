@@ -82,7 +82,7 @@ Here is the content of :file:`templates.yaml` for these three VMs (don't forget 
         resource-set: "default"
         description: "Cloud enabled Ubuntu 17.10"
 
-We selected the *default* configuration as a **resource-set** for these VMs. It should reference one of the resource sets defined in the :file:`/etc/resources.yaml` file. Please refer to the :ref:`resources.yaml <resources.yaml>` and :ref:`networks.yaml <networks.yaml>` configuration files for more informations on this option.
+We selected *default* as the **resource-set** for these VMs. It should reference one of the resource sets defined in the :file:`/etc/resources.yaml` file. Please refer to the :ref:`resources.yaml <resources.yaml>` and :ref:`networks.yaml <networks.yaml>` configuration files for more informations on this option.
 
 Following this step, you should be able to list your new virtual machines::
 

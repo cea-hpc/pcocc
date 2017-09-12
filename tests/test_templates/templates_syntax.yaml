@@ -1,0 +1,7 @@
+example:
+  image: toto
+  resource-set: default
+
+		!!!
+herits:
+  inherits: example

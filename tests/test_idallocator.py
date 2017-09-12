@@ -1,41 +1,8 @@
-import pcocc
-import os
 import pytest
 
 from pcocc.Misc import IDAllocator
 from pcocc.Error import PcoccError
 from pcocc.Batch import KeyTimeoutError
-
-kvstore = {}
-def kv_atom_update_mock(*args, **kwargs):
-    key = os.path.join(args[0], args[1])
-    nargs = args[3:] + (kvstore.get(key, None),)
-    nval, ret = args[2](*nargs, **kwargs)
-    kvstore[key] = nval
-
-    return ret
-
-def kv_write_mock(*args):
-    key = os.path.join(args[0], args[1])
-    kvstore[key] = args[2]
-
-
-def kv_read_mock(*args, **kwargs):
-    key = os.path.join(args[0], args[1])
-    val =  kvstore.get(key, None)
-    if not val and kwargs.get('blocking', False):
-        raise KeyTimeoutError('')
-
-    return val
-
-@pytest.fixture 
-def config(mocker):
-    config = pcocc.Config()
-    mocker.patch.object(config, 'batch')
-    config.batch.atom_update_key.side_effect = kv_atom_update_mock
-    config.batch.write_key.side_effect = kv_write_mock
-    config.batch.read_key.side_effect = kv_read_mock
-    return config
 
 def test_range_alloc(config):
     config.batch.list_all_jobs.return_value = [100, 101]
@@ -77,7 +44,7 @@ def test_range_alloc(config):
     ids_101 += ida.alloc(40)
     assert len(ids_101) == 90
     assert len(set(ids_100[0:5] + ids_100[45:50]  + ids_101)) == 100
-    
+
     # make job 100 inactive
     config.batch.list_all_jobs.return_value = [101]
 
@@ -92,7 +59,7 @@ def test_single_alloc(config):
     config.batch.list_all_jobs.return_value = [100]
     config.batch.batchid = 100
 
-    ida = IDAllocator('test/single', 2)    
+    ida = IDAllocator('test/single', 2)
 
     id1 = ida.alloc_one()
     id2 = ida.alloc_one()
@@ -115,7 +82,7 @@ def test_coll_alloc(config):
     config.batch.batchid = 100
     config.batch.node_rank = 0
 
-    ida = IDAllocator('test/single', 1)    
+    ida = IDAllocator('test/single', 1)
 
     id1_a = ida.coll_alloc_one(0, 'test1')
 
@@ -135,6 +102,4 @@ def test_coll_alloc(config):
     with pytest.raises(KeyTimeoutError):
         ida.coll_alloc_one(0, 'test2')
 
-    ida.free_one(id1_a)    
-
-
+    ida.free_one(id1_a)

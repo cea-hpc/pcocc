@@ -1,0 +1,3 @@
+example:
+  image: "%{env:EXAMPLE_IMAGE_PATH}"
+  resource-set: default

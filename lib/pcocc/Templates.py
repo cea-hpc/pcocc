@@ -129,11 +129,13 @@ class Template(object):
 
         # Attributes cannot have dashes so we convert to underscore
         user_attr =  attr.replace('_','-')
-        if user_attr in self.settings:
-            return self.settings[user_attr]
-
-
         required, default, heritable = template_settings[user_attr]
+
+        if user_attr in self.settings:
+            if self.settings[user_attr] is None:
+                return default
+            else:
+                return self.settings[user_attr]
 
         parent = self._parent_template()
         if heritable and parent:
@@ -214,6 +216,10 @@ class Template(object):
             revision = 0
             image_file = os.path.join(image,
                                       'image')
+            if not os.path.isfile(image_file):
+                raise InvalidConfigurationError(
+                    "template \"{}\" image directory is "
+                    "has no image ".format(self.name))
 
         return image_file, revision
 
@@ -255,6 +261,7 @@ class Template(object):
         # Convert drives to ordered dict format
         # and set default values
         ordered_drives = OrderedDict()
+
         for drive in self.settings['persistent-drives']:
             # Dict syntax
             if isinstance(drive, dict):

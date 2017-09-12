@@ -1,0 +1,41 @@
+example:
+  image: 'example'
+  resource-set: default
+  mount-points:
+    homedir: /home
+  custom-args:
+    - '-cdrom'
+    - /path/to/my-iso
+  qemu-bin: /path/to/qemu/bin/qemu-system-x86
+  nic-model: e1000
+  description: 'example'
+  user-data: 'example'
+  instance-id: 'example'
+  emulator-cores: 2
+  remote-display: spice
+  full-node: true
+  disk-cache: 'writeback'
+
+herits:
+  inherits: example
+
+overloads:
+  inherits: example
+  image: 'overload'
+  resource-set: non-default
+  mount-points:
+  custom-args:
+  qemu-bin:
+  nic-model:
+  description: 'overloaded'
+  user-data:
+  instance-id:
+  emulator-cores:
+  full-node: False
+  disk-model: 'ide'
+  persistent-drives:
+    - 'drive':
+        mmp: 'no'
+        cache: 'unsafe'
+  remote-display:
+  disk-cache:

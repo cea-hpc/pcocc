@@ -901,7 +901,7 @@ def ovs_set_group_members(brname, group_id, members):
                            brname,
                            'group_id={0},type=all'.format(group_id) + bucket])
 
-def ovs_add_flow(brname, table, priority, match, action=None, cookie=None):
+def ovs_add_flow(brname, table, priority, match, action="", cookie=""):
     if action:
         action = "actions="+action
 

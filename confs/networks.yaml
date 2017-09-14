@@ -62,8 +62,6 @@ nat-rssh:
 #     # Range of PKeys to allocate for virtual clusters
 #     min-pkey: "0x2000"
 #     max-pkey: "0x3000"
-#     # Resource manager token to request when allocating this network
-#     license: "pkey"
 #     # Name of opensm process
 #     opensm-daemon: "opensm"
 #     # Configuration file for opensm partitions

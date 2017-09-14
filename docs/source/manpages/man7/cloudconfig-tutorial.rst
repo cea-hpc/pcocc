@@ -4,7 +4,7 @@
 
 This tutorial shows how to configure a cloud-init enabled VM image, that is, a VM image where the cloud-init service has been enabled to run a boot time. Cloud-init is a multi-distribution package that handles early initialization of a VM instance. It can perform various tasks such as configuring users and access credentials, installing packages or setting up mount points. These tasks are defined in a cloud-config file that can be passed to a pcocc VM using the **user-data** template parameter.
 
-Many distributions provide cloud-init enabled VM images that you can easily import as pcocc templates. More information downloading and importing these images can be found in :ref:`pcocc-newvm-tutorial(7)<newvm>`.
+Many distributions provide cloud-init enabled VM images that you can easily import as pcocc templates. More information about downloading and importing these images can be found in :ref:`pcocc-newvm-tutorial(7)<newvm>`.
 
 .. note::
     By default it is not possible to login to cloud-enabled VMs, you must first specify a cloud-config file to setup a SSH key or other authentication mechanism.

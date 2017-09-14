@@ -6,7 +6,7 @@
 Description
 ***********
 
-:file:`/etc/pcocc/resources.yaml` is a YAML formatted file describing sets of resources that pcocc templates may reference. Currently resource are only composed of networks defined in :file:`/etc/pcocc/networks.yaml`.
+:file:`/etc/pcocc/resources.yaml` is a YAML formatted file describing sets of resources that pcocc templates may reference. Currently resource sets are only composed of networks defined in :file:`/etc/pcocc/networks.yaml`.
 
 Syntax
 ******

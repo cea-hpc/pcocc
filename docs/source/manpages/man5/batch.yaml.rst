@@ -11,7 +11,7 @@ Description
 
 Syntax
 ******
-This configuration files contains two keys. The **type** key defines the target batch mangager. Currently the only supported value is *slurm* for the aforementionned environment composed of SLURM and etcd. The **settings** key contains a key/value mapping defining parameters for the target batch manager. The following parameters can be defined:
+This configuration files contains two keys. The **type** key defines the target batch manager. Currently the only supported value is *slurm* for the aforementioned environment composed of SLURM and etcd. The **settings** key contains a key/value mapping defining parameters for the target batch manager. The following parameters can be defined:
 
 
 SLURM settings

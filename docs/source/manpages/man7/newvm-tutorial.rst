@@ -111,7 +111,7 @@ The most basic cloud-config file which you can use is as follows::
 
 It creates a user named *demo* able to use sudo without password and which can login via SSH with the specified key.
 
-Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest without depending on networking. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the ref:`pcocc-save(1)<save>` command. Append the following content to your cloud-config file::
+Moreover, we will also install the Qemu guest agent in our VMs. The Qemu guest agent is a daemon running in VMs allowing to interact with the guest without depending on networking. pcocc makes use of this agent when it is available, most notably to freeze guest filesystems and obtain consistent snapshots when using the :ref:`pcocc-save(1)<save>` command. Append the following content to your cloud-config file::
 
     packages:
         - qemu-guest-agent
@@ -202,4 +202,4 @@ You can also look back at the serial console log with::
 Saving VM images
 ****************
 
-Instead of configuring your VMs with cloud-init each time you instantiate them, you may want to create templates from pre-configured images which already contain the necessary packages, configuration files, user defintions etc. pcocc allows you to create new images from a running VM with the ref:`pcocc-save(1)<save>` command.
+Instead of configuring your VMs with cloud-init each time you instantiate them, you may want to create templates from pre-configured images which already contain the necessary packages, configuration files, user defintions etc. pcocc allows you to create new images from a running VM with the :ref:`pcocc-save(1)<save>` command.

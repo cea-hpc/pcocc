@@ -48,13 +48,13 @@ The easiest way to install pcocc on a RPM based distribution is to build a packa
 You may need to install the *rpm-build* package first. The resulting pcocc RPM should be installed with the package manager which will pull all the necessary dependencies from your configured repositories. If you are missing something, please have a look at the guidelines provided in the previous section.
 
 
-Setup compute nodes and required services
-*****************************************
+Prepare compute nodes and required services
+*******************************************
 
 Hardware virtualization support
 -------------------------------
 
-Check that your compute nodes processors have virtualization extensions enabled, and if not (and possible) enable them in the bios::
+Check that your compute nodes processors have virtualization extensions enabled, and if not (and possible) enable them in the BIOS::
 
     #This command should return a match
     grep -E '(vmx|svm)' /proc/cpuinfo
@@ -72,7 +72,7 @@ Adjust the GROUP and MODE permissions to fit your needs. If virtualization exete
 
 Slurm setup
 -----------
-It is recommended that Slurm is confitured to manage process tracking, CPU affinity and memory allocation with cgroups. Set the following parameters in your Slurm configuration files:
+It is recommended that Slurm is configured to manage process tracking, CPU affinity and memory allocation with cgroups. Set the following parameters in your Slurm configuration files:
 
 .. code-block:: text
     :caption: /etc/slurm/slurm.conf
@@ -119,8 +119,8 @@ This configuration can be used for a quick evaluation of pcocc. For a more relia
 
    deps/etcd-production
 
-Basic configuration
-*******************
+Edit pcocc configuration files
+******************************
 
 The configuration of pcocc itself consists in editing YAML files in :file:`/etc/pcocc/`. These files must be present on all front-end and compute nodes.
 
@@ -143,62 +143,31 @@ The :file:`/etc/pcocc/batch.yaml` configuration file contains configuration pert
 
 If you enabled TLS, select the *https* etcd-protocol and define the **etcd-ca-cert** parameter to the path of the CA certificate created for etcd (see :ref:`Deploy a secure etcd cluster <etcd-production>`).
 
-The sample network configuration in :file:`/etc/pcocc/networks.yaml` defines two networks, a NAT Ehernet network which connects each VM to the host network via NAT routing, and allows to SSH into VMs, and a private Ethernet network which provides an isolated L2 Ethernet network for each virtual cluster.
+The sample network configuration in :file:`/etc/pcocc/networks.yaml` defines a single Ethernet network named *nat-rssh*. It allows VMs of each virtual cluster to communicate over a private Ethernet network and provides them with a network gateway to reach external hosts. Routing is performed by NAT (Network Address Translation) using the hypervisor IP as source. It also performs reverse NAT from ports allocated dynamically on the hypervisor to the SSH port of each VM. DHCP and DNS servers are spawned for each virtual cluster to provide network IP addresses for the VMs. For a more detailed description of network parameters, please see :ref:`pcocc-resources.yaml(5)<networks.yaml>`.
 
-For the NAT network, most parameters can be kept as-is for the purpose of this tutorial, as long as the default network ranges do not conflict with your existing addressing plan. You have to define the **domain-name** parameter which can be set to the domain name of the host cluster and the **dns-server** parameter which should be set to the IP of a DNS server that VMs may query to resolve services from the host cluster. You may also provide a **ntp-server**:
+Most parameters can be kept as-is for the purpose of this tutorial, as long as the default network ranges do not conflict with your existing IP addressing plan. The **host-if-suffix** parameter can be used if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by Slurm as computeXX can reached more efficiently via IPoIB at the computeXX-ib address, the **host-if-suffix** parameter can be set to *-ib* so that the Ethernet tunnels between hypervisors transit over IPoIB. Raising the MTU may also help improve performance if your physical network allows it.
 
-.. code-block:: yaml
-  :caption: /etc/pcocc/networks.yaml
+The :file:`/etc/pcocc/resources.yaml` configuration file defines sets of resources, currently only networks, that templates may reference. The default configuration is also sufficient for this tutorial: a single resource set is defined, *default* which only provides the *nat-rssh* network. See :ref:`pcocc-resources.yaml(5)<resources.yaml>` for more information about this file.
 
-  nat-rssh:
-    # Provides acces to the host network via NAT
-    type: nat
-    settings:
-    [..]
-      # Domain name and DNS server to provide to VMs via DHCP
-      domain-name: "domain.name.com"
-      dns-server: "0.0.0.0"
-    [..]
-
-The private network configuration should also require little to no change. The **host-if-suffix** parameter can be used if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by Slurm as computeXX can reached more efficiently via IPoIB at the computeXX-ib address, the **host-if-suffix** parameter can be set to *-ib* so that the Ethernet tunnels between hypervisors transit over IPoIB. Raising the MTU may also help improve performance if your physical network allows it.
-
-.. code-block:: yaml
-  :caption: /etc/pcocc/networks.yaml
-
-  [..]
-  # Define a private ethernet network isolated from the host
-  pv:
-    # Private ethernet network isolated from the host
-    # Ethernet (Layer 2) inter-VM packets are relayed between hosts
-    # via a Layer 3 tunnel
-    type: pv
-    settings:
-      [...]
-      # Network mtu
-      mtu: "1500"
-      # Suffix to append to remote hostnames when tunneling
-      # Ethernet packets
-      host-if-suffix: ""
-
-The :file:`/etc/pcocc/resources.yaml` configuration file defines sets of resources, currently only networks, that templates may reference. The default configuration is also sufficient for this tutorial. By default, two resource sets are defined, *standalone* for an isolated VM which only needs the NAT network and *cluster* for VMs which are part of a virtual cluster and require a private Ethernet network to communicate with one another.
-
-The :file:`/etc/pcocc/templates.yaml` configuration file contains globally defined templates which will be avalaible to all users. It does not need to be modified intially.
+The :file:`/etc/pcocc/templates.yaml` configuration file contains globally defined templates which are available to all users. It does not need to be modified initially. See :ref:`pcocc-templates.yaml(5)<templates.yaml>` for more information about this file.
 
 
-Network configuration verification
-**********************************
+Validate the installation
+*************************
 
 To validate this configuration, you may launch the following command on a compute node as root::
 
   pcocc internal setup init
 
-It must run without error, and a bridge interface named according to the configuration of the NAT network must appear in the list of network interfaces on the node::
+It must run without error, and a bridge interface named according to the configuration of the *nat-rssh* network must appear in the list of network interfaces on the node::
 
  # ip a
  [..]
- 5: natbr: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN
-    link/ether 52:54:00:c0:c0:c0 brd ff:ff:ff:ff:ff:ff
-    inet 10.254.0.1/16 brd 10.254.255.255 scope global natbr
+ 5: nat_xbr: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN
+    link/ether 52:54:00:ff:ff:ff brd ff:ff:ff:ff:ff:ff
+    inet 10.250.255.254/16 scope global newnat_xbr
+       valid_lft forever preferred_lft forever
+    inet6 fe80::5054:ff:feff:ffff/64 scope link
        valid_lft forever preferred_lft forever
 
 You may then launch as root, on the same node::

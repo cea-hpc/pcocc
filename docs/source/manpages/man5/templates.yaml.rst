@@ -18,7 +18,7 @@ Template parameters
 -------------------
 
 **image**
- Path to a directory containing a boot disk image. VMs instantiated from this template will boot from an ephemeral private copy of this image. See :ref:`pcocc-newvm-tutorial(7)<newvm>` for importing existing images and :ref:`pcocc-save(1)<save>` for creating new images or revisions from running VMs).
+ Path to a directory containing a boot disk image. VMs instantiated from this template will boot from an ephemeral private copy of this image. This location must be available on both front-end and compute nodes. See :ref:`pcocc-newvm-tutorial(7)<newvm>` for importing existing images and :ref:`pcocc-save(1)<save>` for creating new images or revisions from running VMs.
 **resource-set**
  Resources to provide to VMs instantiated from this template. This must reference a resource set defined in :ref:`resources.yaml<resources.yaml>`.
 **inherits**

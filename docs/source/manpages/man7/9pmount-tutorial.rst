@@ -23,7 +23,7 @@ A mount-point named *optmount* for :file:`/opt` can be defined as follows::
 .. note::
     The **readonly** parameter defaults to *false* and therefore can be omitted for RW mounts
 
-In this definition *optmount* is the tag of the 9p export which will be exposed to the VM. This tag has to be unique and will be referred to when mounting the export (see next section).
+In this definition *optmount* is the tag of the 9p export which will be exposed to the VM. This tag has to be unique and will be referred to when mounting the export (see next section). */opt/* is the host path that is associated to this tag.
 
 Mounting exports in the guest
 *****************************
@@ -48,7 +48,7 @@ Mirroring UIDs
 
 Since I/O is performed with permissions of the user launching the virtual cluster, the best way to avoid permission issues is to access 9p mounts in your VM with a user having the same uid as your user on the host.
 
-For example lets assume your user on the host is user1, you may retrieve it's numeric id with::
+For example let's assume your user on the host is user1, you may retrieve it's numeric id with::
 
     id user1
 
@@ -61,6 +61,8 @@ Therefore, you would need to create a 'user1' in your VM with uid 1023. This may
           users:
           - name : user1
             uid: 1023
+
+If applicable, another solution is to configure your VMs to access the same directory sever as your hosts.
 
 
 Mounting your home directory

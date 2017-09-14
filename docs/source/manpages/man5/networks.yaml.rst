@@ -25,7 +25,7 @@ Syntax
     network1:
         # Select the network type
         type: ethernet
-        # Define settings for nat networks
+        # Define settings for ethernet networks
         settings:
             setting1: 'foo'
             setting2: 'bar'
@@ -34,7 +34,7 @@ The following networks are supported:
 
 Ethernet network
 ****************
-A virtual Ethernet network is defined by using the network type *ethernet*. A VM connected to a network of this type receives an Ethernet interface linked to an isolated virtual switch. All the VMs of a virtual cluster connected to a given network are linked to the same virtual switch. Connectivity is provided by encapsulating Ethernet packets from the VMs in IP tunnels between hypervisors. If the **network-layer** parameter is set to *L2* pcocc only provides Ethernet layer 2 connectivity between the VMs. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. If the **network-layer** is set to *L3* pcocc also manages IP addressing and optionally provides access to external networks through NAT. Reverse NAT can also be setup to allow connecting to a VM port such as the SSH port from the outside. DHCP and DNS servers are automatically setup on the private network to provide IP addresses for the VMs. The available parameters are:
+A virtual Ethernet network is defined by using the network type *ethernet*. A VM connected to a network of this type receives an Ethernet interface linked to an isolated virtual switch. All the VMs of a virtual cluster connected to a given network are linked to the same virtual switch. Connectivity is provided by encapsulating Ethernet packets from the VMs in IP tunnels between hypervisors. If the **network-layer** parameter is set to *L2* pcocc only provides Ethernet layer 2 connectivity between the VMs. The network is entirely isolated and no services (such as DHCP) are provided, which means the user is responsible for configuring the VM interfaces as he likes. If the **network-layer** is set to *L3* pcocc also manages IP addressing and optionally provides access to external networks through a gateway which performs NAT (Network Address Translation) using the hypervisor IP as source. Reverse NAT can also be setup to allow connecting to a VM port such as the SSH port from the outside. DHCP and DNS servers are automatically setup on the private network to provide IP addresses for the VMs. The available parameters are:
 
 **dev-prefix**
  Prefix to use when assigning names to virtual devices such as bridges and TAPs created on the host.
@@ -51,7 +51,7 @@ A virtual Ethernet network is defined by using the network type *ethernet*. A VM
  Please note that the MTU of the Ethernet interfaces in the VMs has to be set 50 bytes lower than this value to account for the encapsulation headers. The DHCP server on a L3 network automatically provides an appropriate value.
 
 **mac-prefix**
- Prefix to use when assigning MAC adressess to virtual Ethernet interfaces. MAC addresses are assigned to each VM in order starting from the MAC address constructed by appending zeros to the prefix. (defaults to 52:54:00)
+ Prefix to use when assigning MAC addresses to virtual Ethernet interfaces. MAC addresses are assigned to each VM in order starting from the MAC address constructed by appending zeros to the prefix. (defaults to 52:54:00)
 **host-if-suffix**
  Suffix to append to hostnames when establishing a remote tunnel if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by SLURM as computeXX can reached more efficiently via IPoIB at the computeXX-ib address, the **host-if-suffix** parameter can be set to *-ib* so that the Ethernet tunnels between hypervisors transit over IPoIB.
 
@@ -157,8 +157,6 @@ The example below sums up the available parameters::
         # Range of PKeys to allocate for virtual clusters
         min-pkey: "0x2000"
         max-pkey: "0x3000"
-        # Resource manager token to request when allocating this network
-        license: "pkey"
         # Name of opensm process
         opensm-daemon: "opensm"
         # Configuration file for opensm partitions
@@ -166,6 +164,10 @@ The example below sums up the available parameters::
         # Template for generating the configuration file for opensm partitions
         opensm-partition-tpl: /etc/opensm/partitions.conf.tpl
 
+As explained above, pcocc must be installed on the OpenSM node(s) and the *pkeyd* daemon must be running to manage the partition configuration file::
+
+   systemctl enable pkeyd
+   systemctl start pkeyd
 
 Sample configuration file
 *************************

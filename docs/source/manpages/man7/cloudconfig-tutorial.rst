@@ -51,6 +51,22 @@ This defines two demo users, with their respective public SSH keys which have to
           ssh-authorized-keys:
             - <ssh pub key 1>
 
+Hostname considerations
+***********************
+
+By default, cloud-init stores the VM hostname in /etc/hostname which makes it persistent across reboots. This may not be what you want if you plan to instantiate many VMs from the same disk image and need them to find out their hostname dynamically from DHCP. You can inhibit this behaviour with the preserve hostname option::
+
+   preserve_hostname: true
+
+This option must also be set in the cloud-init configuration file in the VM to be persistent (see :ref:`writing_files_label`)::
+
+  write_files:
+    - path: /etc/cloud/cloud.cfg.d/99_hostname.cfg
+      permissions: '0644'
+      content: |
+        preserve_hostname: true
+
+
 Running early boot commands
 ***************************
 
@@ -92,6 +108,8 @@ Or for apt::
 You can also ask for packages to be upgraded first::
 
   package_update: false
+
+.. _writing_files_label:
 
 Writing files
 *************

@@ -142,6 +142,10 @@ We can now instantiate VMs::
 
     pcocc alloc -c2 mycentos:3,myubuntu:1
 
+If you encounter any issue, note that the verbosity of all pcocc commands can be increased with the *-v* option to help with troubleshooting, for example::
+
+   pcocc -vv alloc -c2 mycentos:3,myubuntu:1
+
 Using this command, you will launch four VMs with two cores each:
 
 * three *mycentos*

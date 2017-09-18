@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-9PMOUNT-TUTORIAL" "7" "Sep 05, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-9PMOUNT-TUTORIAL" "7" "Sep 18, 2017" "0.4.0" "pcocc"
 .SH NAME
 pcocc-9pmount-tutorial \- How to mount host directories in VMs
 .
@@ -65,7 +65,7 @@ The \fBreadonly\fP parameter defaults to \fIfalse\fP and therefore can be omitte
 .UNINDENT
 .UNINDENT
 .sp
-In this definition \fIoptmount\fP is the tag of the 9p export which will be exposed to the VM. This tag has to be unique and will be referred to when mounting the export (see next section).
+In this definition \fIoptmount\fP is the tag of the 9p export which will be exposed to the VM. This tag has to be unique and will be referred to when mounting the export (see next section). \fI/opt/\fP is the host path that is associated to this tag.
 .SH MOUNTING EXPORTS IN THE GUEST
 .sp
 To mount a 9p export in the guest, you can use the following command:
@@ -110,7 +110,7 @@ mounts:
 .sp
 Since I/O is performed with permissions of the user launching the virtual cluster, the best way to avoid permission issues is to access 9p mounts in your VM with a user having the same uid as your user on the host.
 .sp
-For example lets assume your user on the host is user1, you may retrieve it\(aqs numeric id with:
+For example let\(aqs assume your user on the host is user1, you may retrieve it\(aqs numeric id with:
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -147,6 +147,8 @@ users:
 .fi
 .UNINDENT
 .UNINDENT
+.sp
+If applicable, another solution is to configure your VMs to access the same directory sever as your hosts.
 .SH MOUNTING YOUR HOME DIRECTORY
 .sp
 Mounting one\(aqs own home directory is a common use\-case for this feature. It makes it easy to share files and facilitates SSH key deployment. To export your home directory, set the following parameter in the VM template:

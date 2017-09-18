@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-BATCH.YAML" "5" "Sep 05, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-BATCH.YAML" "5" "Sep 18, 2017" "0.4.0" "pcocc"
 .SH NAME
 pcocc-batch.yaml \- Batch environment configuration file
 .
@@ -35,7 +35,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 \fB/etc/pcocc/batch.yaml\fP is a YAML formatted file describing how pcocc should interact with the cluster batch environment. At this time pcocc expects a SLURM batch environment along with an etcd key\-value store.
 .SH SYNTAX
 .sp
-This configuration files contains two keys. The \fBtype\fP key defines the target batch mangager. Currently the only supported value is \fIslurm\fP for the aforementionned environment composed of SLURM and etcd. The \fBsettings\fP key contains a key/value mapping defining parameters for the target batch manager. The following parameters can be defined:
+This configuration files contains two keys. The \fBtype\fP key defines the target batch manager. Currently the only supported value is \fIslurm\fP for the aforementioned environment composed of SLURM and etcd. The \fBsettings\fP key contains a key/value mapping defining parameters for the target batch manager. The following parameters can be defined:
 .SS SLURM settings
 .INDENT 0.0
 .TP

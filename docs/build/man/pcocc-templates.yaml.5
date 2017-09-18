@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-TEMPLATES.YAML" "5" "Sep 05, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-TEMPLATES.YAML" "5" "Sep 18, 2017" "0.4.0" "pcocc"
 .SH NAME
 pcocc-templates.yaml \- VM templates definition file
 .
@@ -40,7 +40,7 @@ The \fBtemplates.yaml\fP file contains a key/value mapping. Each key represents 
 .INDENT 0.0
 .TP
 \fBimage\fP
-Path to a directory containing a boot disk image. VMs instantiated from this template will boot from an ephemeral private copy of this image. See pcocc\-newvm\-tutorial(7) for importing existing images and pcocc\-save(1) for creating new images or revisions from running VMs).
+Path to a directory containing a boot disk image. VMs instantiated from this template will boot from an ephemeral private copy of this image. This location must be available on both front\-end and compute nodes. See pcocc\-newvm\-tutorial(7) for importing existing images and pcocc\-save(1) for creating new images or revisions from running VMs.
 .TP
 \fBresource\-set\fP
 Resources to provide to VMs instantiated from this template. This must reference a resource set defined in resources.yaml\&.

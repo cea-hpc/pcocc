@@ -68,7 +68,7 @@ def recursive_scan_data_files(dest, src):
       f_files.append((destdir, local_files))
    return f_files
 
-setup(name= 'pcocc', version= '0.3.1', description= 'Spawn VMs on a HPC Cluster',
+setup(name= 'pcocc', version= '0.4.0', description= 'Spawn VMs on a HPC Cluster',
       long_description= 'Pcocc  allows users of a HPC cluster '
       'to host their own clusters of VMs on compute nodes alongside regular '
       'jobs. This allows users to fully customize their software environnements '

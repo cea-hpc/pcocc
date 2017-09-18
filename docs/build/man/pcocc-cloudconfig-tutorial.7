@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Sep 05, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Sep 18, 2017" "0.4.0" "pcocc"
 .SH NAME
 pcocc-cloudconfig-tutorial \- How to configure cloud-init enabled VMs
 .
@@ -33,7 +33,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .sp
 This tutorial shows how to configure a cloud\-init enabled VM image, that is, a VM image where the cloud\-init service has been enabled to run a boot time. Cloud\-init is a multi\-distribution package that handles early initialization of a VM instance. It can perform various tasks such as configuring users and access credentials, installing packages or setting up mount points. These tasks are defined in a cloud\-config file that can be passed to a pcocc VM using the \fBuser\-data\fP template parameter.
 .sp
-Many distributions provide cloud\-init enabled VM images that you can easily import as pcocc templates. More information downloading and importing these images can be found in pcocc\-newvm\-tutorial(7)\&.
+Many distributions provide cloud\-init enabled VM images that you can easily import as pcocc templates. More information about downloading and importing these images can be found in pcocc\-newvm\-tutorial(7)\&.
 .sp
 \fBNOTE:\fP
 .INDENT 0.0
@@ -97,6 +97,35 @@ users:
       uid: 1247
       ssh\-authorized\-keys:
         \- <ssh pub key 1>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH HOSTNAME CONSIDERATIONS
+.sp
+By default, cloud\-init stores the VM hostname in /etc/hostname which makes it persistent across reboots. This may not be what you want if you plan to instantiate many VMs from the same disk image and need them to find out their hostname dynamically from DHCP. You can inhibit this behaviour with the preserve hostname option:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+preserve_hostname: true
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This option must also be set in the cloud\-init configuration file in the VM to be persistent (see \fI\%Writing files\fP):
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+write_files:
+  \- path: /etc/cloud/cloud.cfg.d/99_hostname.cfg
+    permissions: \(aq0644\(aq
+    content: |
+      preserve_hostname: true
 .ft P
 .fi
 .UNINDENT

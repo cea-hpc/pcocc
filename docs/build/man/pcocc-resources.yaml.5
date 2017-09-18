@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-RESOURCES.YAML" "5" "Sep 05, 2017" "0.3.1" "pcocc"
+.TH "PCOCC-RESOURCES.YAML" "5" "Sep 18, 2017" "0.4.0" "pcocc"
 .SH NAME
 pcocc-resources.yaml \- Resource sets configuration file
 .
@@ -32,7 +32,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 ..
 .SH DESCRIPTION
 .sp
-\fB/etc/pcocc/resources.yaml\fP is a YAML formatted file describing sets of resources that pcocc templates may reference. Currently resource are only composed of networks defined in \fB/etc/pcocc/networks.yaml\fP\&.
+\fB/etc/pcocc/resources.yaml\fP is a YAML formatted file describing sets of resources that pcocc templates may reference. Currently resource sets are only composed of networks defined in \fB/etc/pcocc/networks.yaml\fP\&.
 .SH SYNTAX
 .sp
 \fB/etc/pcocc/resources.yaml\fP contains a key/value mapping. Each key represents a set of resources and the associated value contains a unique key, \fBnetworks\fP whose value is a list of networks to provide to VMs. Interfaces will be added to VMs in the same order as they appear in this list, which means that, for example, the first Ethernet network in the list should appear as eth0 in the guest operating system.

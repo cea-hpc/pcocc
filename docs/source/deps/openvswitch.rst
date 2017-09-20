@@ -2,7 +2,7 @@
 Installing Open vSwitch
 #######################
 
-pcocc relies on Open vSwitch to provide the VMs with private virtual networks. Open vSwitch can be downloaded from `here <http://openvswitch.org/download/>`_. The official `installation guide <http://docs.openvswitch.org/en/latest/intro/install/general/>`_ can be used as an additional source for this process.
+pcocc relies on Open vSwitch to provide the VMs with private virtual networks. Open vSwitch can be downloaded from `official website <http://openvswitch.org/download/>`_. The official `installation guide <http://docs.openvswitch.org/en/latest/intro/install/general/>`_ can be used as an additional source for this process.
 
 ****************
 Building the RPM
@@ -27,7 +27,7 @@ Installation and configuration
 
 Install the RPM on all compute nodes or wait for it to be pulled as a dependency by pcocc. You'll also want to enable the service and start it (or reboot your compute nodes)::
 
-    #On all compute nodes as root
+    # On all compute nodes as root
     systemctl enable openvswitch
     systemctl start openvswitch
 

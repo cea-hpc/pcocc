@@ -15,4 +15,4 @@ The RPM building process is quite straightforward::
     cd python-etcd-0.4.4
     python setup.py bdist_rpm
 
-Put the resulting packages in your local repositories and install python-etcd on your front-end and compute nodes or wait for pcocc to pull it as a dependency.
+Put the resulting packages in your local repositories and install ``python-etcd`` on your front-end and compute nodes or wait for pcocc to pull it as a dependency.

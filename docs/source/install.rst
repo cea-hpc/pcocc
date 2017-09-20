@@ -41,11 +41,13 @@ This guide also assumes that you already have a working Slurm cluster. The follo
 RPM based installation
 **********************
 
-The easiest way to install pcocc on a RPM based distribution is to build a package and install it on all your compute and front-end nodes. Starting from the source distribution, you can go to the root directory of the sources and run the following command to build a RPM:
+Pre-generated RPMs can be downloaded directly from the pcocc `website <https://github.com/cea-hpc/pcocc/releases/latest>`_. To generate a RPM from the source distribution, go to the root directory of the sources and run the following command::
 
     python setup.py bdist_rpm
 
-You may need to install the *rpm-build* package first. The resulting pcocc RPM should be installed with the package manager which will pull all the necessary dependencies from your configured repositories. If you are missing something, please have a look at the guidelines provided in the previous section.
+You may need to install the ``rpm-build`` package first.
+
+The pcocc RPM should be installed on all your compute and front-end nodes using to the package manager which will pull all the necessary dependencies from your configured repositories. If you are missing something, please have a look at the guidelines provided in the previous section.
 
 
 Prepare compute nodes and required services
@@ -56,7 +58,7 @@ Hardware virtualization support
 
 Check that your compute nodes processors have virtualization extensions enabled, and if not (and possible) enable them in the BIOS::
 
-    #This command should return a match
+    # This command should return a match
     grep -E '(vmx|svm)' /proc/cpuinfo
 
 
@@ -67,7 +69,7 @@ The kvm module must be loaded on all compute nodes and accessible (rw permission
 
    KERNEL=="kvm", GROUP=="xxx", MODE="xxx"
 
-Adjust the GROUP and MODE permissions to fit your needs. If virtualization exetensions are not enabled or access to kvm is not provided, pcocc will run Qemu in emulation mode which will be slow.
+Adjust the **GROUP** and **MODE** permissions to fit your needs. If virtualization extensions are not enabled or access to kvm is not provided, pcocc will run Qemu in emulation mode which will be slow.
 
 
 Slurm setup
@@ -96,7 +98,7 @@ Make sure that your node definitions have coherent memory size et CPU count para
     NodeName=Node1 CPUs=8 RealMemory=16000 State=UNKNOWN
     ...
 
-Note how DefMemPerCPU times CPUs equals RealMemory. As described in the requirements section, you need to enable Lua SPANK plugins. Follow this guide if you haven't done it yet:
+Note how **DefMemPerCPU** times **CPUs** equals **RealMemory**. As described in the requirements section, you need to enable Lua SPANK plugins. Follow this guide if you haven't done it yet:
 
 .. toctree::
    :maxdepth: 1
@@ -124,7 +126,7 @@ Edit pcocc configuration files
 
 The configuration of pcocc itself consists in editing YAML files in :file:`/etc/pcocc/`. These files must be present on all front-end and compute nodes.
 
-First, create a root-owned file named :file:`/etc/pcocc/etcd-password` with 0600 permissions containing the etcd root password in plain text.
+First, create a root-owned file named :file:`/etc/pcocc/etcd-password` with ``0600`` permissions containing the etcd root password in plain text.
 
 The :file:`/etc/pcocc/batch.yaml` configuration file contains configuration pertaining to Slurm and etcd. Define the hostnames and client port of your etcd servers:
 
@@ -141,11 +143,11 @@ The :file:`/etc/pcocc/batch.yaml` configuration file contains configuration pert
      etcd-protocol: http
      etcd-auth-type: password
 
-If you enabled TLS, select the *https* etcd-protocol and define the **etcd-ca-cert** parameter to the path of the CA certificate created for etcd (see :ref:`Deploy a secure etcd cluster <etcd-production>`).
+If you enabled TLS, select the *https* **etcd-protocol** and define the **etcd-ca-cert** parameter to the path of the CA certificate created for etcd (see :ref:`Deploy a secure etcd cluster <etcd-production>`).
 
 The sample network configuration in :file:`/etc/pcocc/networks.yaml` defines a single Ethernet network named *nat-rssh*. It allows VMs of each virtual cluster to communicate over a private Ethernet network and provides them with a network gateway to reach external hosts. Routing is performed by NAT (Network Address Translation) using the hypervisor IP as source. It also performs reverse NAT from ports allocated dynamically on the hypervisor to the SSH port of each VM. DHCP and DNS servers are spawned for each virtual cluster to provide network IP addresses for the VMs. For a more detailed description of network parameters, please see :ref:`pcocc-resources.yaml(5)<networks.yaml>`.
 
-Most parameters can be kept as-is for the purpose of this tutorial, as long as the default network ranges do not conflict with your existing IP addressing plan. The **host-if-suffix** parameter can be used if compute nodes have specific hostnames to address each network interface. For example, if a compute node known by Slurm as computeXX can reached more efficiently via IPoIB at the computeXX-ib address, the **host-if-suffix** parameter can be set to *-ib* so that the Ethernet tunnels between hypervisors transit over IPoIB. Raising the MTU may also help improve performance if your physical network allows it.
+Most parameters can be kept as-is for the purpose of this tutorial, as long as the default network ranges do not conflict with your existing IP addressing plan. The **host-if-suffix** parameter can be used if compute nodes have specific hostnames to address each network interface. For example, if a compute node, known by Slurm as ``computeXX``, can be reached more efficiently via IPoIB at the ``computeXX-ib`` address, the **host-if-suffix** parameter can be set to *-ib* so that the Ethernet tunnels between hypervisors transit over IPoIB. Raising the MTU may also help improve performance if your physical network allows it.
 
 The :file:`/etc/pcocc/resources.yaml` configuration file defines sets of resources, currently only networks, that templates may reference. The default configuration is also sufficient for this tutorial: a single resource set is defined, *default* which only provides the *nat-rssh* network. See :ref:`pcocc-resources.yaml(5)<resources.yaml>` for more information about this file.
 

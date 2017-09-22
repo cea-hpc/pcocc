@@ -8,18 +8,12 @@ pcocc relies on Open vSwitch to provide the VMs with private virtual networks. O
 Building the RPM
 ****************
 
-First, download the latest stable Open vSwitch release (2.5.3 at the time of this writing)::
+Get tarball and specfile from latest stable Open vSwitch release (2.5.3 at the time of this writing) and build the RPM::
 
-    mkdir -p ~/rpmbuild/SOURCES
-    wget http://openvswitch.org/releases/openvswitch-2.5.3.tar.gz
-    cp openvswitch-2.5.3.tar.gz ~/rpmbuild/SOURCES/
-    tar xfz openvswitch-2.5.3.tar.gz
-    sed 's/openvswitch-kmod, //g' openvswitch-2.5.3/rhel/openvswitch.spec > openvswitch-2.5.3/rhel/openvswitch_no_kmod.spec
-
-Install required dependencies and compile the RPM::
-
-    yum-builddep ~/openvswitch-2.5.3/rhel/openvswitch_no_kmod.spec
-    rpmbuild -ba --nocheck ~/openvswitch-2.5.3/rhel/openvswitch_no_kmod.spec
+    curl -O http://openvswitch.org/releases/openvswitch-2.5.3.tar.gz
+    tar xzf openvswitch-2.5.3.tar.gz openvswitch-2.5.3/rhel/openvswitch.spec -O openvswitch.spec
+    yum-builddep openvswitch.spec
+    rpmbuild -ba --define "_sourcedir $PWD" openvswitch.spec
 
 ******************************
 Installation and configuration

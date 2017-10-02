@@ -36,7 +36,7 @@ Put the resulting packages in your repositories and install slurm-spank-plugins-
 Configuring SPANK
 *****************
 
-For the pcocc plugin to be properly loaded, we have to instruct the Slurm SPANK infrastructure to load all LUA addons in the standard /etc/slurm/lua.d directory by setting the following content inside :file:`/etc/slurm/plugstack.conf`:
+For the pcocc plugin to be properly loaded, we have to instruct the Slurm SPANK infrastructure to load all LUA addons in the standard :file:`/etc/slurm/lua.d` directory by setting the following content inside :file:`/etc/slurm/plugstack.conf`:
 
 .. code-block:: text
     :caption: /etc/slurm/plugstack.conf

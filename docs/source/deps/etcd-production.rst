@@ -49,7 +49,7 @@ For each etcd server, generate a certificate as follows::
     echo '{"CN":"'$NAME'","hosts":[""],"key":{"algo":"rsa","size":2048}}' | cfssl gencert -config=ca-config.json -ca=ca.pem -ca-key=ca-key.pem -hostname="$ADDRESS" - | cfssljson -bare $NAME
 
 .. note::
-   If your servers will be reached from other IPs or DNS aliases, make sure to reference them in the ADDRESS variable
+   If your servers will be reached from other IPs or DNS aliases, make sure to reference them in the **ADDRESS** variable
 
 
 You now have to deploy the generated keys and certificates in the :file:`/etc/etcd/` directory of each server node. For example for node1::
@@ -77,11 +77,12 @@ etcd needs to be configured on each server node in the /etc/etcd/etcd.conf confi
     ETCD_PEER_CLIENT_CERT_AUTH=true
     ETCD_TRUSTED_CA_FILE=/etc/etcd/etcd-ca.crt
     ETCD_CERT_FILE="/etc/etcd/server.crt"
-    ETCD_KEY_FILE="/etc/etcd/server.key"                                                                                                                                                                                                   ETCD_PEER_KEY_FILE=/etc/etcd/server.key
+    ETCD_KEY_FILE="/etc/etcd/server.key"
+    ETCD_PEER_KEY_FILE=/etc/etcd/server.key
     ETCD_PEER_CERT_FILE=/etc/etcd/server.crt
 
 .. note::
-    ETCD_NAME, ETCD_ADVERTISE_CLIENT_URLS, ETCD_INITIAL_ADVERTISE_PEER_URLS have to be adapted for each server node.
+    **ETCD_NAME**, **ETCD_ADVERTISE_CLIENT_URLS**, **ETCD_INITIAL_ADVERTISE_PEER_URLS** have to be adapted for each server node.
 
 Finally, you may enable and start the service on all etcd nodes::
 
@@ -104,7 +105,7 @@ To check if your etcd server is running correctly you may do::
 Configure etcd for pcocc
 ************************
 
-Before enabling authentication, configure a "root" user in etcd:
+Before enabling authentication, configure a ``root`` user in etcd::
 
     etcdctl --endpoints="https://node1.mydomain.com:2379" --cacert=~/etcd-ca/ca.pem  user add root
 

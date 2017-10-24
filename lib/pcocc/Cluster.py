@@ -208,6 +208,10 @@ class VM(object):
         return self._template.persistent_drives
 
     @property
+    def machine_type(self):
+        return self._template.machine_type
+
+    @property
     def disk_model(self):
         return self._template.disk_model
 

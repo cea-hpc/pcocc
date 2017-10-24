@@ -15,6 +15,7 @@ example:
   remote-display: spice
   full-node: true
   disk-cache: 'writeback'
+  machine-type: 'q35'
 
 herits:
   inherits: example
@@ -39,3 +40,4 @@ overloads:
         cache: 'unsafe'
   remote-display:
   disk-cache:
+  machine-type: 'pc'

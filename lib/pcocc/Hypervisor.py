@@ -536,10 +536,10 @@ username={3}@pcocc
         try:
             # Check if the kvm is usable
             f =  open('/dev/kvm', 'w+')
-            cmdline += ['-machine', 'type=q35,accel=kvm']
+            cmdline += ['-machine', 'type={0},accel=kvm'.format(vm.machine_type)]
             cmdline += ['-cpu', 'host']
         except:
-            cmdline += ['-machine', 'type=q35']
+            cmdline += ['-machine', 'type={0}'.format(vm.machine_type)]
         else:
             f.close()
 

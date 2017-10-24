@@ -73,6 +73,7 @@ mount-points      No           {'homedir': {'path': '/home'}}
 qemu-bin          No           /path/to/qemu/bin/qemu-system-x86
 custom-args       No           ['-cdrom', '/path/to/my-iso']
 image-revision    No           N/A
+machine-type      No           q35
 """),
 ('herits',
 """ATTRIBUTE         INHERITED    VALUE
@@ -91,6 +92,7 @@ resource-set      Yes          default
 disk-cache        Yes          writeback
 image             Yes          example
 image-revision    No           N/A
+machine-type      Yes          q35
 """),
 ])
 def test_template_display(template, expected_output, capsys, datadir, config):

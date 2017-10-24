@@ -57,6 +57,8 @@ Template parameters
   Path to the Qemu binary to use to run the VMs (defaults to searching for qemu-system-x86 in the user's PATH)
 **nic-model**
   Model of Qemu virtual Ethernet network card to provide to VMs (defaults to "virtio-net").
+**machine-type**
+  Type of Qemu machine to emulate (defaults to "pc").
 **disk-model**
   Model of Qemu virtual drive to provide to VMs. Valid parameters are *virtio* (default) or *ide*.
 **emulator-cores**

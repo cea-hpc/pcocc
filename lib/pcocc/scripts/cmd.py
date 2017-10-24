@@ -780,7 +780,7 @@ def pcocc_batch(restart_ckpt, batch_script, host_script, batch_options,
             wrpfile.write(
 """
 TEMP_BATCH_SCRIPT="/tmp/pcocc.batch.$$"
-cat <<PCOCC_BATCH_SCRIPT_EOF >> "${TEMP_BATCH_SCRIPT}"
+cat <<"PCOCC_BATCH_SCRIPT_EOF" >> "${TEMP_BATCH_SCRIPT}"
 """)
             wrpfile.write(batch_script.read())
             wrpfile.write(
@@ -794,7 +794,7 @@ chmod u+x "$TEMP_BATCH_SCRIPT"
             wrpfile.write(
 """
 TEMP_HOST_SCRIPT="/tmp/pcocc.host.$$"
-cat <<PCOCC_HOST_SCRIPT_EOF >> "${TEMP_HOST_SCRIPT}"
+cat <<"PCOCC_HOST_SCRIPT_EOF" >> "${TEMP_HOST_SCRIPT}"
 """)
             wrpfile.write(host_script.read())
             wrpfile.write(

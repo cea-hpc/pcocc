@@ -38,7 +38,7 @@ import signal
 import datetime
 import random
 import binascii
-
+import uuid
 
 from ClusterShell.NodeSet  import RangeSet
 from .scripts import click
@@ -770,7 +770,10 @@ username={3}@pcocc
             iso_file = batch.get_vm_state_path(vm.rank, 'cloud_seed')
 
             f = open(meta_data_file, 'w')
-            f.write('instance-id: {0}\n'.format(vm.instance_id))
+            instance_id = vm.instance_id
+            if instance_id is None:
+                instance_id = uuid.uuid4()
+            f.write('instance-id: {0}\n'.format(instance_id))
 
             if hasattr(vm, 'domain_name'):
                 # Setting the fqdn as a hostname is not standard but

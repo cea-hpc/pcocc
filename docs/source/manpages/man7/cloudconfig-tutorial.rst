@@ -23,10 +23,7 @@ A cloud-config file is a YAML formatted file beginning with the *#cloud-config* 
 
 Where :file:`~/conf` is the cloud-config file which will be passed to cloud-init at VM boot.
 
-Most cloud-config directives are only applied at the first VM boot. As a result, if you reboot a VM or if you save it after cloud-init has run, it will no longer apply the cloud-config file, even if you change its directives.
-
-This mechanism is based on the value of **instance-id** which defaults to *pcocc-deploy* for pcocc VMs. Cloud-init records the **instance-id** it sees on first boot and will no longer run as long as it stays the same. This means that you can configure a VM a second time by changing its **instance-id** template parameter to something else. If you are pre-configuring VMs for other users to customize later with cloud-init, you might want to use a non-default **instance-id** so that your users don't have to change it to apply another cloud-config file.
-
+Most cloud-config directives are *per-instance*, which means they are applied once per instanciated VM, when it first boots. This mechanism relies on the value of **instance-id** which defaults to a random uuid generated for each instanciated pcocc VM. Alternatively, the **instance-id** can be set to a fixed value in the VM template definition (see :ref:`pcocc-templates.yaml(5)<templates.yaml>`). Each time cloud-init runs, it records the current **instance-id**  in the VM filesysterm and only applies *per-instance* directives if it differs from what was previously recorded.
 
 Setting up user credentials
 ***************************

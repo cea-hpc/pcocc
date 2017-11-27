@@ -44,8 +44,8 @@ Generate the CA certificate::
 
 For each etcd server, generate a certificate as follows::
 
-    export ADDRESS=10.19.213.101,node1.mydomain.com,node1
-    export NAME=server
+    export NAME=node1
+    export ADDRESS=10.19.213.101,$NAME.mydomain.com,$NAME
     echo '{"CN":"'$NAME'","hosts":[""],"key":{"algo":"rsa","size":2048}}' | cfssl gencert -config=ca-config.json -ca=ca.pem -ca-key=ca-key.pem -hostname="$ADDRESS" - | cfssljson -bare $NAME
 
 .. note::
@@ -60,7 +60,7 @@ You now have to deploy the generated keys and certificates in the :file:`/etc/et
    ssh root@node1 chmod 600 /etc/etcd/server.key
 
 .. note::
-   The CA certificate ca.pem will later have to deployed on all nodes using pcocc (front-end and compute nodes). Make sure you keep it along with the whole etcd-ca directory.
+   The CA certificate ca.pem will later have to deployed on all nodes hosting pcocc (front-end and compute nodes). Make sure you keep a backup along with the whole etcd-ca directory.
 
 ******************
 etcd Configuration
@@ -68,21 +68,23 @@ etcd Configuration
 
 etcd needs to be configured on each server node in the /etc/etcd/etcd.conf configuration file. Here is an example for node1::
 
-    ETCD_LISTEN_PEER_URLS="https://:2380"
-    ETCD_LISTEN_CLIENT_URLS="https://:2379"
+    ETCD_NAME=node1
+    ETCD_LISTEN_PEER_URLS="https://10.19.213.101:2380"
+    ETCD_LISTEN_CLIENT_URLS="https://10.19.213.101:2379"
     ETCD_INITIAL_CLUSTER_TOKEN="pcocc-etcd-cluster"
     ETCD_INITIAL_CLUSTER="node1=https://node1.mydomain.com:2380,node2=https://node2.mydomain.com:2380,node3=https://node3.mydomain.com:2380"
     ETCD_INITIAL_ADVERTISE_PEER_URLS="https://node1.mydomain.com:2380"
     ETCD_ADVERTISE_CLIENT_URLS="https://node1.mydomain.com:2379"
-    ETCD_PEER_CLIENT_CERT_AUTH=true
     ETCD_TRUSTED_CA_FILE=/etc/etcd/etcd-ca.crt
     ETCD_CERT_FILE="/etc/etcd/server.crt"
     ETCD_KEY_FILE="/etc/etcd/server.key"
+    ETCD_PEER_CLIENT_CERT_AUTH=true
+    ETCD_PEER_TRUSTED_CA_FILE=/etc/etcd/etcd-ca.crt
     ETCD_PEER_KEY_FILE=/etc/etcd/server.key
     ETCD_PEER_CERT_FILE=/etc/etcd/server.crt
 
 .. note::
-    **ETCD_NAME**, **ETCD_ADVERTISE_CLIENT_URLS**, **ETCD_INITIAL_ADVERTISE_PEER_URLS** have to be adapted for each server node.
+    **ETCD_NAME**, **ETCD_ADVERTISE_CLIENT_URLS**, **ETCD_INITIAL_ADVERTISE_PEER_URLS**, **ETCD_LISTEN_PEER_URLS** and **ETCD_LISTEN_CLIENT_URLS** have to be adapted for each server node.
 
 Finally, you may enable and start the service on all etcd nodes::
 
@@ -95,11 +97,10 @@ Check etcd Status
 
 To check if your etcd server is running correctly you may do::
 
-    $ etcdctl --endpoints=https://node1.mydomain.com:2379 --cacert=ca-clients.crt member list
+    $ etcdctl --endpoints=https://node1.mydomain.com:2379 --ca-file=~/etcd-ca/ca.pem member list
     6c86f26914e6ace, started, Node2, https://node3.mydomain.com:2380, https://node3.mydomain.com:2379
     1ca80865c0583c45, started, Node1, https://node2.mydomain.com:2380, https://node2.mydomain.com:2379
     99c7caa3f8dfeb70, started, Node0, https://node1.mydomain.com:2380, https://node1.mydomain.com:2379
-
 
 ************************
 Configure etcd for pcocc
@@ -107,21 +108,21 @@ Configure etcd for pcocc
 
 Before enabling authentication, configure a ``root`` user in etcd::
 
-    etcdctl --endpoints="https://node1.mydomain.com:2379" --cacert=~/etcd-ca/ca.pem  user add root
+    etcdctl --endpoints="https://node1.mydomain.com:2379" --ca-file=~/etcd-ca/ca.pem  user add root
 
 .. warning::
     Choose a secure password. You'll have to reference it in the pcocc configuration files.
 
 Enable authentication::
 
-    etcdctl --endpoints="https://node1.mydomain.com:2379" --cacert=~/etcd-ca/ca.pem auth enable
+    etcdctl --endpoints="https://node1.mydomain.com:2379" --ca-file=~/etcd-ca/ca.pem auth enable
 
 Remove the guest role::
 
-    $ etcdctl --endpoints="https://node1.mydomain.com:2379" --cacert ~/etcd-ca/ca.pem -u root:<password> role remove guest
+    $ etcdctl --endpoints="https://node1.mydomain.com:2379" --ca-file=~/etcd-ca/ca.pem -u root:<password> role remove guest
     Role guest removed
 
 You should no longer be able to access the keystore without authentication::
 
-    $ etcdctl --endpoints "https://node1.mydomain.com:2379" --cacert=~/etcd-ca/ca.pem  get /
+    $ etcdctl --endpoints "https://node1.mydomain.com:2379" --ca-file=~/etcd-ca/ca.pem  get /
     Error:  110: The request requires user authentication (Insufficient credentials) [0]

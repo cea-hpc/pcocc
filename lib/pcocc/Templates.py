@@ -219,7 +219,7 @@ class Template(object):
                                       'image')
             if not os.path.isfile(image_file):
                 raise InvalidConfigurationError(
-                    "template \"{}\" image directory is "
+                    "template \"{}\" image directory "
                     "has no image ".format(self.name))
 
         return image_file, revision

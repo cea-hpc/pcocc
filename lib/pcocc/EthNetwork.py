@@ -665,6 +665,7 @@ additionalProperties: false
                                          PidDaemon(pid_file))
         subprocess.check_call(
             shlex.split("ip netns exec {netns} /usr/sbin/dnsmasq "
+                        "--dhcp-authoritative "
                         "--pid-file={pid_file} "
                         "--conf-file= "
                         "--leasefile-ro "

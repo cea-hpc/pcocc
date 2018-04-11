@@ -48,6 +48,8 @@ pcocc supports the following sub-commands:
       |scp_title|
     :ref:`ssh<ssh>`
       |ssh_title|
+    :ref:`shell<shell>`
+      |shell_title|
     :ref:`exec<exec>`
       |exec_title|
     :ref:`display<display>`

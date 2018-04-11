@@ -59,6 +59,8 @@ titles = {
 'nc': 'Connect to a VM via  nc',
 'scp': 'Transfer files to a VM via scp',
 'ssh': 'Connect to a VM via ssh',
+'shell': 'Connect to a VM using the pcocc agent',
+'attach': 'Attach to the input/output of running programs',
 'exec': 'Execute commands through the pcocc guest agent',
 'display': 'Display the graphical output of a VM',
 'reset': 'Reset a VM',

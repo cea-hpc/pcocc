@@ -16,7 +16,7 @@
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
-
+from __future__ import division
 import sys
 import subprocess
 import atexit
@@ -32,17 +32,24 @@ import tempfile
 import re
 import time
 import threading
-import pwd
 import logging
 import pcocc
+import pcocc.Image
+import pcocc.Plot
+
+from shutil import copyfile
 from pcocc.scripts import click
 from pcocc import PcoccError, Config, Cluster, Hypervisor
 from pcocc.Backports import subprocess_check_output
 from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from pcocc.scripts.Shine.TextTable import TextTable
+from pcocc.pcocc_pb2 import stdio
+from pcocc.Agent import AgentCommand, AgentCommandPrinter
+
 
 helperdir = '/etc/pcocc/helpers'
+
 
 def handle_error(err):
     """ Print exception with stack trace if in debug mode """
@@ -51,6 +58,7 @@ def handle_error(err):
     if Config().debug:
         raise err
     sys.exit(-1)
+
 
 def cleanup(spr, terminal_settings):
     """ Called at exit to restore terminal settings """
@@ -65,8 +73,10 @@ def cleanup(spr, terminal_settings):
         else:
             raise
 
-def ascii (text):
+
+def ascii(text):
     return text.encode('ascii', 'ignore')
+
 
 def docstring(docstr, sep="\n"):
     """ Decorator: Append to a function's docstring.
@@ -78,6 +88,7 @@ def docstring(docstr, sep="\n"):
             func.__doc__ = sep.join([func.__doc__, docstr])
         return func
     return _decorator
+
 
 def load_config(batchid=None, batchname=None, batchuser=None,
                 default_batchname=None,
@@ -93,9 +104,9 @@ def load_config(batchid=None, batchname=None, batchuser=None,
     config.load_user()
     return config
 
-def load_batch_cluster():
-    definition = Config().batch.read_key('cluster/user', 'definition',
-                                               blocking=True)
+
+def load_batch_cluster(user=None,batchid=None):
+    definition = Config().batch.read_cluster_definition(user, batchid)
     return Cluster(definition)
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
@@ -207,6 +218,167 @@ def pcocc_display(jobid, jobname, print_opts, vm):
 
     except PcoccError as err:
         handle_error(err)
+
+def ps_display_jobs(joblist):
+    tbl = TextTable("%id %user %partition %nodes %name %template %elapsed %timelimit")
+
+    try:
+
+        for j in joblist:
+            tbl.append({'id': str(j["batchid"]),
+                        'user': j["user"],
+                        'partition': j["partition"],
+                        'nodes': str(j["node_count"]),
+                        'name': j["jobname"],
+                        'template': j["definition"],
+                        'elapsed': j["exectime"],
+                        'timelimit': j["timelimit"]
+                        })
+    except PcoccError as err:
+        handle_error(err)
+    print tbl
+
+
+def ps_display_vm_state(cluster):
+    tbl = TextTable("%vm %hostname %description %value")
+
+    try:
+        for i in range(0, cluster.vm_count()):
+            state = cluster.state(i)
+            tbl.append({'vm': "vm" + str(i),
+                        'hostname': state.get("hostname"),
+                        'description': state["desc"],
+                        'value': state["value"]
+                        })
+    except PcoccError as err:
+        handle_error(err)
+    print tbl
+
+
+@cli.command(name='ps',
+             short_help='List Clusters and Jobs')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-a', '--allj', is_flag=True, default=False,
+              help='Use to display all pcocc jobs')
+def pcocc_shell(jobid, jobname, allj):
+    """Display currently allocated pcocc clusters
+       or display the state of a specific cluster
+    """
+    config = load_config(jobid, jobname, default_batchname='pcocc')
+    jobs = config.batch.list_alive_jobs()
+
+    filtered_list = []
+    if jobid or jobname:
+        # In this mode we are targetting a single cluster
+        # we then proceed to display its state
+
+        cluster = load_batch_cluster()
+
+        current_id = config.batch.batchid
+        print(current_id)
+        batch_desc = [v for v in jobs if v["batchid"] == current_id ]
+
+        if len(batch_desc) == 0:
+            raise Exception("Error this job was not found")
+
+        # Start by displaying Batch level infos
+        click.secho("\nAllocation Information:\n",
+                        fg='blue')
+        ps_display_jobs(batch_desc)
+
+        #Now Generate VM state
+        click.secho("\nVirtual Machines' State:\n",
+                    fg='blue')
+        ps_display_vm_state(cluster)
+    else:
+        # In this mode we are not targetting a particular job 
+        # we therefore display jobs
+        for j in jobs:
+            if allj or (j["user"] == config.batch.batchuser):
+                filtered_list.append(j)
+        ps_display_jobs(filtered_list)
+
+
+@cli.command(name='shell',
+             context_settings=dict(ignore_unknown_options=True,
+                                   allow_interspersed_args=False),
+             short_help='Open a Shell Using the Pcocc Agent')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-s', '--shell', type=str, default="bash",
+              help='Shell to be used (default=bash)')
+@click.argument('shell_opts', nargs=-1, type=click.UNPROCESSED)
+def pcocc_shell(jobid, jobname, shell, shell_opts):
+    """Open a shell to a VM using the Pcocc Agent
+
+    \b
+    Example usage:
+           pcocc shell user@vm1
+
+    """
+    config = load_config(jobid, jobname, default_batchname='pcocc')
+    cluster = load_batch_cluster()
+
+    ccmd = AgentCommand( cluster, 0 )
+
+    #No argument case
+    if shell_opts == ():
+        shell_opts = ("root@vm0", )
+
+    shell_opts = " ".join(shell_opts)
+
+    s_vm_user = "root"
+    s_vm_idx = 0
+
+    login_vm = re.search(r"(?P<login>\w+)@vm(?P<vmid>\d+)", shell_opts) 
+    
+    if not login_vm:
+        vm = re.search(r"vm(?P<vmid>\d+)", shell_opts )
+        
+        if not vm:
+            sys.stderr.write("Cannot parse login expression " + shell_opts + "\n")
+            sys.exit(1)
+        else:
+            #VM only
+            s_vm_idx = int(vm.group("vmid"))
+    else:
+        #login + vm
+        s_vm_idx = int(login_vm.group("vmid"))
+        s_vm_user = login_vm.group("login")
+
+    #Now resolve the target user
+    user_gid = 0
+    user_uid = 0
+
+    if s_vm_user != "root":
+        #It seems that we need to resolve target UID
+        user_info = ccmd.userinfo( s_vm_idx, s_vm_user )
+        if user_info == None:
+            sys.stderr.write("Failed to resolve infos for user " + s_vm_user + "\n")
+            sys.exit(1)
+        else:
+            if user_info[ str(s_vm_idx)] == None:
+                sys.stderr.write("Failed to resolve infos for user " + s_vm_user + "\n" )
+                sys.exit(1)
+
+            user_uid = int(user_info[ str(s_vm_idx) ]["uid"])
+            user_gid = int(user_info[ str(s_vm_idx) ]["gid"])
+
+    local_pcocc_exec(config,
+                     ccmd,
+                     jobid,
+                     jobname,
+                     "",
+                     s_vm_idx,
+                     1,
+                     [shell, '-i'],
+                     user_uid,
+                     user_gid)
 
 
 @cli.command(name='ssh',
@@ -581,6 +753,10 @@ def pcocc_ckpt(jobid, jobname, force, ckpt_dir):
         load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
 
+        #Freeze the pcocc agent
+        ccmd = AgentCommand( cluster, 0, log=False )
+        ccmd.freeze("-")
+
         dest_dir = validate_save_dir(ckpt_dir, force)
 
         cluster.checkpoint(dest_dir)
@@ -830,6 +1006,291 @@ def build_verbose_opt():
         return []
 
 
+
+@cli.command(name='exec',
+             short_help="Execute commands through the guest agent",
+             context_settings=dict(ignore_unknown_options=True,
+                                   allow_interspersed_args=False))
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-c', '--cores', default=1, type=int,
+              help='Number of cores to execute in each VM')
+@click.option('-u', '--uid', default=0, type=int,
+              help='UID used to run the command')
+@click.option('-g', '--gid', default=0, type=int,
+              help='GID used to run the command')
+@click.argument('cmd', nargs=-1, required=False, type=click.UNPROCESSED)
+def pcocc_exec(jobid, jobname, rng, index, cores, cmd, uid, gid):
+    """Execute commands through the guest agent
+
+       For this to work, a pcocc agent must be started in the
+       guest.
+    """
+    config = load_config(jobid, jobname, default_batchname='pcocc')
+    cluster = load_batch_cluster()
+
+    ccmd = AgentCommand(cluster, 0)
+
+    local_pcocc_exec(config, ccmd,
+                     jobid, jobname,
+                     rng, index,
+                     cores, cmd,
+                     uid, gid)
+
+
+
+def pcocc_get_exec_id( config, g_alloc_id):
+    current_alloc_id = 0
+    if g_alloc_id < 0:
+        #Get a global ID
+        current_alloc_id = config.batch.read_key('cluster/user',
+                                                 "hostagent/exec_alloc_id")
+        if not current_alloc_id:
+            config.batch.write_key('cluster/user',
+                                   "hostagent/exec_alloc_id",
+                                   "0")
+            current_alloc_id = 0
+        else:
+            #Convert to int
+            current_alloc_id = int(current_alloc_id)
+            config.batch.write_key('cluster/user',
+                                   "hostagent/exec_alloc_id",
+                                   str(current_alloc_id + 1))
+    else:
+        current_alloc_id = g_alloc_id
+
+    return current_alloc_id
+
+
+@cli.command(name='mpirun',
+             short_help="Launch MPI programs inside VMs",
+             context_settings=dict(ignore_unknown_options=True,
+                                   allow_interspersed_args=False))
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-n', '--np', default=1, type=int,
+              help='Number of processes to run on')
+@click.option('-c', '--cores', default=1, type=int,
+              help='Number of cores to provide to each process')
+@click.option('-l', '--login', default="root", type=str,
+              help='login used to run the command')
+@click.option('-m', '--mpi', default="openmpi", type=str,
+              help='MPI type to be used')
+@click.option('-v', '--mpiv', default="1.0", type=str,
+              help='MPI version to be used')
+@click.option('-e', '--eth', default="eth1", type=str,
+              help='Ethernet Card Used to do MPI communications')
+@click.argument('cmd', nargs=-1, required=False, type=click.UNPROCESSED)
+def pcocc_exec(jobid, jobname, rng, index, np, cores, login, mpi, mpiv,  eth, cmd):
+    config = load_config(jobid, jobname, default_batchname='pcocc')
+    cluster = load_batch_cluster()
+
+    ccmd = AgentCommand( cluster, 0, log=False )
+
+    if rng != "":
+        index = rng
+    need_to_generate_hostfile = 0
+    #Check host-based connectivity
+    ips = ccmd.lookup( "-", "vm0" )
+    #Now check that everybody knows VM0
+    for _, v in ips.items():
+        if v == 1:
+            need_to_generate_hostfile = 1
+    
+    #Generate the corresponding host-file
+    if need_to_generate_hostfile:
+        ips = ccmd.getip( "-", eth )
+        hosts = ccmd.hostname( "-" )
+        hostfile=""
+        for k, _ in hosts.items():
+            host = hosts[k]
+            ip = " ".join( ips[k].split("#") )
+            hostfile += "{0} {1}\n".format(ip, host)
+        ccmd.writefile( "-", "/etc/hosts", hostfile, append=True )
+
+    cores_to_run = np * cores
+
+    #Now see how many nodes we need
+    free_cores = ccmd.allocfree("-")
+    total_cores = 0
+    for k,v in free_cores.items():
+        iv = int(v)
+        free_cores[ k ] = iv
+        total_cores += iv
+
+    if total_cores < cores_to_run:
+        raise Exception("Cannot run {0} cores on {1} remaining".format(cores_to_run, total_cores))
+
+    #Get alloc id
+    current_alloc_id = pcocc_get_exec_id( config, -1 )
+
+    #Now allocate cores
+    left_to_alloc = cores_to_run
+
+    vmlist = []
+
+    for k,v in free_cores.items():
+        if v == 0:
+            continue
+        alloc = ccmd.alloc(k, v, "", current_alloc_id )
+        for _, vv in alloc.items():
+            if vv < 0:
+                raise Exception("Failed to allocate on vm ")
+        vmlist.append(k)
+        left_to_alloc -= v
+        if left_to_alloc <= 0:
+            break
+
+    #Retrieve user infos
+    uid="0"
+    gid="0"
+
+    if login != "root":
+        userinfo=ccmd.userinfo( vmlist[0], login )
+        infosforvm = userinfo[ vmlist[0] ]
+        if infosforvm == None:
+            raise Exception("Failed to resolve user {0} on {1}".format(login, vmlist[0]))
+        uid = infosforvm["uid"]
+        gid = infosforvm["gid"]
+
+    mpicmd = []
+            #Now time to run the command
+    try:
+        #We now specialize our command
+        if mpi == "openmpi":
+            #Generate host list
+            host_slot_list=[]
+            for i in range(0, len(vmlist)):
+                k=vmlist[i]
+                if 3 <= int(mpiv[0]):
+                    host_slot_list.append( "vm" +  k + ":" + str(free_cores[k]) )
+                else:
+                    for i in range(0, int(free_cores[k])):
+                        host_slot_list.append( "vm" +  k )
+            hostlist = ",".join(host_slot_list)
+            #Write command
+            acmd = ["mpirun",
+                      "-np",
+                      str(np),
+                      #"-cpus-per-proc",
+                      #str(cores),
+                      "-H",
+                      hostlist ] + list(cmd)
+        elif (mpi == "pmix"):
+             #Generate host list (new OMPI style)
+            host_slot_list=[]
+            for i in range(0, len(vmlist)):
+                k=vmlist[i]
+                host_slot_list.append( "vm" +  k + ":" + str(free_cores[k]) )
+            hostlist = ",".join(host_slot_list)
+            acmd = ["psrvr",
+                      "--daemonize",
+                      "-H",
+                      hostlist,
+                      "&&",
+                      "prun",
+                      "-np",
+                      str(np)] + list(cmd)
+        elif (mpi == "mpich") or ( mpi == "mpc" ) or ( mpi == "mpcp" ):
+            #Generate host list
+            host_slot_list=[]
+            for i in range(0, len(vmlist)):
+                k=vmlist[i]
+                host_slot_list.append( "vm" +  k )
+            hostlist = ",".join(host_slot_list)
+            if mpi == "mpc":
+                acmd = ["mpcrun",
+                      "-p={0}".format(len(vmlist)),
+                      "-n={0}".format(np),
+                      "-hosts",
+                      hostlist] + list(cmd)
+            elif mpi == "mpcp":
+                acmd = ["mpcrun",
+                      "-p={0}".format(np),
+                      "-n={0}".format(np),
+                      "-hosts",
+                      hostlist] + list(cmd)
+            else:
+                acmd = ["mpirun",
+                      "-hosts",
+                      hostlist,
+                      "-np",
+                      str(np)] + list(cmd)
+
+        else:
+            raise Exception("No such MPI implementation {0}".format(mpi))
+            
+        scmd = " ".join(acmd) 
+        mpicmd = ["bash",
+                  "-lc",
+                  scmd ]
+        ret = ccmd.doexec(vmlist[0], current_alloc_id,  mpicmd[0], mpicmd[1:] , uid, gid)
+
+        #Check for errors
+        for k in ret:
+            if ret[k] == 1:
+                raise Exception("Failled to exec on {0}, now releasing alloc".format(k))
+        
+        #Eventually attach to the output
+        detached = local_pcocc_cmd_attach( ccmd,  jobid, jobname )
+    except Exception as e:
+        ccmd.release("-", current_alloc_id)
+        handle_error(e)
+    if detached == 0:
+        ccmd.release("-", current_alloc_id)
+
+#We add this indirection to be able to call exec from other commands
+def local_pcocc_exec(config, ccmd, jobid,
+                     jobname, rng, index,
+                     cores, cmd, uid, gid,
+                     attach=True, g_alloc_id=-1):
+    
+    if rng != "":
+        index = rng
+
+    current_alloc_id = pcocc_get_exec_id( config, g_alloc_id )
+    
+    try:
+        allocs = ccmd.alloc(index, cores, "", current_alloc_id )
+        for _, vv in allocs.items():
+            if vv < 0:
+                raise Exception("Failed to allocate on vm ")
+        #Now time to run the command
+        ret = ccmd.doexec(index, current_alloc_id,  cmd[0], cmd[1:] , uid, gid)
+
+        #Check for errors
+        for k in ret:
+            if ret[k] == 1:
+                raise Exception("Failled to exec on {0}, now releasing alloc".format(k))
+    except Exception as e:
+        ccmd.release(index, current_alloc_id)
+        handle_error(e)
+
+
+    detached = 0
+    #Now attach to target
+    if attach:
+        detached = local_pcocc_cmd_attach( ccmd,  jobid, jobname )
+
+    if detached == 0 :
+        #If we are here we got EOF
+        ccmd.release(index, current_alloc_id)
+
+    return current_alloc_id
+
+
 @cli.command(name='alloc',
              context_settings=dict(ignore_unknown_options=True),
              short_help="Run a virtual cluster (interactive)")
@@ -957,7 +1418,7 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
             sys.exit(status >> 8)
         elif pid == s_exec.pid and not wait:
             sys.stderr.write("Terminating the cluster...\n")
-            t = threading.Timer(40, wait_timeout, [s_pjob])
+            t = threading.Timer(4000, wait_timeout, [s_pjob])
             t.start()
             s_pjob.send_signal(signal.SIGINT)
             s_pjob.wait()
@@ -991,6 +1452,7 @@ def clean_exit(sig, frame):
     if Config().hyp.host_agent:
         Config().hyp.host_agent.signal()
     stop_threads.set()
+    logging.info("Exit")
     sys.exit(0)
 
 @internal.command(name='run',
@@ -1015,48 +1477,6 @@ def pcocc_run(restart_ckpt):
     except PcoccError as err:
         handle_error(err)
 
-@cli.command(name='exec',
-             short_help="Execute commands through the guest agent",
-             context_settings=dict(ignore_unknown_options=True,
-                                   allow_interspersed_args=False))
-@click.option('-i', '--index', default=0, type=int,
-              help='Index of the vm on which the command should be executed')
-@click.option('-j', '--jobid', type=int,
-              help='Jobid of the selected cluster')
-@click.option('-J', '--jobname',
-              help='Job name of the selected cluster')
-@click.option('-u', '--user',
-              help='User id to use to execute the command')
-@click.option('-s', '--script', is_flag=True,
-              help='Cmd is a shell script to be copied to /tmp and executed in place')
-@click.argument('cmd', nargs=-1, required=False, type=click.UNPROCESSED)
-def pcocc_exec(index, jobid, jobname, user, script, cmd):
-    """Execute commands through the guest agent
-
-       For this to work, a pcocc agent must be started in the
-       guest. This is mostly available for internal use where we do
-       not want to rely on a network connexion / ssh server.
-    """
-    try:
-        load_config(jobid, jobname, default_batchname='pcocc')
-        cluster = load_batch_cluster()
-
-        if not user:
-            user = pwd.getpwuid(os.getuid()).pw_name
-
-        cmd = list(cmd)
-
-        if script:
-            basename = os.path.basename(cmd[0])
-            cluster.vms[index].put_file(cmd[0],
-                                    '/tmp/%s' % basename)
-            cmd = ['bash', '/tmp/%s' % basename]
-
-        ret = cluster.exec_cmd([index], cmd, user)
-        sys.exit(max(ret))
-
-    except PcoccError as err:
-        handle_error(err)
 
 @internal.command(name='setup',
              short_help="For internal use")
@@ -1144,5 +1564,926 @@ def pcocc_tpl_show(template):
             sys.exit(-1)
 
         tpl.display()
+    except PcoccError as err:
+        handle_error(err)
+
+@template.command(name='export',
+             short_help="Export the image associated with a template")
+@click.option('-o', '--output', default="./image.qcow2", type=str,
+              help='Output file and format (default output.qcow2)')
+@click.argument('template', nargs=1)
+def pcocc_tpl_export(output, template):
+    config = load_config()
+    pcocc_tpl_export_local(config, output, template)
+
+#This is an indirection to allow the export
+#to be used locally in this file
+def pcocc_tpl_export_local(config, output, template):
+    output = os.path.abspath(output)
+
+    if os.path.isfile(output):
+        click.secho('Output file already exists ' + output, fg='red', err=True)
+        sys.exit(-1)
+
+    try:
+
+        try:
+            tpl = config.tpls[template]
+        except KeyError as err:
+            click.secho('Template not found: ' + template, fg='red', err=True)
+            sys.exit(-1)
+
+        #Resolve current image
+        image, rev = tpl.resolve_image()
+        pcocc.Image.convert(image, output, quiet=False)
+        click.secho( "'{0} (revision {1})' has been exported to '{2}'".format(
+                        template,
+                        rev,
+                        output),
+                    fg='green', err=True)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@template.command(name='import',
+             short_help="Import a VM image to a new template")
+@click.option('-n', '--name', type=str, required=True, default="",
+              help='Name of the new template to be created')
+@click.option('-i', '--inherit', default="", type=str, required=False,
+              help='Name of the existing template to inherit from')
+@click.option('-p', '--prefix', default="", type=str, required=False,
+              help='Prefix where to store the VM images (directory)')
+@click.argument('image', nargs=1, required=False)
+def pcocc_tpl_import(name, inherit, prefix,  image):
+
+
+    if image != None:
+        if not os.path.isfile(image):
+            click.secho("Input image file does not exist '" + image + "'", fg='red', err=True)
+            sys.exit(-1)
+        else:
+            image = os.path.abspath(image)
+
+    if name == "":
+        click.secho("You must provide a name to the new template", fg='red', err=True)
+        sys.exit(-1)
+
+    try:
+        config = load_config()
+
+        try:
+            tpl = config.tpls[name]
+            if tpl:
+                click.secho("There seems to be an existing template with name '" + name + "'",
+                            fg='red',
+                            err=True)
+                return
+        except:
+            pass
+
+        if inherit != "":
+            try:
+                tpl = config.tpls[inherit]
+            except KeyError as err:
+                click.secho('Parent template not found: ' + inherit, fg='red', err=True)
+                sys.exit(-1)
+        else:
+            #No inherit and no image is incorrect
+            if image == "":
+                click.secho('If you provide no image you must inherit from a template',
+                            fg='red',
+                            err=True)
+                sys.exit(-1)
+
+
+        to_store = ""
+        if prefix == "":
+            to_store = config.user_conf_dir + "/" + name 
+        else:
+            to_store = prefix + "/" + name
+
+        sys.stderr.write("Creating template directory '{0}'... ".format(to_store))
+        try:
+            os.mkdir(to_store)
+            sys.stderr.write("OK\n")
+        except:
+            sys.stderr.write("ERROR\n")
+            click.secho('Failed to create VM storage directory: ' + to_store, fg='red', err=True)
+            sys.exit(-1)
+
+        output_image = to_store + "/image"
+
+        if( (inherit != "") and (image == None) ):
+            pcocc_tpl_export_local(config, output_image, inherit)
+        else:
+            pcocc.Image.convert( image, to_store + "/image", quiet=False)
+
+        tpl_config = "\n\n"
+        tpl_config += "#Autogenerated by 'pcocc import' on {0}\n".format(
+                            str(datetime.datetime.now()))
+        tpl_config += "{0}:\n".format(name)
+        tpl_config += "    image: {0}\n".format(to_store)
+        if inherit != "":
+            tpl_config += "    inherits: {0}\n".format(inherit)
+        tpl_config += "#   resource-set: cluster\n"
+        tpl_config += "#   user-data: ~/my-cloud-file\n"
+        tpl_config += "#   mount-points:\n"
+        tpl_config += "#       homes:\n"
+        tpl_config += "#           path: pathtomy/home\n"
+        tpl_config += "#           readonly: false\n"
+        tpl_config += "\n\n"
+
+        template_file = os.path.join(config.user_conf_dir,
+                                    'templates.yaml')
+
+        if os.path.isfile(template_file):
+            copyfile(template_file, template_file + ".bak")
+            click.secho("Saved a backup of 'templates.yaml' in '" + template_file +".bak'",
+                        fg='blue',
+                        err=True)
+
+
+        sys.stderr.write("Registering new template '{0}'... ".format(name))
+        try:
+            with open(template_file, "a") as tplf:
+                tplf.write(tpl_config)
+            tplf.close()
+            sys.stderr.write("OK\n")
+        except:
+            sys.stderr.write("ERROR\n")
+            sys.exit(-1)
+
+        click.secho("Sucessfully imported '{0}' with this configuration:\n{1}"
+                    .format(name, tpl_config),
+                    fg='green',
+                    err=True)
+
+    except PcoccError as err:
+        handle_error(err)
+
+
+@cli.command(name='attach',
+             short_help="Attach to standard input and outputs for running programs")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+
+def pcocc_cmd_attach( jobid, jobname ):
+    load_config(jobid, jobname, default_batchname='pcocc')
+    cluster = load_batch_cluster()
+
+    ccmd = AgentCommand( cluster, 0 )
+    
+    return local_pcocc_cmd_attach( ccmd, jobid, jobname )
+
+#We need this extra indirection to alloc a direct call from exec
+def local_pcocc_cmd_attach( ccmd, jobid, jobname ):
+
+    #Broadcast attach
+    ccmd.attach("-")
+
+    detached = [0]
+
+    def iterin(deta):
+        yield stdio(vmid = -1, stdin="", stderr="",eof=False)
+        while 1 :
+            l = sys.stdin.readline()
+            if not l :
+                #Bcast EOF
+                yield stdio(vmid = -1, stdin="", stderr="",eof=True)
+                ccmd.eof("-")
+                return
+            if l[0] == chr(27):
+                click.secho("You are now detached from program output" ,  fg='blue', err=True)
+                click.secho("Use 'pcocc attach' to reattach" ,  fg='blue', err=True)
+                #Broadcast detach
+                #yield stdio(vmid = -1, id=-1, stdin="", stderr="",eof=True)
+                deta[0]=1
+                return
+            yield stdio(vmid = -1, stdin=l, stderr="",eof=False)
+
+    try:
+        outputs = ccmd.exec_stream( iterin(detached) )
+
+        for dat in outputs:
+            if dat.stdin != "":
+                sys.stdout.write( dat.stdin  )
+            if dat.stderr != "":
+                sys.stderr.write( dat.stderr)
+    except:
+        pass
+
+    if detached[0] == 1:
+        ccmd.detach("-")
+
+    return detached[0]
+
+@cli.group()
+def agent():
+    """ Gathers commands related to the pcocc agent """
+    pass
+
+def top_display_keys(stats):
+    tbl = TextTable("%key %description")
+
+    try:
+        for k in stats:
+            if k[0:5] != "stat_":
+                continue
+            tbl.append({'key': k,
+                        'description': ""})
+    except PcoccError as err:
+        handle_error(err)
+    print tbl
+
+
+def top_display_keys_desc( key ):
+    #Special cases
+    entries = key.split("_")
+    if key.startswith("stat_diff_cpu"):
+        return click.style("{0} time spent in {1} since last query".format(entries[2], entries[3]),
+                           fg="red")
+    elif key.startswith("stat_cpu"):
+        if "percent" in key:
+            return click.style("{0} current load in percent (%)".format(entries[1]),
+                           fg="cyan", bold=True)
+        else:
+            return click.style("{0} time spent in {1} since launch".format(entries[1], entries[2]),
+                           fg="red")
+        
+    elif key.startswith("stat_softirq"):
+        irq_names = {"1":"TOTAL",
+                     "2":"HI",
+                     "3":"TIMER",
+                     "4":"NET_TX",
+                     "5":"NET_RX",
+                     "6":"BLOCK",
+                     "7":"BLOCK_IOPOLL",
+                     "8":"TASKLET",
+                     "9":"SCHED",
+                     "10":"HRTIMER",
+                     "11":"RCU"}
+        return click.style("{0} software interrupts (softirq)".format(irq_names[entries[2]]),
+                     fg="magenta")
+    elif key.startswith("stat_mem"):
+        mem_desc = {
+            "stat_mem_nfs_unstable_kb":
+            "NFS memory sent to the server and not committed to storage",
+            "stat_mem_mapped_kb":
+            "Memory used by files being mmapped",
+            "stat_mem_vmallocused_kb":
+            "Amount of VMALLOC aread used",
+            "stat_mem_committed_as_kb":
+            "Amount of memory allocated on the system",
+            "stat_mem_writebacktmp_kb":
+            "Memory used by FUSE for write-back",
+            "stat_mem_pagetables_kb":
+            "Memory dedicated to the lowest level of the page-table",
+            "stat_mem_active_file__kb":
+            "Pagecage memory used and not reclaimed",
+            "stat_mem_swapfree_kb":
+            "Remaining SWAP space available",
+            "stat_mem_anonhugepages_kb":
+            "Non-file memory mapped in huge-pages",
+            "stat_mem_buffers_kb":
+            "Memory currently used in buffers",
+            "stat_mem_memtotal_kb":
+            "Memory available on the system",
+            "stat_mem_shmem_kb":
+            "Memory used for shared-memory",
+            "stat_mem_swaptotal_kb":
+            "Memory available in the SWAP",
+            "stat_mem_slab_kb":
+            "Memory for in-kernel data-structures",
+            "stat_mem_hugepagesize_kb":
+            "The size of a HugePage",
+            "stat_mem_dirty_kb":
+            "Memory to be written to Disk",
+            "stat_mem_unevictable_kb":
+            "Memory that cannot be SWAPPED out",
+            "stat_mem_memfree_kb":
+            "Physical Memory free on the system",
+            "stat_mem_vmallocchunk_kb":
+            "Largest continuous free block of VMALLOC",
+            "stat_mem_directmap2m_kb":
+            "Memory mapped to HugePages",
+            "stat_mem_swapcached_kb":
+            "Memory both in mem and SWAP",
+            "stat_mem_bounce_kb":
+            "Memory for block-device bounce buffs",
+            "stat_mem_memavailable_kb":
+            "Estimate of how much memory is available",
+            "stat_mem_writeback_kb":
+            "Memory being written back to Disk",
+            "stat_mem_hardwarecorrupted_kb":
+            "Memory identified as not working",
+            "stat_mem_sunreclaim_kb":
+            "Part of SLAB which cannot be reclaimed",
+            "stat_mem_commitlimit_kb":
+            "Based on overcommit maximum memory available on system",
+            "stat_mem_sreclaimable_kb":
+            "Part of the SLAB which can be reclaimed",
+            "stat_mem_vmalloctotal_kb":
+            "Total size of the VMALLOC memory area",
+            "stat_mem_directmap4k_kb":
+            "Amount of memory mapped in standard 4k pages",
+            "stat_mem_inactive_kb":
+            "Memory reclaimable without performance impact",
+            "stat_mem_inactive_file__kb":
+            "Pagecache memory available for reclaim",
+            "stat_mem_directmap1g_kb":
+            "Memory mapped in 1GB pages",
+            "stat_mem_active_kb":
+            "Memory in-use",
+            "stat_mem_anonpages_kb":
+            "Non-File pages in page-table",
+            "stat_mem_inactive_anon__kb":
+            "Anonymous memory which is Swappable",
+            "stat_mem_active_anon__kb":
+            "Anonymous memory in-use",
+            "stat_mem_kernelstack_kb":
+            "Memory used by the kernel stack",
+            "stat_mem_mlocked_kb":
+            "Pages locked using mlock",
+            "stat_mem_cached_kb":
+            "Memory in the pagecache"
+        }
+
+        try:
+            return click.style("{0}".format(mem_desc[key]),
+                                fg="green", bold=True)
+        except:
+            return  click.style("???",
+                                fg="green", bold=True)
+    return ""
+
+
+def top_display_keys(stats):
+    tbl = TextTable("%key %description")
+
+    try:
+        for k in stats:
+            if k[0:5] != "stat_":
+                continue
+            tbl.append({'key': k,
+                        'description': top_display_keys_desc(k)})
+    except PcoccError as err:
+        handle_error(err)
+    print tbl
+
+
+def top_graph_value(ccmd, index,  key, interupt=False):
+    """This generates a graph for a given probe key
+
+    Arguments:
+        ccmd {ClusterCommand} -- The object used to send commands
+        index {Str/Int} -- Index of the VMs to measure
+        key {Str} -- The key to be measured over time
+
+    Keyword Arguments:
+        interupt {bool} -- If the interrups have to be followed (default: {False})
+
+    Raises:
+        Exception -- Failed to retrieve graph data
+        Exception -- The key was not found
+    """
+    if len(key.split(",")) != 1:
+        raise Exception("You may only provide a single key to -g")
+
+    stats = ccmd.vmstat(0, interupt)
+    if len(stats) == 0:
+        raise Exception("Failed to retrieve graph data")
+    tdata = stats['0']
+    try:
+        tdata[key]
+    except:
+        raise Exception("No such key use 'pcocc top -l'")
+
+    # Now enter the reading loop
+    start = int(time.time())
+
+    titles = [None] * ccmd.vm_count()
+    acc = [None] * ccmd.vm_count()
+
+    g = pcocc.Plot.GnuPlot()
+
+    while True:
+        stats = {}
+        stats = ccmd.vmstat(index, interupt)
+        now = int(time.time()) - start
+        for k in stats:
+            titles[int(k)] = "vm" + k
+
+            if acc[int(k)] is None:
+                acc[int(k)] = []
+
+            if isinstance( stats[k], dict) == False:
+                raise PcoccError("Could not retrieve vmstat data")
+
+            serie = acc[int(k)]
+            serie.append([now, stats[k][key]])
+        g.plot(acc, titles, xlabel="time", style="lp")
+        time.sleep(1)
+
+def top_display_values(ccmd, index, key, interupt=False):
+
+    stats = ccmd.vmstat(index, interupt)
+
+    keys=key.strip().split(",")
+
+    for k in keys:
+        k = k.strip()
+
+    col = "%vm"
+
+    for i in range(0, len(keys)):
+        col = col + " %v"+chr(97 + i)
+
+    tbl = TextTable(col)
+    tbl.color = True
+
+    tbl.header_labels = {}
+    for i in range(0, len(keys)):
+        tbl.header_labels["v"+chr(97+i)] = keys[i]
+
+
+    try:
+        for k in stats:
+            entry = {"vm":str(k)}
+            for i in range(0, len(keys)):
+                e = "v"+chr( 97 + i)
+                entry[e] = stats[str(k)][keys[i]]
+            tbl.append(entry)
+    except PcoccError as err:
+        handle_error(err)
+    print tbl
+
+
+def top_display_report(ccmd):
+    """This implements the basic information
+    display for the "pcocc top" command
+
+    Arguments:
+        ccmd {ClusterCommand} -- Handler to send commands
+    """
+    # Gather Data
+    stats = ccmd.vmstat("-")
+
+    # Gather Data
+    acc_cpu = [[]]
+    acc_memory = [[]]
+
+    for i in range(0, ccmd.vm_count()):
+        try:
+            cpup = stats[ str(i) ]["stat_cpu_percent"]
+            memf = stats[ str(i) ]["stat_mem_memfree_kb"]
+            memt = stats[ str(i) ]["stat_mem_memtotal_kb"]
+            # Convert
+            cpup = round(float(cpup)*100.0, 2)
+            memf = round(float(memf), 2)
+            memt = round(float(memt), 2)
+            memp = ((memt-memf) * 100.0) / memt
+            # Add to graph
+            acc_cpu[0].append([i, cpup])
+            acc_memory[0].append([i, memp])
+        except:
+            pass
+
+    # Plot Load with impulses
+    click.secho('\nCurrent CPU Load in %',
+                fg='red', bold=True)
+    g = pcocc.Plot.GnuPlot(ratio=5)
+    g.plot(acc_cpu, ["CPU Load (%)"], xlabel="VM ID", style="steps")
+    # Plot Memory with impulses
+    click.secho('Current Memory Usage in %',
+                fg='red', bold=True)
+    g = pcocc.Plot.GnuPlot(ratio=5)
+    g.plot(acc_memory, ["Memory Usage (%)"], xlabel="VM ID", style="steps")
+
+    # Now Generate a summary table
+
+    col = "%vm %usedmem %totalmem %mempct %cpuload"
+
+    tbl = TextTable(col)
+    tbl.color = True
+
+    tbl.header_labels["vm"] = "VM ID"
+    tbl.header_labels["usedmem"] = "Used Memory (GB)"
+    tbl.header_labels["totalmem"] = "Total Memory (GB)"
+    tbl.header_labels["mempct"] = "Memory Used (%)"
+    tbl.header_labels["cpuload"] = "CPU Used (%)"
+
+    for i in range(0, ccmd.vm_count()):
+        cpup = float(stats[ str(i) ]["stat_cpu_percent"])
+        memf = float(stats[str(i)]["stat_mem_memfree_kb"]) / (1024*1024)
+        memt = float(stats[str(i)]["stat_mem_memtotal_kb"]) / (1024*1024)
+        memused = memt - memf
+        memp = ((memt-memf) * 100.0) / memt
+        entry = {
+            "vm": str(i),
+            "usedmem": str(round(memused, 2)),
+            "totalmem": str(round(memt, 2)),
+            "mempct": str(round(memp, 2)),
+            "cpuload": str(round(cpup*100.0, 2))
+        }
+
+        tbl.append(entry)
+    
+    print tbl
+
+
+
+@agent.command(name='top',
+             short_help='Monitor vm state')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-r', '--interupt',  is_flag=True, default=False,
+              help='If the stats have to include the interupts')
+@click.option('-l', '--lst', is_flag=True, default=False,
+              help='Use to display available probes')
+@click.option('-g', '--graph', default="", type=str,
+              help='Graph a given key over time')
+@click.option('-k', '--key', default="", type=str,
+              help='Display a given probe over VMs')
+def pcocc_top(jobid, jobname, rng, index,  interupt, lst, graph, key):
+    """Display statistics from VMs
+    """
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster, 0)
+
+        if rng != "":
+            index = rng
+
+        if lst:
+            stats = ccmd.vmstat(0, interupt)
+            if len(stats) != 1:
+                raise Exception("Failed to retrieve keys")
+            top_display_keys(stats['0'])
+        elif graph != "":
+            top_graph_value(ccmd, index, graph, interupt)
+        elif key != "":
+            top_display_values(ccmd, index, key, interupt)
+        else:
+            top_display_report(ccmd)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@agent.group()
+def commands():
+    """ Issue commands to the pcocc agent """
+    pass
+
+
+@commands.command(name='hostname',
+             short_help="Get Hostname from VMs")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+def pcocc_cmd_hostname( jobid, jobname, rng, index ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+        ret = ccmd.hostname(index)
+
+        print(AgentCommandPrinter("hostname", ret))
+    except PcoccError as err:
+        handle_error(err)
+
+@commands.command(name='hello',
+             short_help="Ping event to check if the agent is alive (returns UNIX TS)")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+def pcocc_cmd_hello( jobid, jobname, rng, index ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.hello(index)
+
+        print(AgentCommandPrinter("hello", ret ))
+    except PcoccError as err:
+        handle_error(err)   
+
+
+
+@commands.command(name='freeze',
+             short_help="Suspend events from the pcocc agent")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+def pcocc_cmd_freeze( jobid, jobname, rng, index ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.freeze(index)
+
+        print(AgentCommandPrinter("freeze", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+@commands.command(name='thaw',
+             short_help="Resume events from the pcocc agent")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+def pcocc_cmd_thaw( jobid, jobname, rng, index ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.thaw(index)
+
+        print(AgentCommandPrinter("thaw", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+@commands.command(name='mkdir',
+             short_help="Create a directory on the target vms with a mode")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-p', '--path', type=str, required=True,
+              help='Hierarchy of paths to be created')
+@click.option('-m', '--mode', default=777, type=int,
+              help='Mode of the directory to be created')
+def pcocc_cmd_mkdir( jobid, jobname, rng, index, path, mode ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.mkdir(index, path, mode)
+
+        print(AgentCommandPrinter("mkdir", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+@commands.command(name='ip',
+             short_help="Get ip for target iface on target vms")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-e', '--eth', type=str, default="eth0",
+              help='Device to be queried (default eth0)')
+def pcocc_cmd_getip( jobid, jobname, rng, index, eth ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.getip(index, eth)
+
+        print(AgentCommandPrinter("getip", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+
+
+@commands.command(name='chmod',
+             short_help="Change rights for a file on target vms")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-p', '--path', type=str, required=True,
+              help='Hierarchy of paths to be created')
+@click.option('-m', '--mode', default=777, type=int,
+              help='Mode of the directory to be created')
+def pcocc_cmd_chmod( jobid, jobname, rng, index, path, mode ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.chmod(index, path, mode)
+
+        print(AgentCommandPrinter("chmod", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+@commands.command(name='exec',
+             short_help="Run a command on VMs")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-l', '--alloc', type=int, required=True,
+              help='Target global alloc ID')
+@click.option('-u', '--uid', type=int, default=0,
+              help='UID to run the progam with')
+@click.option('-g', '--gid', type=int, default=0,
+              help='GID to run the progam with')
+@click.argument('cmd', nargs=-1, required=True, type=click.UNPROCESSED)
+def pcocc_cmd_exec( jobid, jobname, rng, index, alloc, cmd, uid, gid ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.doexec(index, alloc,  cmd[0], cmd[1:], uid=uid, gid=gid)
+        print(AgentCommandPrinter("exec", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+
+@commands.command(name='alloc',
+             short_help="Allocate resources on given vms")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-c', '--count', type=int, required=True,
+              help='Number of cores to allocate')
+@click.option('-d', '--desc', default="None", type=str,
+              help='Description of the allocation')
+@click.option('-g', '--gad', type=int, required=True,
+              help='ID of the global allocation')
+def pcocc_cmd_alloc( jobid, jobname, rng, index, count, desc, gad ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.alloc(index, count, desc, gad)
+
+        print(AgentCommandPrinter("alloc", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+@commands.command(name='release',
+             short_help="Release resources on given vms")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-g', '--gad', default=-1, type=int,
+              help='Global alloc ID to be targetted')
+def pcocc_cmd_release( jobid, jobname, rng, index,  gad ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand( cluster, 0 )
+
+        if rng != "":
+            index = rng
+        
+        ret = ccmd.release(index, gad)
+
+        print(AgentCommandPrinter("release", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+
+@commands.command(name='allocfree',
+             short_help="List number of CPU free on VMs")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+def pcocc_cmd_allocfree( jobid, jobname, rng, index ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.allocfree(index)
+
+        print(AgentCommandPrinter("allocfree", ret ))
+    except PcoccError as err:
+        handle_error(err)
+
+@commands.command(name='vmstat',
+             short_help="Get Statistics from VMs")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-w', '--rng', default="", type=str,
+              help='Range of VMids on which the command should be executed')
+@click.option('-i', '--index', default=0, type=int,
+              help='Index of the vm on which the command should be executed')
+@click.option('-r', '--interupt',  is_flag=True, default=False,
+              help='If the stats have to include the interupts')
+def pcocc_cmd_allocfree( jobid, jobname, rng, index, interupt ):
+    try:
+        load_config(jobid, jobname, default_batchname='pcocc')
+        cluster = load_batch_cluster()
+
+        ccmd = AgentCommand(cluster)
+
+        if rng != "":
+            index = rng
+
+        ret = ccmd.vmstat(index, interupt)
+
+        print(AgentCommandPrinter("vmstat", ret ))
     except PcoccError as err:
         handle_error(err)

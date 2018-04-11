@@ -13,8 +13,11 @@ Decription
 
 Execute commands through the guest agent
 
-For this to work, the pcocc guest agent must be started in the guest. This is mostly available for internal use where we do not want to rely on a network connexion/ssh server.
+For this to work, the pcocc guest agent must be started in the guest. This is mostly available for internal use where we do not want to rely on a network connexion/ssh server. 
 
+.. note::
+    It is possible to detach from the output by typing *Escape + Enter*.
+    In this case you may end the execution with *pcocc command release*.
 
 Options
 *******
@@ -28,18 +31,23 @@ Options
     -J, \-\-jobname [TEXT]
                 Job name of the selected cluster
 
+    -w, \-\-rng [TEXT]
+                Rangeset or vmid on which to run the command
+
+    -c, \-\-cores [TEXT]
+                Number of cores on which to run the command
+
     -u, \-\-user [TEXT]
                 User id to use to execute the command
 
-    -s, \-\-script
-                Cmd is a shell script to be copied to /tmp and executed in place
+    -g, \-\-gid
+                Group id to use to execute the command
 
     -h, \-\-help
                 Show this message and exit.
 
 Examples
 ********
-
 
 Execute a command
 .................
@@ -48,23 +56,13 @@ To run a command in the first VM of the default job as the current user::
 
     pcocc exec "hostname"
 
+To run the same command on all VMs (the "-" rangeset means all VM)::
+    
+    pcocc exec -w - "hostname"
+
 To run a command as root in the third VM of the job named *centos*::
 
     pcocc exec -J centos -u root -i 2 cat /etc/shadow
-
-
-Send and execute a script
-.........................
-
-pcocc exec can copy a script to the target machine and execute it. Assuming  :file:`./script.sh` contains ::
-
-    #!/bin/sh
-    echo "Hello from $(hostname)"
-
-To execute it on the second VM of the default job as the current user::
-
-    $ pccoc exec -i 1 -s ./script.sh
-    Hello from vm1
 
 See also
 ********

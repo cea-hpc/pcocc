@@ -83,6 +83,8 @@ class Config(object):
         self.load_vnets(os.path.join(conf_dir, 'networks.yaml'))
         self.load_rsets(os.path.join(conf_dir, 'resources.yaml'))
         self.load_tpls(os.path.join(conf_dir, 'templates.yaml'))
+        if jobid is None:
+            jobid = os.getenv('PCOCC_LOCAL_JOB_ID')
         self.load_batch(os.path.join(conf_dir, 'batch.yaml'), jobid,
                         jobname, default_jobname, process_type,
                         batchuser)

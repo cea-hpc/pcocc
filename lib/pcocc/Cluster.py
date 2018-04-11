@@ -19,6 +19,7 @@
 
 import sys
 import yaml
+import json
 import time
 import logging
 from Queue import Queue
@@ -26,9 +27,10 @@ from threading import Thread
 
 from . import Hypervisor
 from . import Batch
-from .Error import PcoccError
+from .Error import PcoccError, NoAgentError
 from .Config import Config
 from .scripts import click
+from Tbon import TreeNode, TreeClient
 
 class InvalidClusterError(PcoccError):
     """Exception raised when the cluster definition cannot be parsed
@@ -99,6 +101,7 @@ def do_quit_vm(vm):
     vm.quit()
 
 
+
 class VM(object):
     def __init__(self, rank, template):
         self.rank = rank
@@ -106,6 +109,11 @@ class VM(object):
         self.eth_ifs = {}
         self.vfio_ifs = {}
         self.mounts = {}
+        self.command_client = None
+        self.command_node = None
+
+    def __del__(self):
+        self.tbon_disconnect()
 
     def is_on_node(self):
         return Config().batch.is_rank_local(self.rank)
@@ -128,7 +136,58 @@ class VM(object):
             'vf_name': vf_name
         }
 
+    def vm_command_hander(self, command):
+        try:
+            json.loads(command.data)
+        except Exception as e:
+            return "error", {"error":"could not parse JSON in data " + str(e)}
+        return Config().hyp.send_command_host_agent( command )
+
+    def exec_eof_handler(self):
+        return Config().hyp.send_eof_host_agent()
+
+    def exec_input_handler(self, inpu):
+        return Config().hyp.send_input_host_agent( inpu )
+
+    def exec_output_handler(self, is_active ):
+        return Config().hyp.get_output_host_agent( is_active )
+
+    def _set_host_agent_ctx(self, vm_rank):
+        self.command_node = TreeNode(
+            vmid=vm_rank,
+            port=0,
+            handler=self.vm_command_hander,
+            exec_input_handler=self.exec_input_handler,
+            exec_output_handler=self.exec_output_handler,
+            exec_input_eof_notifier=self.exec_eof_handler
+        )
+
+
+    def command_tree_get_info(self):
+        key_name =  "hostagent/vms/" + str(self.rank)
+        root_info = Config().batch.read_key(
+            "cluster/user",
+            key_name,
+            blocking=True
+        )
+        info = root_info.split(":")
+        if len(info) != 3:
+            raise Exception("Failed to parse VM info")
+        return info
+
+    def check_command_client(self):
+        if self.command_client is None:
+            info = self.command_tree_get_info()
+            self.command_client = TreeClient(
+                info
+            )
+
+    def tbon_disconnect( self ):
+        del self.command_client
+        del self.command_node
+
     def run(self, ckpt_dir=None):
+        self._set_host_agent_ctx(self.rank)
         Config().hyp.run(self, ckpt_dir)
 
     def exec_cmd(self, cmd, user):
@@ -156,7 +215,8 @@ class VM(object):
         Config().hyp.dump(self, dumpfile)
 
     def wait_start(self):
-        Config().hyp.wait_vm_start(self)
+        Config().hyp.wait_vm_start(self.rank)
+
     @property
     def networks(self):
         return self._template.rset.networks
@@ -185,7 +245,7 @@ class VM(object):
     @property
     def serial_ports(self):
         return ['taskcontrolport', 'taskioport', 'taskinputport',
-                Hypervisor.QEMU_GUEST_AGENT_PORT]
+                 'pcocc_agent', Hypervisor.QEMU_GUEST_AGENT_PORT]
 
     @property
     def user_data(self):
@@ -245,6 +305,11 @@ class VM(object):
     @property
     def emulator_cores(self):
         return self._template.emulator_cores
+    
+    @property
+    def state(self):
+        state, _ = Config().hyp.get_vm_state(self.rank)
+        return state
 
     def checkpoint_img_file(self, ckpt_dir):
         return Config().hyp.checkpoint_img_file(self, ckpt_dir)
@@ -262,6 +327,8 @@ class Cluster(object):
         self.resource_definition = ""
         self.definition = template_string
         count = 0
+        self.command_client = None
+        self.live_agents = {}
 
         # Parse definition to generate the list of VMs
         try:
@@ -289,6 +356,89 @@ class Cluster(object):
 
         self.resource_definition = self.resource_definition[:-1]
 
+    def command_tree_get_root(self):
+        root_info = Config().batch.read_key(
+            "cluster/user",
+            "hostagent/vms/0",
+            blocking=True
+        )
+        info = root_info.split(":")
+        if len(info) != 3:
+            raise Exception("Failed to parse VM0 info")
+        return info
+
+    def check_command_client(self):
+        if self.command_client is None:
+            info = self.command_tree_get_root()
+            self.command_client = TreeClient(
+                info
+            )
+
+    def tbon_disconnect(self):
+        del self.command_client
+        self.command_client = None
+
+    def vm_count(self):
+        return len(self.vms)
+
+
+    def check_agent(self, rank, timeout=60):
+        """This checks if the agent has started with a graceful timeout
+        
+        Arguments:
+            rank {int} -- The rank to be checked
+            timeout {int} -- How long to wait for the agent
+        
+        Returns:
+            int -- (1) agent found (0) no agent yet (after 60 seconds by default)
+        """
+
+        if str(rank) in self.live_agents:
+            return 1
+
+        data = None
+        try:
+            data = Config().batch.read_key('cluster/user', 
+                                            "hostagent/vms/{0}-agent".format(rank),
+                                            blocking=True, timeout=timeout)
+        except:
+            pass
+
+        if data is None:
+            return 0
+        else:
+            self.live_agents[str(rank)] = True
+            return 1
+
+
+    def command(self, vmid, command, data, direct = 0 ):
+        if len(self.vms) <= vmid:
+            raise PcoccError("No such vmid")
+
+        if self.check_agent(vmid) == 0:
+            raise NoAgentError()
+
+        try:
+            if direct == 0 :
+                self.check_command_client()
+                return self.command_client.command(vmid, command, data)
+            else: 
+                self.vms[ vmid ].check_command_client()
+                return self.vms[vmid].command_client.command(vmid, command, data)
+        except:
+            return None
+
+    def exec_stream( self, inputs ):
+        self.check_command_client()
+        logging.info("Cluster Exec Streeam")
+        for v in  self.command_client.exec_stream(inputs):
+            yield v
+
+    def state(self, vmid):
+        if len(self.vms) <= vmid:
+            raise Exception("No such VMID")
+        return self.vms[ vmid ].state
+
     def alloc_node_resources(self):
         self._set_host_state('network-config',
                              1,
@@ -314,7 +464,7 @@ class Cluster(object):
                                  str(e))
             raise
 
-        self._set_host_state('complete',
+        self._set_host_state('running',
                              2,
                              'done',
                              None)
@@ -391,11 +541,10 @@ class Cluster(object):
             host_rank = Config().batch.node_rank
             if host_rank == -1:
                 host_rank = 0
-
         return '{0}/{1}'.format(self._host_state_dir(), host_rank)
 
     def _check_host_state(self, host_state):
-        if host_state['state'] == 'complete':
+        if host_state['state'] == 'running':
             return True
         elif host_state['state'] == 'failed':
             raise ClusterSetupError(host_state['desc'])

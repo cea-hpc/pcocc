@@ -29,3 +29,11 @@ class InvalidConfigurationError(PcoccError):
     def __init__(self, error):
         super(InvalidConfigurationError, self).__init__(
             'Unable to parse configuration file: ' + error)
+
+class NoAgentError(PcoccError):
+    """General class for syntax errors in the configuration files
+    """
+    def __init__(self):
+        super(NoAgentError, self).__init__(
+            "Could not contact the pcocc agent.\n"\
+            "Make sure that your vm has started and that the agent is properly installed.")

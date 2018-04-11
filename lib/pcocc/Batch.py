@@ -25,6 +25,7 @@ import shutil
 import errno
 import subprocess
 import sys
+import time
 import random
 import datetime
 import logging
@@ -40,8 +41,9 @@ import argparse
 import uuid
 import threading
 
-from ClusterShell.NodeSet  import NodeSet, NodeSetException
-from ClusterShell.NodeSet  import RangeSet
+from Tbon import UserRootCert, ClientCert
+from ClusterShell.NodeSet import NodeSet, NodeSetException, RangeSet
+
 
 from .Config import Config
 from .Backports import subprocess_check_output
@@ -49,6 +51,7 @@ from .Error import PcoccError, InvalidConfigurationError
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import CHILD_EXIT, datetime_to_epoch, stop_threads
 from abc import ABCMeta, abstractmethod
+
 
 class BatchError(PcoccError):
     """Generic exception for Batch related issues
@@ -104,6 +107,10 @@ properties:
   settings:
     type: object
     properties:
+      tbon-cert-size:
+        type: integer
+      tbon-expiration-days:
+        type: integer
       etcd-servers:
         type: array
       etcd-client-port:
@@ -379,7 +386,21 @@ class EtcdManager(BatchManager):
         if not self._in_a_job:
             raise NoJobError()
 
-    def read_key(self, key_type, key, blocking=False, timeout=0):
+    def infer_user_and_alloc_id(self, user, batchid):
+        ruser = user
+        rid = batchid
+        if ruser is None:
+            self._only_in_a_job()
+            ruser = self.batchuser
+        if rid is None:
+            self._only_in_a_job()
+            rid = self.batchid
+        return ruser, rid
+
+    def read_key(self, key_type, key,
+                 blocking=False, timeout=0,
+                 user=None,
+                 batchid=None):
         """Reads a key from keystore
 
         Returns None if the key doesn't exist except if blocking is
@@ -387,18 +408,28 @@ class EtcdManager(BatchManager):
         expires.
 
         """
-        val, index = self.read_key_index(key_type, key)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+
+        val, index = self.read_key_index(key_type, key, user=user, batchid=batchid)
         if val or not blocking:
             return val
 
         while not val:
             val, index = self.wait_key_index(key_type, key, index,
-                                             timeout=timeout)
+                                             timeout=timeout,
+                                             user=user,
+                                             batchid=batchid)
 
         return val.value
 
+
+
+
     @_retry_on_cred_expiry
-    def read_key_index(self, key_type, key, realindex=False):
+    def read_key_index(self, key_type, key,
+                       realindex=False,
+                       user=None,
+                       batchid=None):
         """Reads a key and its modification index from keystore
 
         By default, return an index suitable for watches, for updates
@@ -407,7 +438,11 @@ class EtcdManager(BatchManager):
         Returns None if the key doesn't exist.
 
         """
-        key_path = self.get_key_path(key_type, key)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+
+        key_path = self.get_key_path(key_type, key,
+                                     user, batchid)
+
         try:
             ret = self.keyval_client.read(key_path)
         except etcd.EtcdKeyNotFound as e:
@@ -419,7 +454,7 @@ class EtcdManager(BatchManager):
             return ret.value, max(ret.modifiedIndex,
                                   ret.etcd_index)
 
-    def read_dir(self, key_type, key):
+    def read_dir(self, key_type, key, user=None, batchid=None):
         """Reads a directory from keystore
 
         Returns None if the directory doesn't exist. Otherwise,
@@ -427,11 +462,12 @@ class EtcdManager(BatchManager):
         lib)
 
         """
+        user, batchid = self.infer_user_and_alloc_id(user, batchid)
         val, _ = self.read_dir_index(key_type, key)
         return val
 
     @_retry_on_cred_expiry
-    def read_dir_index(self, key_type, key):
+    def read_dir_index(self, key_type, key, user=None, batchid=None):
         """Reads a directory from keystore
 
         Returns None if the directory doesn't exist. Otherwise,
@@ -439,14 +475,16 @@ class EtcdManager(BatchManager):
         lib) and associated modification index
 
         """
-        key_path = self.get_key_path(key_type, key)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+
+        key_path = self.get_key_path(key_type, key, user, batchid)
         try:
             val = self.keyval_client.read(key_path, recurse = True)
         except etcd.EtcdKeyNotFound as e:
             return None, e.payload['index']
 
         return val, max(val.modifiedIndex,
-                              val.etcd_index)
+                        val.etcd_index)
 
     @_retry_on_cred_expiry
     def write_ttl(self, key_type, key, value, ttl):
@@ -539,9 +577,14 @@ class EtcdManager(BatchManager):
             self.delete_key(self, key_type, key)
 
     @_retry_on_cred_expiry
-    def wait_key_index(self, key_type, key, index, timeout = 0):
+    def wait_key_index(self, key_type, key, index,
+                       timeout = 0,
+                       user=None,
+                       batchid=None):
         """Wait until a key is updated from the specified index"""
-        key_path = self.get_key_path(key_type, key)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+
+        key_path = self.get_key_path(key_type, key, user, batchid)
 
         while True:
             try:
@@ -572,8 +615,9 @@ class EtcdManager(BatchManager):
 
             self.wait_key_index(key_type, key, last_index, timeout=30)
 
-
-    def get_key_path(self, key_type, key):
+    def get_key_path(self, key_type, key,
+                     user=None,
+                     batchid=None):
         """Returns the path of a key
 
         Global keys are global to the whole physical cluster whereas
@@ -583,17 +627,17 @@ class EtcdManager(BatchManager):
         only be written as root.
 
         """
+        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+
         if key_type == 'global':
             return '/pcocc/global/{0}'.format(key)
         if key_type == 'global/user':
-            return '/pcocc/global/users/{0}/{1}'.format(self.batchuser, key)
+            return '/pcocc/global/users/{0}/{1}'.format(user, key)
         elif key_type == 'cluster':
-            self._only_in_a_job()
-            return '/pcocc/cluster/{0}/{1}'.format(self.batchid, key)
+            return '/pcocc/cluster/{0}/{1}'.format(batchid, key)
         elif key_type == 'cluster/user':
-            self._only_in_a_job()
-            return '/pcocc/cluster/users/{0}/{1}/{2}'.format(self.batchuser,
-                                                             self.batchid,
+            return '/pcocc/cluster/users/{0}/{1}/{2}'.format(user,
+                                                             batchid,
                                                              key)
         else:
             raise KeyError(key_type)
@@ -631,7 +675,9 @@ class EtcdManager(BatchManager):
 
             delta = datetime.datetime.now() - self._last_cred_renew
 
-            if  delta > datetime.timedelta(seconds=15):
+            logging.info("DELTA" + str(delta))
+
+            if delta > datetime.timedelta(seconds=15):
                 logging.debug('Renewing etcd credentials')
                 self._last_cred_renew = datetime.datetime.now()
                 self._keyval_client.password = self._get_keyval_credential()
@@ -748,8 +794,6 @@ class EtcdManager(BatchManager):
 
             u.write()
 
-            self.make_dir('cluster/user', '')
-
     def cleanup_cluster_keys(self):
         try:
             logging.debug('Setting self-destruct on cluster etcd keystore')
@@ -763,6 +807,14 @@ class EtcdManager(BatchManager):
     def populate_env(self):
         """ Populate environment variables with batch related info to propagate """
         os.putenv('PCOCC_JOB_ID', str(self.batchid))
+    
+    def read_cluster_definition(self, user=None, batchid=None):
+        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+        definition = Config().batch.read_key('cluster/user', 'definition',
+                                               blocking=True)
+        return definition
+
+        
 
 # Schema to validate the global pkey state in the key/value store
 local_job_allocation_schema = """
@@ -1110,6 +1162,9 @@ class LocalManager(EtcdManager):
                     batchid, job['host'])
 
         return batchids
+    
+    def list_alive_jobs(self):
+        return self.list_all_jobs()
 
     def find_job_by_name(self, user, batchname,
                          host=None):
@@ -1391,7 +1446,16 @@ class SlurmManager(EtcdManager):
                 uid = int(os.environ['SLURM_JOB_UID'])
                 self.batchuser = pwd.getpwuid(uid).pw_name
             except KeyError:
-                self.batchuser = pwd.getpwuid(os.getuid()).pw_name
+                if batchid:
+                    # If we have a batch id we can get the user from the alloc
+                    jobs = self.list_all_jobs(get_infos=True)
+                    me = [ v for v in jobs if  v["batchid"] == batchid]
+                    if len(me) == 0:
+                        raise InvalidJobError("No such AllocID")
+                    self.batchuser = me[0]["user"]
+                else:
+                    # Assume we are the caller
+                    self.batchuser = pwd.getpwuid(os.getuid()).pw_name
 
         # Find the job id.
         # Look in order at the specified job id, job name, environment variable,
@@ -1469,6 +1533,173 @@ class SlurmManager(EtcdManager):
         if self.proc_type == ProcessType.LAUNCHER:
             self._init_cluster_dir()
 
+        tbon_cert_size = 2048
+        tbon_cert_expiration = 30
+
+        if "tbon-cert-size" in settings:
+            tbon_cert_size = settings["tbon-cert-size"]
+        if "tbon-expiration-days" in settings:
+            tbon_cert_expiration = settings["tbon-expiration-days"]
+
+        #Now either restore or load the certs
+        self.setup_command_cert(tbon_cert_size, tbon_cert_expiration)
+
+
+    def setup_command_cert_generate(self, now_timestamp, tbon_cert_size, current_value):
+        cert_info = {}
+
+        # If there is a previous cert with the same TS
+        # we may not regenerate and directly take the same
+        # values for keys and cert (avoids breaking the alloc
+        # which has just raced with us)
+        if current_value:
+            try:
+                prev_cert = yaml.load(current_value)
+                # Are we in a race ?
+                if "gen_time" in prev_cert:
+                    if str(prev_cert["gen_time"]) == str(now_timestamp) :
+                        cert_info = prev_cert
+                        # Load this cert in batch
+                        self.root_cert = UserRootCert(
+                                        rcrt = cert_info["root_ca_crt"],
+                                        rkey =  cert_info["root_ca_key"]
+                                    )
+                        logging.debug("Done Acquiring Root Certificate for user (concurrent)")
+                        self.client_cert = ClientCert(
+                                            ckey=cert_info["client_key"],
+                                            ccert=cert_info["client_crt"]
+                                        )
+                        logging.debug("Done Acquiring Client Certificate for user (concurrent)")
+                        # And we are done!
+                        return cert_info, now_timestamp
+            except:
+                #Something went wrong just proceed to generation
+                pass
+
+        #Now Generate Root Certificate
+        root_cert = UserRootCert(key_size=tbon_cert_size)
+        root_cert.gen_user_root_cert()
+        #Save in Etcd
+        cert_info["root_ca_key"] = root_cert.root_key_data
+        cert_info["root_ca_crt"] = root_cert.root_cert_data
+        logging.info("Done Initializing Root Certificate for user")
+        #Now Generate Client Certificate
+        client_cert = ClientCert(key_size=tbon_cert_size)
+        client_cert.gen_client_cert(
+                        rkey=root_cert.root_key_data,
+                        rcert=root_cert.root_cert_data
+                        )
+        #Save in Etcd
+        cert_info["client_key"] = client_cert.key
+        cert_info["client_crt"] = client_cert.crt
+        logging.info("Done Initializing Client Certificate for user")
+        # Save Generation TS
+        cert_info["gen_time"] = now_timestamp
+        cert_info["gen_size"] = tbon_cert_size
+
+        return yaml.dump(cert_info), now_timestamp
+
+
+    def setup_command_cert(self, tbon_cert_size, tbon_cert_expiration, force=False):
+        cert_expired = force
+
+        # We divide the TS to account for
+        # possible clock skew between  nodes
+        # this is to make sure that two concurent
+        # allocation would make the same regen decision
+        now_timestamp = int(time.time()) // 60
+
+        try:
+            # Default all values to None
+            root_ca_key_data = None
+            root_ca_cert_data = None
+            client_key_data = None
+            client_cert_data = None
+            gen_time = None
+            gen_size = None
+            # Now try to retrieve current value
+            cert_data = self.read_key('global/user',
+                                              'hostagent/cert')
+            # Try to extract data from cert 
+            if cert_data:
+                cert = yaml.load(cert_data)
+                if "root_ca_key" in cert:
+                    root_ca_key_data = cert["root_ca_key"]
+                if "root_ca_crt" in cert:
+                    root_ca_cert_data = cert["root_ca_crt"]
+                if "client_key" in cert:
+                    client_key_data = cert["client_key"]
+                if "client_crt" in cert:
+                    client_cert_data = cert["client_crt"]
+                if "gen_time" in cert:
+                    gen_time = cert["gen_time"]
+                if "gen_size" in cert:
+                    gen_size = cert["gen_size"]
+        except:
+            logging.error("Could not check command certificate state in Etcd")
+            # Flag the cert as expired as we failed to read it
+            cert_expired = True
+        
+        # Check is the certificate has expired
+        if gen_time is not None:
+            expiry_seconds = tbon_cert_expiration * 3600 * 24
+            if expiry_seconds <= (now_timestamp - int(gen_time)):
+                cert_expired = True
+                logging.info("Command Certificates expired for user")
+        else:
+            # If we are here previous certificate had no TS
+            # Just regen in doubt
+            cert_expired = True
+        
+        # Check if certificate size has been changed
+        if gen_size is not None:
+            if tbon_cert_size != int(gen_size):
+                cert_expired = True
+                logging.info("Command Certificates size changed for user")
+        else:
+            # If we are here previous certificate had no SIZE
+            # Just regen in doubt
+            cert_expired = True
+
+
+        # If all OK and no regen Load in Batch
+        if( root_ca_key_data
+            and root_ca_cert_data
+            and client_key_data 
+            and client_cert_data
+            and not cert_expired):
+            self.root_cert = UserRootCert(
+                                rcrt = root_ca_cert_data,
+                                rkey = root_ca_key_data
+                            )
+            logging.debug("Done Acquiring Root Certificate for user")
+            self.client_cert = ClientCert(
+                                ckey=client_key_data,
+                                ccert=client_cert_data
+                            )
+            logging.debug("Done Acquiring Client Certificate for user")
+        else:
+            # We need to make sure that there are not
+            # two concurent pcocc allocations as regenerating
+            # the certs would break their command tree
+            # So if there is more than one allocation we give up
+            # on regenerating
+
+            allocs = self.list_user_jobs(self.batchuser)
+
+            if len(allocs) != 1:
+                logging.info("Gave up on regenerating keys as there are multiple pcocc allocations")
+                return
+
+            self.atom_update_key(
+                'global/user',
+                'hostagent/cert',
+                self.setup_command_cert_generate,
+                now_timestamp,
+                tbon_cert_size)
+
+
+
 
     def find_job_by_name(self, user, batchname, host=None):
         """Return a jobid matching a user and batchname
@@ -1495,18 +1726,79 @@ class SlurmManager(EtcdManager):
         except ValueError:
             raise InvalidJobError('name %s is ambiguous' % batchname)
 
-    def list_all_jobs(self):
+    def list_all_jobs(self, get_infos=False):
         """List all jobs in the cluster
 
-        Returns a list of the batchids of all jobs in the cluster
+        If no get_infos [ 1234, 1235 ]
+        Otherwise list of dict with several keys:
+            - batchid
+            - user
+            - exectime
+            - timelimit
+            - partition
+            - node count
+            - jobname
+            - state
 
+        Keyword Arguments:
+            get_user {bool} -- Whether to show users (default: {False})
+        
+        Raises:
+            BatchError -- Failled to retrieve joblist from SLURM
+        
+        Returns:
+            array -- List of jobs (with or without user info)
         """
+
         try:
             joblist = subprocess_check_output(['squeue', '-ho',
-                                               '%A']).split()
-            return [ int(j) for j in joblist ]
+                                               '%A %u %M %l %P %D %j %t']).split("\n")
+            ret=[]
+            for j in joblist:
+                entry=j.split(" ")
+                if len(entry) != 8:
+                    continue
+                ret.append({"batchid":int(entry[0]),
+                            "user":entry[1],
+                            "exectime":entry[2],
+                            "timelimit":entry[3],
+                            "partition":entry[4],
+                            "node_count":int(entry[5]),
+                            "jobname":entry[6],
+                            "state":entry[7]
+                            })
+            if get_infos is False:
+                return [ j["batchid"] for j in ret ]
+            else:
+                return ret
         except subprocess.CalledProcessError as err:
             raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
+
+    def list_user_jobs(self, user):
+        all_jobs = self.list_all_jobs(get_infos=True)
+        return [ j for j in all_jobs if j["user"] == user ]
+
+
+    def list_alive_jobs(self):
+        """Get Jobs currently running
+
+        This will return a list of the currently
+        running batch IDs
+
+        """
+        all_jobs = self.list_all_jobs(get_infos=True)
+
+        ret=[]
+        # Filter out live Clusters by comparing to ETCD
+        for j in all_jobs:
+            bid = j["batchid"]
+            usr = j["user"]
+            def_found = self.read_key("cluster/user", "definition", user=usr, batchid=bid)
+            if def_found:
+                j["definition"] = def_found
+                ret.append(j)
+        return ret
+
 
     def _build_rank_map(self, tasks_per_node=None):
         self._only_in_a_job()
@@ -1547,6 +1839,8 @@ class SlurmManager(EtcdManager):
 
         self._rank_map = yaml.safe_load(data)
 
+    def vm_count(self):
+        return len(self._rank_map)
 
     def run(self, cluster, run_opt, cmd):
         """Launch the VM tasks"""
@@ -1561,6 +1855,7 @@ class SlurmManager(EtcdManager):
         try:
             if self._etcd_auth_type == 'password':
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
+            #Make sure user owned keys and cert are generated
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
             ret = subprocess.call(['salloc'] + alloc_opt + cmd)
         except KeyboardInterrupt:

@@ -85,7 +85,7 @@ setup(name= 'pcocc', version= '0.4.0', description= 'Spawn VMs on a HPC Cluster'
         pcocc=pcocc.scripts.cmd:cli
       ''',
       install_requires=['PyYAML', 'python-etcd >= 0.4.3', 'psutil',
-                        'jsonschema', 'urllib3', 'dnspython', 'ClusterShell'],
+                        'jsonschema', 'urllib3', 'dnspython', 'ClusterShell', 'grpcio'],
       cmdclass={'bdist_rpm': pcocc_bdist_rpm,
                 'install': pcocc_install}
 )

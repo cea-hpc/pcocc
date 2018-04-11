@@ -988,6 +988,8 @@ def pcocc_pkeyd():
 # We want to catch some signals and exit ourselves
 # so that all 'atexit' cleanup callbacks are executed
 def clean_exit(sig, frame):
+    if Config().hyp.host_agent:
+        Config().hyp.host_agent.signal()
     stop_threads.set()
     sys.exit(0)
 

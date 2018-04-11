@@ -39,6 +39,8 @@ import datetime
 import random
 import binascii
 import uuid
+import Queue
+import pcocc_pb2
 
 from ClusterShell.NodeSet  import RangeSet
 from .scripts import click
@@ -94,6 +96,372 @@ class AgentError(PcoccError):
     def __init__(self, error):
         super(AgentError, self).__init__('Guest agent failure: '
                                               + error)
+class hostAgentContext(object):
+    """
+    This class hosts the pcoccHostAgent context
+    it tracks running processes and their
+    respective outputs.
+    It is also used to save callbacks
+    used when processing asynchrous agent
+    responses.
+    """
+    def __init__(self, vm_rank=-1):
+        self.vm_rank = vm_rank
+        self.cb = {}
+        self.execctx = {}
+
+    #
+    # Callback management
+    #
+
+    def set_ret_cb(self, tag_id, ret_cb):
+        """
+        Set a return callback for 
+        a given command
+        """
+        self.cb[str(tag_id)] = ret_cb
+
+    def get_ret_cb(self, tag_id):
+        """
+        Get the return callback from
+        a command (by TAG)
+        """
+        ret = None
+        try:
+            ret = self.cb[str(tag_id)]
+            del self.cb[str(tag_id)]
+        except:
+            return None
+        return ret
+
+    #
+    # Execution context Management
+    #
+
+    def execctx_get(self, eid):
+        """
+        Get the execution context
+        for a given EID
+        """
+        if str(eid) in self.execctx:
+            return self.execctx[str(eid)]
+        else:
+            return None
+
+    def execctx_new(self, eid):
+        """
+        Create a new execution context
+        """
+        ret =  self.execctx_get(eid)
+
+        if ret:
+            raise AgentError("ID is already present")
+        else:
+            self.execctx[str(eid)] = {"outputs": [], "done": 0, "detach" : 0 }
+            return self.execctx[str(eid)]
+
+    def execctx_get_or_create(self, eid):
+        """
+        Retrieve or create a new execution context
+        """
+        ret = self.execctx_get(eid)
+        if ret:
+            return ret
+        else:
+            return self.execctx_new(eid)
+
+
+    def execctx_command(self, event):
+        """
+        Handle async commands related to an
+        execution context
+        """
+        d = event["data"]
+        if "id" in d:
+            eid = d["id"]
+        else:
+            raise AgentError("No execctx id in command")
+        ectx = self.execctx_get_or_create(eid)
+        if "kind" in d:
+            k = d["kind"]
+            if k == "stdout":
+                ectx["outputs"].append({"data":d["data"], "stderr": 0})
+            elif k == "stderr":
+                ectx["outputs"].append({"data":d["data"], "stderr": 1})
+            elif k == "end_exec":
+                ectx["done"] = 1
+            elif k == "start_exec":
+                ectx["done"] = 0
+            elif k == "detach_exec":
+                ectx["detach"] = 1
+            elif k == "attach_exec":
+                ectx["detach"] = 0
+
+class pcoccHostAgent(object):
+    """
+    This class is in charge of managing and sending
+    commands to the pcoccagent located inside VMs
+
+    It acts both as a client and server for theses
+    requests. It is also providing some state management
+    through the hostAgentContext class
+    """
+    def __init__(self, vm_rank=-1):
+        #The rank of the VM this agent works for
+        self.rank = vm_rank
+        #A lock to protect the serial port
+        self.wlock = threading.Lock()
+        #A tag to be incremented for each message
+        self.current_tag = 1
+        #This pipe is used to notify the exit
+        self.sp_r, self.sp_w = os.pipe()
+        #If the agent exited
+        self.exited = 0
+        #This is the buffer where data are stored
+        #between two reads
+        self.databuff = ""
+        #This class holds the execution CTX
+        self.ctx = hostAgentContext(vm_rank)
+        #This is the serial port FD
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        #Keep a reference to the parent batch
+        batch = Config().batch
+        #This is the path to the agent serial port
+        agent_file = batch.get_vm_state_path(vm_rank,
+                                             "serial_pcocc_agent_socket")
+        try:
+            self.sock.connect(agent_file)
+        except Exception as e:
+            raise PcoccError("Could not connect to pcocc_agent socket:" + str(e))
+        #Now start the readloop
+        threading.Thread(target=self.client_thread).start()
+        #Make sure the agent is unfrozen
+        self.first_thaw = True
+        thawcmd = pcocc_pb2.Command(source =-1,
+                                    destination=self.rank,
+                                    cmd="thaw",
+                                    data= "{}")
+        self.send_command(thawcmd)
+
+    def send_eof(self):
+        """
+        This function is used to send EOF to programs
+        running inside the VM
+        """
+        cmd = pcocc_pb2.Command(source =-1,
+                                destination=self.rank,
+                                cmd="exec_stdin_eof",
+                                data= "{}")
+        return self.send_command(cmd)
+
+
+    def send_input(self, inpu):
+        """
+        This function sends input to programs
+        running insed the VMs
+        """
+        #logging.info("EID " + str(inpu.eid) + " STDIO " + inpu.stdin)
+        data = {}
+        data["data"] = inpu.stdin
+
+        cmd = pcocc_pb2.Command(source =-1,
+                                destination=self.rank,
+                                cmd="exec_stdin",
+                                data= json.dumps(data))
+
+        return self.send_command(cmd)
+
+
+    def get_output(self, is_active):
+        """
+        This function returns the output from
+        the VMs when a client is attached
+        """
+        while True:
+            if not is_active():
+                break
+            #Are there processes running or output remaining ?
+            running=0
+            for eid in self.ctx.execctx:
+                entry = self.ctx.execctx["" + eid ]
+                if( ( (entry["done"]==0) and (entry["detach"]==0) )
+                or (len(entry["outputs"]))):
+                    running=1
+                    break
+            #No more processes running
+            if running == 0:
+                logging.info("None running")
+                return
+
+            for eid in self.ctx.execctx:
+                entry = self.ctx.execctx["" + eid ]
+                lout = entry["outputs"][:]
+                entry["outputs"] = []
+                for i in range(0, len(lout)):
+                    ent = lout[i]
+                    if ent["stderr"] == 1:
+                        yield pcocc_pb2.stdio(vmid = self.rank, stdin="", stderr=ent["data"])
+                    else:
+                        yield pcocc_pb2.stdio(vmid = self.rank, stdin=ent["data"], stderr="")
+
+    def send_command(self, command):
+        """
+        This is the main entry point
+        to send a command to the agent
+        """
+        return self.send_command_rpc(command)
+
+    def send_command_rpc(self, scommand):
+        """
+        This implements commands to the pcocc agent
+        """
+        tag = self.current_tag
+        self.current_tag = self.current_tag + 1
+        data = ("{\"cmd\":\"" + scommand.cmd + "\","
+                " \"tag\": " + str(tag) + ","
+                " \"data\": " + scommand.data + " }")
+        logging.debug("--->"  + data)
+
+        if scommand.cmd != "thaw":
+            retq = Queue.Queue()
+
+            def event_processor(ret_cmd, ret_data):
+                retq.put({"cmd":ret_cmd, "data": ret_data})
+
+            self.ctx.set_ret_cb(tag, event_processor)
+
+        self.wlock.acquire()
+        self.sock.sendall(data + "\n")
+        self.wlock.release()
+
+        if scommand.cmd == "thaw":
+            #As thaw is the first command we allow
+            #to bypass the response
+            return "sucess", {}
+
+        try:
+            response = retq.get(timeout=1300)
+            return response["cmd"], response["data"]
+        except:
+            return "error", {"error":("Timeout when connecting"
+                                      "to pcoccagent is it installed in your vm ?")}
+
+    def agent_started(self):
+        """
+        This signals that the agent has started
+        the complement of this function is in Cluster.check_agent
+        """
+        logging.info("Agent started in vm %d" % self.rank)
+        Config().batch.write_key('cluster/user',
+                                 "hostagent/vms/{0}-agent".format(self.rank),
+                                 "started")
+
+    def signal(self):
+        """
+        Helper function to detect VM quit
+        """
+        self.exited = 1
+        os.write(self.sp_w, "SIG")
+
+    def quit(self):
+        """
+        Function called when the host agent is quitting
+        """
+        logging.info("Disconnecting pccoc host agent")
+        self.sock.shutdown(socket.SHUT_RDWR)
+        self.sock.close()
+        self.signal()
+
+    def read_a_command(self):
+        """
+        This is the read loop waiting for guest
+        agent data and routing them to callbacks
+        """
+        if '\n' in self.databuff:
+            sret = self.databuff.split("\n")
+            self.databuff = "\n".join(sret[1:])
+            ret = sret[0]
+            return ret
+        else:
+            rdr, _, rdx = select.select([self.sp_r, self.sock], [], [self.sock])
+            if self.exited:
+                #Time to quit
+                return None
+            elif rdr:
+                tdata = self.sock.recv(50)
+                #logging.info("IN: " + tdata)
+                if not tdata:
+                    return None
+                else:
+                    self.databuff = self.databuff + tdata
+                    ret2 = self.read_a_command()
+                    return ret2
+            elif rdx:
+                return None
+
+    def process_incoming_command(self, cmd):
+        """
+        This function will be called if the agent
+        starts sending requests to the host agent
+        ie CMD instead of SUCCESS/ERROR/ASYNC
+        """
+        return "error", {"error":"Not implemented yet"}
+
+    def handle_incoming_command(self, command_data):
+        """
+        This function is called to route messages
+        from the guest agent
+        """
+        logging.debug("PCOCCAGENT: " + command_data)
+        try:
+            cmd = json.loads(command_data)
+        except Exception as e:
+            logging.error("Cannot parse JSON for incomm " + str(e))
+            self.wlock.acquire()
+            self.sock.sendall("{\"cmd\":\"error\",\"data\":{\"error\":\""+ str(e)  + "\"}}\n")
+            self.wlock.release()
+            return
+        if "cmd" in cmd:
+            action = cmd["cmd"]
+            if (action == "error") or (action == "success"):
+                if "tag" in cmd:
+                    tag = cmd["tag"]
+                    #logging.error("RTA:" + str(tag))
+                    callback = self.ctx.get_ret_cb(tag)
+                    if callback:
+                        (callback)(action, cmd["data"])
+                        return
+            elif (action == "async"):
+                d = cmd["data"]
+                if "type" in d:
+                    typ = d["type"]
+                    if(typ == "execstream"):
+                        self.ctx.execctx_command(cmd)
+                    if(typ == "agentstart"):
+                        self.agent_started()
+            else:
+                cmd, data = self.process_incoming_command(cmd)
+                self.wlock.acquire()
+                self.sock.sendall("{\"cmd\":\"" + cmd + "\",\"data\":" + json.dumps(data) + "}\n")
+                self.wlock.release()
+
+    def client_thread(self):
+        """
+        This function is the function run by the
+        thread processing agend outputs
+        """
+        #logging.info("Client Host Agent start @ " + str(self.rank))
+        while True:
+            sdata = self.read_a_command()
+            #logging.info("A@ " + str(self.rank) + sdata)
+            if sdata == None:
+                logging.info("Client Host Agent  Disconnected @ "+ str(self.rank))
+                break
+            #sdata = sdata.replace("\o32", "\\n")
+            if len(sdata.replace("\n","")) == 0:
+                continue
+            self.handle_incoming_command(sdata)
+
 
 QMP_READ_SIZE=32768
 
@@ -288,6 +656,37 @@ class RemoteMonitor(object):
 class Qemu(object):
     def __init__(self):
         self.qemu_bin = 'qemu-system-x86_64'
+        self.host_agent=None
+        self.state_ready = 0
+
+    def check_rdy_agent(self):
+        while self.host_agent == None:
+            time.sleep(1)
+        if self.state_ready:
+            return
+        self.wait_vm_start( self.host_agent.rank )
+        self.state_ready = 1
+
+    def set_host_agent(self, vm_rank):
+        self.host_agent = pcoccHostAgent(vm_rank)
+
+    def send_command_host_agent( self, command ):
+        self.check_rdy_agent()
+        return self.host_agent.send_command( command )
+
+    def send_eof_host_agent( self  ):
+        self.check_rdy_agent()
+        return self.host_agent.send_eof()
+
+    def send_input_host_agent( self, inpu ):
+        self.check_rdy_agent()
+        return self.host_agent.send_input( inpu )
+
+
+    def get_output_host_agent( self, is_active ):
+        self.check_rdy_agent()
+        for e in  self.host_agent.get_output( is_active ):
+            yield e
 
     def _do_lock_image(self, drive, key):
         batch = Config().batch
@@ -544,8 +943,8 @@ username={3}@pcocc
             f.close()
 
         cmdline += ['-rtc', 'base=utc']
-        cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,'
-                    'vram_size=67108864,vgamem_mb=16']
+        #cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,'
+        #            'vram_size=67108864,vgamem_mb=16']
 
         self._set_vm_state('temporary-disk',
                            'creating disk file',
@@ -914,8 +1313,8 @@ username={3}@pcocc
             mon.close_monitor()
 
         # Signal VM started
-        self._set_vm_state('complete',
-                           'started',
+        self._set_vm_state('running',
+                           'The vm has started',
                            None, vm.rank)
 
         # If we need to properly shutdown the guest, catch SIGTERMs
@@ -943,6 +1342,10 @@ username={3}@pcocc
         if systemd_notify('VM is booting...', ready=True):
             watchdog = threading.Thread(None, self.watchdog, args=[vm])
             watchdog.start()
+
+
+        self.set_host_agent(vm.rank)
+
 
         while qemu_console_sock:
             # Only accept one client at a time
@@ -1159,6 +1562,8 @@ username={3}@pcocc
 
 
     def quit(self, vm):
+        if self.host_agent:
+            self.host_agent.quit()
         s_mon = RemoteMonitor(vm)
         s_mon.quit()
         s_mon.close_monitor()
@@ -1568,6 +1973,7 @@ username={3}@pcocc
                                        self._vm_state_key(vm_rank),
                                        yaml.dump({'state': state,
                                                   'desc': desc,
+                                                  'hostname' : socket.gethostname(),
                                                   'value': value}))
 
     def _unpack_vm_state(self, value):
@@ -1581,18 +1987,21 @@ username={3}@pcocc
     def _vm_state_key(self, vm_rank):
         return "state/vms/{0}".format(vm_rank)
 
-    def wait_vm_start(self, vm):
-        """Wait for vm to start"""
-
+    def get_vm_state(self, vm_rank):
         batch = Config().batch
         vm_state, index = batch.read_key_index(
             'cluster/user',
-            self._vm_state_key(vm.rank))
+            self._vm_state_key(vm_rank))
 
-        vm_state = self._unpack_vm_state(vm_state)
-        if vm_state['state'] == 'complete':
+        return self._unpack_vm_state(vm_state), index
+
+    def wait_vm_start(self, vm_rank):
+        """Wait for vm to start"""
+        vm_state, index = self.get_vm_state(vm_rank)
+        if vm_state['state'] == 'running':
             return
 
+        batch = Config().batch
         with click.progressbar(
             show_eta = False,
             show_percent = False,
@@ -1607,11 +2016,11 @@ username={3}@pcocc
             while True:
                 vm_state, index = batch.wait_key_index(
                     'cluster/user',
-                    self._vm_state_key(vm.rank),
+                    self._vm_state_key(vm_rank),
                     index)
 
                 vm_state = self._unpack_vm_state(vm_state.value)
                 bar.current_item = vm_state
                 bar.update(1)
-                if vm_state['state'] == 'complete':
+                if vm_state['state'] == 'running':
                     break

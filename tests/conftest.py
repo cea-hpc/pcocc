@@ -27,6 +27,7 @@ def kv_read_mock(*args, **kwargs):
 
     return val
 
+
 @pytest.fixture
 def config(mocker):
     config = pcocc.Config()
@@ -51,3 +52,18 @@ def datadir(tmpdir, request):
         dir_util.copy_tree(test_dir, bytes(tmpdir))
 
     return tmpdir
+
+
+#class Command(object):
+#    """Mock of a pcocc command object
+#    """
+#    def __init__(self, t, data):
+#        self.cmd = t
+#        self.data = data
+
+
+class myInputOutput(object):
+    def __init__(self, data, is_stderr=0, eof=0):
+        self.stdin = data
+        self.stderr = is_stderr
+        self.eof = eof

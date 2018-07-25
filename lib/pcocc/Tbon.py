@@ -1,274 +1,192 @@
+#  Copyright (C) 2014-2018 CEA/DAM/DIF
+#
+#  This file is part of PCOCC, a tool to easily create and deploy
+#  virtual machines using the resource manager of a compute cluster.
+#
+#  PCOCC is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  PCOCC is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
+
 import grpc
-import time
-from concurrent import futures
-from Queue import Queue
 import pcocc_pb2
 import pcocc_pb2_grpc
 import os
+import time
 import tempfile
 import socket
 import json
 import threading
 import logging
+import subprocess
+import yaml
+
+from OpenSSL import crypto
+from concurrent import futures
+from Queue import Queue
 from Config import Config
 from Error import PcoccError
-import subprocess
 
 #
-# Helper functions
+# Helper functions from pyOpenSSL
 #
 
-
-def secure_tempfile():
+def createKeyPair(type, bits):
     """
-    Helper function creating a temporary
-    file with rights solely for current user
+    Create a public/private key pair.
+    Arguments: type - Key type, must be one of TYPE_RSA and TYPE_DSA
+               bits - Number of bits to use in the key
+    Returns:   The public/private key pair in a PKey object
     """
-    temp = tempfile.NamedTemporaryFile(delete=False)
-    temp.close()
-    os.chmod(temp.name, int('600', 8))
-    return temp.name
+    pkey = crypto.PKey()
+    pkey.generate_key(type, bits)
+    return pkey
 
-
-def load_file_content(path):
+def createCertRequest(pkey, digest="md5", **name):
     """
-    Helper function to read a file content
+    Create a certificate request.
+    Arguments: pkey   - The key to associate with the request
+               digest - Digestion method to use for signing, default is md5
+               **name - The name of the subject of the request, possible
+                        arguments are:
+                          C     - Country name
+                          ST    - State or province name
+                          L     - Locality name
+                          O     - Organization name
+                          OU    - Organizational unit name
+                          CN    - Common name
+                          emailAddress - E-mail address
+    Returns:   The certificate request in an X509Req object
     """
-    try:
-        with open(path, "r") as f:
-            return f.read()
-    except IOError:
-        raise PcoccError("An error was encountered when"
-                         "reading %s" % path)
+    req = crypto.X509Req()
+    subj = req.get_subject()
 
+    for (key,value) in name.items():
+        setattr(subj, key, value)
 
-class UserRootCert(object):
+    req.set_pubkey(pkey)
+    req.sign(pkey, digest)
+    return req
+
+def createCertificate(req, (issuerCert, issuerKey), serial, (notBefore, notAfter), digest="sha1"):
     """
-    This class is used to create the ROOT
-    certificate used by a pcocc instance
+    Generate a certificate given a certificate request.
+    Arguments: req        - Certificate reqeust to use
+               issuerCert - The certificate of the issuer
+               issuerKey  - The private key of the issuer
+               serial     - Serial number for the certificate
+               notBefore  - Timestamp (relative to now) when the certificate
+                            starts being valid
+               notAfter   - Timestamp (relative to now) when the certificate
+                            stops being valid
+               digest     - Digest method to use for signing, default is sha1
+    Returns:   The signed certificate in an X509 object
     """
-    def __init__(
-            self,
-            rkey=None,
-            rcrt=None,
-            key_size=2048
-    ):
-
-        # Initial DAT
-        self.root_key_data = rkey
-        self.root_cert_data = rcrt
-        self.key_size = key_size
-
-    def gen_user_root_cert(self):
-        root_key = secure_tempfile()
-        root_crt = secure_tempfile()
-        host = socket.gethostname()
-        try:
-            with open(os.devnull, 'w') as devnull:
-                # Generate Key
-                command = ["openssl", "genrsa", "-out",
-                           root_key, str(self.key_size)]
-                subprocess.call(command,
-                                stdout=devnull,
-                                stderr=devnull)
-                # Generate Root Cert
-                command = ["openssl", "req", "-new", "-x509",
-                           "-days", "1826", "-key", root_key,
-                           "-out", root_crt,
-                           "-subj",
-                           "/C=FR/ST=Paris/L=Paris/O=Etcd/CN=" + host]
-                subprocess.call(command,
-                                stdout=devnull,
-                                stderr=devnull)
-        except OSError:
-            raise PcoccError("An error was encountered when"
-                             "generating root certificate")
-        logging.debug("Generated root key in %s" % (root_key))
-        logging.debug("Generated root cert in %s for %s" % (root_crt, host))
-        self.root_key_data = load_file_content(root_key)
-        if self.root_key_data == "":
-            raise PcoccError("Generated SSL Key appeared empty please check parameters")
-        self.root_cert_data = load_file_content(root_crt)
-        if self.root_cert_data == "":
-            raise PcoccError("Generated SSL certificate appeared empty"\
-                             "please check parameters (you may increase key size)")
-        os.unlink(root_key)
-        os.unlink(root_crt)
-
-    @property
-    def key(self):
-        if self.root_key_data is None:
-            self.gen_user_root_cert()
-        return self.root_key_data.encode("ascii")
-
-    @property
-    def crt(self):
-        if self.root_cert_data is None:
-            self.gen_user_root_cert()
-        return self.root_cert_data.encode("ascii")
-
-
-class ClientCert(object):
-    """
-    This class is used to store a client
-    keychain to be able to connect to gRPC
-    """
-    def __init__(
-            self,
-            ckey=None,
-            ccert=None,
-            key_size=2048
-    ):
-        self.ckey = ckey
-        self.ccert = ccert
-        self.size = key_size
-
-    def gen_client_cert(self, rkey, rcert):
-        dat = Cert.gen_user_key_cert(rkey, rcert, key_size=self.size)
-        self.ckey = dat[0].encode("ascii")
-        self.ccert = dat[1].encode("ascii")
-
-    @property
-    def key(self):
-        if self.ckey is None:
-            raise PcoccError("Client cert was not generated")
-        return self.ckey.encode("ascii")
-
-    @property
-    def crt(self):
-        if self.ccert is None:
-            raise PcoccError("Client cert was not generated")
-        return self.ccert.encode("ascii")
+    cert = crypto.X509()
+    cert.set_serial_number(serial)
+    cert.gmtime_adj_notBefore(notBefore)
+    cert.gmtime_adj_notAfter(notAfter)
+    cert.set_issuer(issuerCert.get_subject())
+    cert.set_subject(req.get_subject())
+    cert.set_pubkey(req.get_pubkey())
+    cert.sign(issuerKey, digest)
+    return cert
 
 
 class Cert(object):
-    """
-    This class is responsible for generating
-    all the certificates needed by gRPC
-    it is also providing storage paths
-    """
-    @staticmethod
-    def root_key_path(rkey=None):
-        if Config().batch is None:
-            if rkey is None:
-                raise PcoccError("Could not resolve root key")
+    def __init__(
+            self,
+            key_data,
+            cert_data,
+            ca_cert_data = None
+    ):
+        self._key_data = key_data
+        self._cert_data = cert_data
+        self._ca_cert_data = ca_cert_data
 
-        key_data = None
-        if rkey is None:
-            key_data = Config().batch.root_cert.root_key_data
+    def dump_yaml(self):
+        cert = {"key_data": self._key_data,
+                "cert_data": self._cert_data,
+                "ca_cert_data": self._ca_cert_data}
+
+        return yaml.dump(cert)
+
+    @property
+    def key(self):
+        return self._key_data
+
+    @property
+    def cert(self):
+        return self._cert_data
+
+    @property
+    def ca_cert(self):
+        if self._ca_cert_data:
+            return self._ca_cert_data
         else:
-            key_data = rkey
+            return self._cert_data
 
-        rkp = secure_tempfile()
-        f = open(rkp, "w")
-        f.write(key_data)
-        f.close()
-        return rkp
+    @property
+    def cert_chain(self):
+        return self.key, self.cert, self.ca_cert
 
-    @staticmethod
-    def root_cert_path(rcert=None):
-        if Config().batch is None:
-            if rcert is None:
-                raise PcoccError("Could not resolve root cert")
-
-        crt_data = None
-        if rcert is None:
-            crt_data = Config().batch.root_cert.root_cert_data
-        else:
-            crt_data = rcert
-
-        rcp = secure_tempfile()
-        f = open(rcp, "w")
-        f.write(crt_data)
-        f.close()
-        return rcp
-
-    @staticmethod
-    def gen_user_key_cert(rkey=None, rcert=None, key_size=2048):
-        host = socket.gethostname()
-        # Create TMP key
-        key_file = secure_tempfile()
-        # Create TMP cert
-        crt_file = secure_tempfile()
-        # Create TMP cert req
-        crt_req_file = secure_tempfile()
-        # Generate Paths
-        root_key = Cert.root_key_path(rkey)
-        root_crt = Cert.root_cert_path(rcert)
-
+    @classmethod
+    def load_yaml(cls, yaml_data):
+        cert = yaml.safe_load(yaml_data)
         try:
-            with open(os.devnull, 'w') as devnull:
-                # Generate Key
-                command = ["openssl", "genrsa", "-out",
-                           key_file, str(key_size)]
-                subprocess.call(command,
-                                stdout=devnull,
-                                stderr=devnull)
-                # Generate Root Cert
-                command = ["openssl", "req", "-new", "-x509",
-                           "-days", "1826", "-key", key_file,
-                           "-out", crt_file,
-                           "-subj",
-                           "/C=FR/ST=Paris/L=Paris/O=Pcocc/CN=" + host]
-                subprocess.call(command,
-                                stdout=devnull,
-                                stderr=devnull)
-                command = ["openssl", "x509", "-x509toreq", "-in",
-                           crt_file, "-signkey", key_file,
-                           "-out", crt_req_file]
-                subprocess.call(command,
-                        stdout=devnull,
-                        stderr=devnull)
-                command = ["openssl", "x509", "-req", "-days", "730", "-in",
-                           crt_req_file, "-CA", root_crt,
-                           "-CAkey", root_key, "-CAcreateserial", "-out", crt_file]
-                subprocess.call(command,
-                        stdout=devnull,
-                        stderr=devnull)
-        except OSError:
-            raise PcoccError("An error was encountered when"
-                             "generating root certificate")
+            key_data = cert["key_data"]
+            cert_data = cert["cert_data"]
+            ca_cert_data = cert["ca_cert_data"]
 
-        # We should be all set with our certs now
-        # time to load them to memory and delete them
-        key = load_file_content(key_file)
-        if key is None:
-            raise PcoccError("Error retrieving KEY file")
-        crt = load_file_content(crt_file)
-        if crt is None:
-            raise PcoccError("Error retrieving CRT file")
-        # Delete TMP files
-        os.unlink(key_file)
-        os.unlink(crt_file)
-        os.unlink(crt_req_file)
-        os.unlink(root_key)
-        os.unlink(root_crt)
-        # Info
-        logging.debug("Generated cert for %s" % host)
-        # Return Certs
-        return [key, crt, Cert.load_root_cert(rcert)]
+        except (KeyError, yaml.YAMLError) as err:
+            raise PcoccError("Unable to load certificate: " + str(err))
 
-    @staticmethod
-    def load_root_cert(rcert=None):
-        if Config().batch is None:
-            if rcert is None:
-                raise PcoccError("Could not load Root Cert")
-        if rcert is None:
-            return Config().batch.root_cert.root_cert_data.encode("ascii")
-        else:
-            return rcert.encode("ascii")
+        return cls(key_data, cert_data, ca_cert_data)
 
-    @staticmethod
-    def load_client_chain():
-        if Config().batch is None:
-            raise PcoccError("Could not load client keychain")
-        cc = Config().batch.client_cert
-        return [cc.key, cc.crt, Cert.load_root_cert()]
+
+class UserCA(Cert):
+    """This class represents the root certificate which signs client
+    certificates authenticating communications between hypervisor
+    agents of a given user
+
+    """
+    @classmethod
+    def new(cls, key_size=2048, days=9999):
+        logging.debug("Generating CA cert...")
+        cakey = createKeyPair(crypto.TYPE_RSA, key_size)
+        careq = createCertRequest(cakey, CN='PcoccUserCA')
+        cacert = createCertificate(careq, (careq, cakey), 0, (0, 60*60*24*days))
+
+        ca_key_data = crypto.dump_privatekey(crypto.FILETYPE_PEM, cakey)
+        ca_cert_data = crypto.dump_certificate(crypto.FILETYPE_PEM, cacert)
+        logging.debug("Done generating CA cert")
+        return cls(ca_key_data, ca_cert_data)
+
+    def gen_cert(self, cn, key_size=2048, days=9999):
+        logging.debug("Generating cert for " + cn)
+        cacert = crypto.load_certificate(crypto.FILETYPE_PEM, self.cert)
+        cakey = crypto.load_privatekey(crypto.FILETYPE_PEM, self.key)
+
+        pkey = createKeyPair(crypto.TYPE_RSA, key_size)
+        req = createCertRequest(pkey, CN=cn)
+        cert = createCertificate(req, (cacert, cakey), 1, (0, 60*60*24*days))
+
+        key_data = crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey)
+        cert_data = crypto.dump_certificate(crypto.FILETYPE_PEM, cert)
+
+        return Cert(key_data, cert_data, self.cert)
 
 #
 # Multi-Threaded Generator Plumbing
 #
-
 
 def mt_tee(source_iterator):
     """
@@ -546,12 +464,12 @@ class TreeNodeClient(object):
                 pinfo = self.endpoints[rightc]
                 self.rc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
         else:
-            keys = Cert.load_client_chain()
+            client_cert = Config().batch.ca_cert
             if self.enable_client_auth:
                 credential = grpc.ssl_channel_credentials(
-                    root_certificates=keys[2],
-                    private_key=keys[0],
-                    certificate_chain=keys[1]
+                    root_certificates=client_cert.ca_cert,
+                    private_key=client_cert.key,
+                    certificate_chain=client_cert.cert
                 )
             else:
                 credential = grpc.ssl_channel_credentials(
@@ -629,10 +547,10 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
         if enable_ssl is False:
             self.port = self.server.add_insecure_port("[::]:{0}".format(port))
         else:
-            crt = Cert.gen_user_key_cert()
+            server_cert = Config().batch.ca_cert.gen_cert(socket.gethostname())
             credential = grpc.ssl_server_credentials(
-                ((crt[0], crt[1]), ),
-                crt[2],
+                ((server_cert.key, server_cert.cert), ),
+                server_cert.ca_cert,
                 client_ssl_auth
             )
             self.port = self.server.add_secure_port(
@@ -707,7 +625,7 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
                                          cmd="error",
                                          data=json.dumps(
                                              "VM TBON start timemout"))
-        
+
         if request.destination == self.vmid:
             # Local Command
             resp = self.process_local(request)
@@ -780,16 +698,16 @@ class TreeClient(object):
                 raise PcoccError("Client Auth requires SSL support")
             self.channel = grpc.insecure_channel(self.host + ":" + self.port)
         else:
-            keys = Cert.load_client_chain()
+            client_cert = Config().batch.client_cert
             if enable_client_auth:
                 credential = grpc.ssl_channel_credentials(
-                    root_certificates=keys[2],
-                    private_key=keys[0],
-                    certificate_chain=keys[1]
+                    root_certificates=client_cert.ca_cert,
+                    private_key=client_cert.key,
+                    certificate_chain=client_cert.cert
                 )
             else:
                 credential = grpc.ssl_channel_credentials(
-                    root_certificates=keys[2]
+                    root_certificates=client_cert.ca_cert
                 )
             self.channel = grpc.secure_channel(
                 self.host

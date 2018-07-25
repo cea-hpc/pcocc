@@ -222,12 +222,9 @@ additionalProperties: false
                 ))
 
             # Cleanup keystore
-            try:
-                Config().batch.delete_dir(
-                    'cluster',
-                    self._get_net_key_path(''))
-            except:
-                pass
+            Config().batch.delete_dir(
+                'cluster',
+                self._get_net_key_path(''))
 
     def load_node_resources(self, cluster):
         net_res = None

@@ -41,16 +41,16 @@ import argparse
 import uuid
 import threading
 
-from Tbon import UserRootCert, ClientCert
 from ClusterShell.NodeSet import NodeSet, NodeSetException, RangeSet
+from abc import ABCMeta, abstractmethod
 
-
+from .Tbon import  UserCA, Cert
 from .Config import Config
 from .Backports import subprocess_check_output
 from .Error import PcoccError, InvalidConfigurationError
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import CHILD_EXIT, datetime_to_epoch, stop_threads
-from abc import ABCMeta, abstractmethod
+
 
 
 class BatchError(PcoccError):
@@ -107,10 +107,6 @@ properties:
   settings:
     type: object
     properties:
-      tbon-cert-size:
-        type: integer
-      tbon-expiration-days:
-        type: integer
       etcd-servers:
         type: array
       etcd-client-port:
@@ -315,6 +311,20 @@ class BatchManager(object):
     def _in_a_job(self):
         return self.batchid != 0
 
+    @property
+    def ca_cert(self):
+        """Returns a CA certificate for authenticating the user (CLI and hypervisor agents)
+
+        """
+        raise PcoccError("Not implemented")
+
+    @property
+    def client_cert(self):
+        """Returns a Certificate for authenticating the user (clientss)
+
+        """
+        raise PcoccError("Not implemented")
+
     load = staticmethod(load)
 
 def _retry_on_cred_expiry(func):
@@ -345,6 +355,7 @@ class EtcdManager(BatchManager):
         self._etcd_auth_type = settings['etcd-auth-type']
         if self._etcd_auth_type == 'password':
             self._etcd_password = None
+        self._ca_cert = None
 
     def _init_vm_dir(self):
         self._only_in_a_job()
@@ -675,8 +686,6 @@ class EtcdManager(BatchManager):
 
             delta = datetime.datetime.now() - self._last_cred_renew
 
-            logging.info("DELTA" + str(delta))
-
             if delta > datetime.timedelta(seconds=15):
                 logging.debug('Renewing etcd credentials')
                 self._last_cred_renew = datetime.datetime.now()
@@ -807,14 +816,20 @@ class EtcdManager(BatchManager):
     def populate_env(self):
         """ Populate environment variables with batch related info to propagate """
         os.putenv('PCOCC_JOB_ID', str(self.batchid))
-    
-    def read_cluster_definition(self, user=None, batchid=None):
-        user, batchid = self.infer_user_and_alloc_id(user, batchid)
-        definition = Config().batch.read_key('cluster/user', 'definition',
-                                               blocking=True)
-        return definition
 
-        
+    @property
+    def ca_cert(self):
+        """Returns a CA certificate for authenticating the user
+
+        """
+        if not self._ca_cert:
+            self._ca_cert = UserCA.load_yaml(Config().batch.read_key('cluster/user', 'ca_cert',
+                                                                     blocking=True))
+        return self._ca_cert
+
+    @property
+    def client_cert(self):
+        return self.ca_cert
 
 # Schema to validate the global pkey state in the key/value store
 local_job_allocation_schema = """
@@ -1162,7 +1177,7 @@ class LocalManager(EtcdManager):
                     batchid, job['host'])
 
         return batchids
-    
+
     def list_alive_jobs(self):
         return self.list_all_jobs()
 
@@ -1533,174 +1548,6 @@ class SlurmManager(EtcdManager):
         if self.proc_type == ProcessType.LAUNCHER:
             self._init_cluster_dir()
 
-        tbon_cert_size = 2048
-        tbon_cert_expiration = 30
-
-        if "tbon-cert-size" in settings:
-            tbon_cert_size = settings["tbon-cert-size"]
-        if "tbon-expiration-days" in settings:
-            tbon_cert_expiration = settings["tbon-expiration-days"]
-
-        #Now either restore or load the certs
-        self.setup_command_cert(tbon_cert_size, tbon_cert_expiration)
-
-
-    def setup_command_cert_generate(self, now_timestamp, tbon_cert_size, current_value):
-        cert_info = {}
-
-        # If there is a previous cert with the same TS
-        # we may not regenerate and directly take the same
-        # values for keys and cert (avoids breaking the alloc
-        # which has just raced with us)
-        if current_value:
-            try:
-                prev_cert = yaml.load(current_value)
-                # Are we in a race ?
-                if "gen_time" in prev_cert:
-                    if str(prev_cert["gen_time"]) == str(now_timestamp) :
-                        cert_info = prev_cert
-                        # Load this cert in batch
-                        self.root_cert = UserRootCert(
-                                        rcrt = cert_info["root_ca_crt"],
-                                        rkey =  cert_info["root_ca_key"]
-                                    )
-                        logging.debug("Done Acquiring Root Certificate for user (concurrent)")
-                        self.client_cert = ClientCert(
-                                            ckey=cert_info["client_key"],
-                                            ccert=cert_info["client_crt"]
-                                        )
-                        logging.debug("Done Acquiring Client Certificate for user (concurrent)")
-                        # And we are done!
-                        return cert_info, now_timestamp
-            except:
-                #Something went wrong just proceed to generation
-                pass
-
-        #Now Generate Root Certificate
-        root_cert = UserRootCert(key_size=tbon_cert_size)
-        root_cert.gen_user_root_cert()
-        #Save in Etcd
-        cert_info["root_ca_key"] = root_cert.root_key_data
-        cert_info["root_ca_crt"] = root_cert.root_cert_data
-        logging.info("Done Initializing Root Certificate for user")
-        #Now Generate Client Certificate
-        client_cert = ClientCert(key_size=tbon_cert_size)
-        client_cert.gen_client_cert(
-                        rkey=root_cert.root_key_data,
-                        rcert=root_cert.root_cert_data
-                        )
-        #Save in Etcd
-        cert_info["client_key"] = client_cert.key
-        cert_info["client_crt"] = client_cert.crt
-        logging.info("Done Initializing Client Certificate for user")
-        # Save Generation TS
-        cert_info["gen_time"] = now_timestamp
-        cert_info["gen_size"] = tbon_cert_size
-
-        return yaml.dump(cert_info), now_timestamp
-
-
-    def setup_command_cert(self, tbon_cert_size, tbon_cert_expiration, force=False):
-        cert_expired = force
-
-        # We divide the TS to account for
-        # possible clock skew between  nodes
-        # this is to make sure that two concurent
-        # allocation would make the same regen decision
-        now_timestamp = int(time.time()) // 60
-
-        try:
-            # Default all values to None
-            root_ca_key_data = None
-            root_ca_cert_data = None
-            client_key_data = None
-            client_cert_data = None
-            gen_time = None
-            gen_size = None
-            # Now try to retrieve current value
-            cert_data = self.read_key('global/user',
-                                              'hostagent/cert')
-            # Try to extract data from cert 
-            if cert_data:
-                cert = yaml.load(cert_data)
-                if "root_ca_key" in cert:
-                    root_ca_key_data = cert["root_ca_key"]
-                if "root_ca_crt" in cert:
-                    root_ca_cert_data = cert["root_ca_crt"]
-                if "client_key" in cert:
-                    client_key_data = cert["client_key"]
-                if "client_crt" in cert:
-                    client_cert_data = cert["client_crt"]
-                if "gen_time" in cert:
-                    gen_time = cert["gen_time"]
-                if "gen_size" in cert:
-                    gen_size = cert["gen_size"]
-        except:
-            logging.error("Could not check command certificate state in Etcd")
-            # Flag the cert as expired as we failed to read it
-            cert_expired = True
-        
-        # Check is the certificate has expired
-        if gen_time is not None:
-            expiry_seconds = tbon_cert_expiration * 3600 * 24
-            if expiry_seconds <= (now_timestamp - int(gen_time)):
-                cert_expired = True
-                logging.info("Command Certificates expired for user")
-        else:
-            # If we are here previous certificate had no TS
-            # Just regen in doubt
-            cert_expired = True
-        
-        # Check if certificate size has been changed
-        if gen_size is not None:
-            if tbon_cert_size != int(gen_size):
-                cert_expired = True
-                logging.info("Command Certificates size changed for user")
-        else:
-            # If we are here previous certificate had no SIZE
-            # Just regen in doubt
-            cert_expired = True
-
-
-        # If all OK and no regen Load in Batch
-        if( root_ca_key_data
-            and root_ca_cert_data
-            and client_key_data 
-            and client_cert_data
-            and not cert_expired):
-            self.root_cert = UserRootCert(
-                                rcrt = root_ca_cert_data,
-                                rkey = root_ca_key_data
-                            )
-            logging.debug("Done Acquiring Root Certificate for user")
-            self.client_cert = ClientCert(
-                                ckey=client_key_data,
-                                ccert=client_cert_data
-                            )
-            logging.debug("Done Acquiring Client Certificate for user")
-        else:
-            # We need to make sure that there are not
-            # two concurent pcocc allocations as regenerating
-            # the certs would break their command tree
-            # So if there is more than one allocation we give up
-            # on regenerating
-
-            allocs = self.list_user_jobs(self.batchuser)
-
-            if len(allocs) != 1:
-                logging.info("Gave up on regenerating keys as there are multiple pcocc allocations")
-                return
-
-            self.atom_update_key(
-                'global/user',
-                'hostagent/cert',
-                self.setup_command_cert_generate,
-                now_timestamp,
-                tbon_cert_size)
-
-
-
-
     def find_job_by_name(self, user, batchname, host=None):
         """Return a jobid matching a user and batchname
 
@@ -1742,10 +1589,10 @@ class SlurmManager(EtcdManager):
 
         Keyword Arguments:
             get_user {bool} -- Whether to show users (default: {False})
-        
+
         Raises:
             BatchError -- Failled to retrieve joblist from SLURM
-        
+
         Returns:
             array -- List of jobs (with or without user info)
         """

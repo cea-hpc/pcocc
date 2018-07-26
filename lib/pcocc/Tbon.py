@@ -283,6 +283,7 @@ class TreeNodeClient(object):
             raise PcoccError("Client auth is only avalaible with SSL")
 
         self._endpoints = {}
+        self._endpoints_lock = threading.Lock()
         self._vmid = vmid
         self._enable_ssl = enable_ssl
         self._enable_client_auth = enable_client_auth
@@ -302,7 +303,6 @@ class TreeNodeClient(object):
         self._rid = -1
 
         self._routes = {}
-        self._route_lock = threading.Lock()
 
         self._gen_children_list()
         self._connect()
@@ -401,13 +401,14 @@ class TreeNodeClient(object):
             self._recurse_children_list(right, bound, route)
 
     def _get_endpoint(self, target):
+        self._endpoints_lock.acquire()
         if not target in self._endpoints:
             endp = Config().batch.read_key(
                 "cluster/user",
                 "hostagent/vms/{0}".format(target),
                 blocking=True)
             self._endpoints[target]= endp.split(":")
-
+        self._endpoints_lock.release()
         return self._endpoints[target]
 
     def _connect(self):

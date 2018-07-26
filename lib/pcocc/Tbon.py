@@ -134,10 +134,6 @@ class Cert(object):
         else:
             return self._cert_data
 
-    @property
-    def cert_chain(self):
-        return self.key, self.cert, self.ca_cert
-
     @classmethod
     def load_yaml(cls, yaml_data):
         cert = yaml.safe_load(yaml_data)

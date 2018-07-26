@@ -266,13 +266,6 @@ def mt_chain(*iterators):
             yield data
         except:
             pass
-#
-# TBON TreeNode Definition
-#
-
-
-class DiscoverMode(object):
-    NotSet, Etcd = range(2)
 
 
 class TreeNodeClient(object):
@@ -283,76 +276,86 @@ class TreeNodeClient(object):
     """
     def __init__(self,
                  vmid=0,
-                 discover=DiscoverMode.NotSet,
                  enable_ssl=True,
                  enable_client_auth=False):
-        # List of VM endpoints
-        self.endpoints = []
-        self.vmid = vmid
-        self.enable_ssl = enable_ssl
-        self.enable_client_auth = enable_client_auth
 
-        # These are the Client channels
-        # to be used in the tree
-        self.pc = None
-        self.lc = None
-        self.rc = None
+        if enable_client_auth and not enable_ssl:
+            raise PcoccError("Client auth is only avalaible with SSL")
 
-        self.ps = None
-        self.ls = None
-        self.rs = None
+        self._endpoints = {}
+        self._vmid = vmid
+        self._enable_ssl = enable_ssl
+        self._enable_client_auth = enable_client_auth
 
-        self.pid = -1
-        self.lid = -1
-        self.rid = -1
+        self._tree_size = Config().batch.vm_count()
 
-        if not self.enable_ssl:
-            if self.enable_client_auth:
-                raise PcoccError("Client auth is only avalaible with SSL")
+        self._pc = None
+        self._lc = None
+        self._rc = None
 
+        self._ps = None
+        self._ls = None
+        self._rs = None
 
-        self.child_list = []
-        self.child_routes = []
-        self.route_lock = threading.Lock()
-        # Start the Server
-        self.discover_mode = discover
-        self.discover()
-        self.gen_child_list()
-        self.connect()
+        self._pid = -1
+        self._lid = -1
+        self._rid = -1
+
+        self._routes = {}
+        self._route_lock = threading.Lock()
+
+        self._gen_children_list()
+        self._connect()
 
     def __del__(self):
-        del self.ps
-        del self.ls
-        del self.rs
-        del self.pc
-        del self.rc
-        del self.lc
+        del self._ps
+        del self._ls
+        del self._rs
+        del self._pc
+        del self._rc
+        del self._lc
 
     class Target(object):
         NotSet, Parent, Left, Right = range(4)
 
-    #
-    # This is the Command Interface
-    #
-    def send_cmd(self, target, command):
+    def route(self, command):
+        try:
+            route = self._routes[command.destination]
+        except KeyError:
+            route = self.Target.Parent
+
+        ret = self._send_cmd(route, command)
+
+        return ret
+
+    def exec_stream(self, input_iterator, req_array=None):
+        try:
+            children_it = self._send_exec(input_iterator, req_array)
+            for e in children_it:
+                yield e
+        except:
+            # We failed
+            return
+
+    def _send_cmd(self, target, command):
         stub = None
         if target == self.Target.Left:
-            stub = self.ls
+            stub = self._ls
         elif target == self.Target.Right:
-            stub = self.rs
+            stub = self._rs
         elif target == self.Target.Parent:
-            stub = self.ps
-        if stub is None:
-            raise SystemExit("Error could not Route Command")
+            stub = self._ps
+
         return stub.route_command(command)
 
-    def send_exec(self, request_stream, req_array=None):
-        if (self.ls is None) and (self.rs is None):
+    def _send_exec(self, request_stream, req_array=None):
+        if (self._ls is None) and (self._rs is None):
             return
-        if self.ls and self.rs:
+
+        if self._ls and self._rs:
             left_dup, right_dup = mt_tee(request_stream)
-            lreq = self.ls.exec_stream(left_dup)
-            rreq = self.rs.exec_stream(right_dup)
+            lreq = self._ls.exec_stream(left_dup)
+            rreq = self._rs.exec_stream(right_dup)
 
             if req_array:
                 req_array.push(lreq)
@@ -364,9 +367,9 @@ class TreeNodeClient(object):
             lreq.cancel()
             rreq.cancel()
         else:
-            target = self.rs
-            if self.ls:
-                target = self.ls
+            target = self._rs
+            if self._ls:
+                target = self._ls
             req = target.exec_stream(request_stream)
             if req_array:
                 req_array.push(req)
@@ -374,40 +377,13 @@ class TreeNodeClient(object):
                 yield e
             req.cancel()
 
-    #
-    # This is the Discover Interface Definition
-    #
 
-    def split_vm_list(self, vm_list):
-        endpoints = []
-        for i in range(len(vm_list)):
-            ent = vm_list[i].replace("\n", "").split(":")
-            if len(ent) != 3:
-                continue
-            endpoints.insert(int(ent[0]), ent)
-        return endpoints
+    def _gen_children_list(self):
+        me = self._vmid
+        self._recurse_children_list(me, self._tree_size,
+                                    self.Target.NotSet)
 
-    def discover_etcd(self):
-        count = Config().batch.vm_count()
-        vm_list = []
-        for vm in range(0, count):
-            ent = Config().batch.read_key(
-                "cluster/user",
-                "hostagent/vms/{0}".format(vm),
-                blocking=True
-            )
-            vm_list.append(ent)
-        return self.split_vm_list(vm_list)
-
-    def discover(self):
-        ret = []
-        if self.discover_mode == DiscoverMode.Etcd:
-            ret = self.discover_etcd()
-        if ret == []:
-            raise PcoccError("ERROR : Failed to discover tree")
-        self.endpoints = ret
-
-    def __gen_child_list(self, current, bound, choice):
+    def _recurse_children_list(self, current, bound, choice):
         # Recursive scan on childs
         left = (current + 1) * 2 - 1
         right = (current + 1) * 2
@@ -415,53 +391,56 @@ class TreeNodeClient(object):
         if left < bound:
             if choice == self.Target.NotSet:
                 route = self.Target.Left
-            self.child_list.append(left)
-            self.child_routes.append(route)
-            self.__gen_child_list(left, bound, route)
+
+            self._routes[left] = route
+            self._recurse_children_list(left, bound, route)
         if right < bound:
             if choice == self.Target.NotSet:
                 route = self.Target.Right
-            self.child_list.append(right)
-            self.child_routes.append(route)
-            self.__gen_child_list(right, bound, route)
+            self._routes[right] = route
+            self._recurse_children_list(right, bound, route)
 
-    def gen_child_list(self):
-        me = self.vmid
-        count = len(self.endpoints)
-        self.__gen_child_list(me, count, self.Target.NotSet)
+    def _get_endpoint(self, target):
+        if not target in self._endpoints:
+            endp = Config().batch.read_key(
+                "cluster/user",
+                "hostagent/vms/{0}".format(target),
+                blocking=True)
+            self._endpoints[target]= endp.split(":")
 
-    def connect(self):
-        count = len(self.endpoints)
-        if count == 0:
-            return
-        me = self.vmid
-        parent = (me + 1)//2 - 1
-        leftc = (me + 1)*2 - 1
+        return self._endpoints[target]
+
+    def _connect(self):
+        me = self._vmid
+        parent = (me + 1) // 2 - 1
+        leftc = (me + 1) * 2 - 1
         rightc = (me + 1) * 2
         if me == 0:
             parent = -1
-        if count <= leftc:
+
+        if self._tree_size <= leftc:
             leftc = -1
-        if count <= rightc:
+
+        if self._tree_size <= rightc:
             rightc = -1
 
-        self.pid = parent
-        self.lid = leftc
-        self.rid = rightc
+        self._pid = parent
+        self._lid = leftc
+        self._rid = rightc
 
-        if self.enable_ssl is False:
+        if self._enable_ssl is False:
             if 0 <= parent:
-                pinfo = self.endpoints[parent]
-                self.pc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
+                pinfo = self._get_endpoint(parent)
+                self._pc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
             if 0 <= leftc:
-                pinfo = self.endpoints[leftc]
-                self.lc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
+                pinfo = self._get_endpoint(leftc)
+                self._lc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
             if 0 <= rightc:
-                pinfo = self.endpoints[rightc]
-                self.rc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
+                pinfo = self._get_endpoint(rightc)
+                self._rc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
         else:
             client_cert = Config().batch.ca_cert
-            if self.enable_client_auth:
+            if self._enable_client_auth:
                 credential = grpc.ssl_channel_credentials(
                     root_certificates=client_cert.ca_cert,
                     private_key=client_cert.key,
@@ -471,47 +450,24 @@ class TreeNodeClient(object):
                 credential = grpc.ssl_channel_credentials(
                     root_certificates=keys[2])
             if 0 <= parent:
-                pinfo = self.endpoints[parent]
-                self.pc = grpc.secure_channel(pinfo[1]
+                pinfo = self._get_endpoint(parent)
+                self._pc = grpc.secure_channel(pinfo[1]
                                               + ":" + pinfo[2], credential)
             if 0 <= leftc:
-                pinfo = self.endpoints[leftc]
-                self.lc = grpc.secure_channel(pinfo[1]
+                pinfo = self._get_endpoint(leftc)
+                self._lc = grpc.secure_channel(pinfo[1]
                                               + ":" + pinfo[2], credential)
             if 0 <= rightc:
-                pinfo = self.endpoints[rightc]
-                self.rc = grpc.secure_channel(pinfo[1]
+                pinfo = self._get_endpoint(rightc)
+                self._rc = grpc.secure_channel(pinfo[1]
                                               + ":" + pinfo[2], credential)
-        # Start Stubs
+
         if 0 <= parent:
-            self.ps = pcocc_pb2_grpc.pcoccNodeStub(self.pc)
+            self._ps = pcocc_pb2_grpc.pcoccNodeStub(self._pc)
         if 0 <= leftc:
-            self.ls = pcocc_pb2_grpc.pcoccNodeStub(self.lc)
+            self._ls = pcocc_pb2_grpc.pcoccNodeStub(self._lc)
         if 0 <= rightc:
-            self.rs = pcocc_pb2_grpc.pcoccNodeStub(self.rc)
-
-    def route(self, command):
-        try:
-            idx = self.child_list.index(command.destination)
-            route = self.child_routes[idx]
-            if route == self.Target.Left:
-                ret = self.send_cmd(self.Target.Left, command)
-            elif route == self.Target.Right:
-                ret = self.send_cmd(self.Target.Right, command)
-            else:
-                logging.error("No such route type " + str(route))
-        except:
-            ret = self.send_cmd(self.Target.Parent, command)
-        return ret
-
-    def exec_stream(self, input_iterator, req_array=None):
-        try:
-            children_it = self.send_exec(input_iterator, req_array)
-            for e in children_it:
-                yield e
-        except:
-            # We failed
-            return
+            self._rs = pcocc_pb2_grpc.pcoccNodeStub(self._rc)
 
 
 class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
@@ -524,24 +480,25 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
                  vmid=0,
                  port="50051",
                  handler=None,
-                 discover=DiscoverMode.Etcd,
                  enable_ssl=True,
                  client_ssl_auth=True,
                  exec_input_handler=None,
                  exec_output_handler=None,
                  exec_input_eof_notifier=None):
-        self.relay = None
-        self.vmid = int(vmid)
-        self.port = port
-        self.handler = handler
-        self.exec_output_handler = exec_output_handler
-        self.exec_input_handler = exec_input_handler
-        self.exec_input_eof_notifier = exec_input_eof_notifier
-        self.discover = discover
-        self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=25))
-        pcocc_pb2_grpc.add_pcoccNodeServicer_to_server(self, self.server)
+
+        self._relay = None
+        self._vmid = int(vmid)
+        self._port = port
+        self._handler = handler
+        self._exec_output_handler = exec_output_handler
+        self._exec_input_handler = exec_input_handler
+        self._exec_input_eof_notifier = exec_input_eof_notifier
+        self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=25))
+
+        pcocc_pb2_grpc.add_pcoccNodeServicer_to_server(self, self._server)
+
         if enable_ssl is False:
-            self.port = self.server.add_insecure_port("[::]:{0}".format(port))
+            self._port = self._server.add_insecure_port("[::]:{0}".format(port))
         else:
             server_cert = Config().batch.ca_cert.gen_cert(socket.gethostname())
             credential = grpc.ssl_server_credentials(
@@ -549,59 +506,83 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
                 server_cert.ca_cert,
                 client_ssl_auth
             )
-            self.port = self.server.add_secure_port(
+            self._port = self._server.add_secure_port(
                 "[::]:{0}".format(port),
                 credential
             )
+
         logging.debug("CommandServer Now Listening on %s:%s",
                       socket.gethostname(),
-                      self.port)
-        self.server.start()
-        self.register()
+                      self._port)
+
+        self._server.start()
+        self._register()
         # Server is ON now start the relay
-        self.relay = TreeNodeClient(self.vmid,
-                                    self.discover,
+        self._relay = TreeNodeClient(self._vmid,
                                     enable_ssl,
                                     client_ssl_auth)
 
-    #
-    # This is the register Interface definition
-    # Where servers announce themselves
-    #
 
+    def command(self, dest, cmd, data):
+        json_dat = json.dumpsxo(data)
+        docommand = pcocc_pb2.Command(source=self._vmid,
+                                      destination=dest,
+                                      cmd=cmd,
+                                      data=json_dat)
+        return self._route_command(docommand)
 
-    def register_etcd(self):
-        logging.debug("Registering hostagent/vms/%s", self.vmid)
+    def exec_stream(self, request_iterator, context):
+        local_iter, forward_iter = mt_tee(request_iterator)
+
+        next_req_array = []
+
+        context.add_callback(context.cancel)
+
+        def send_output():
+            if self._exec_output_handler:
+                for output in self._exec_output_handler(context.is_active):
+                    yield output
+
+        def send_input():
+            for inpu in local_iter:
+                if inpu.eof is True:
+                    break
+                if self._exec_input_handler:
+                    self._exec_input_handler(inpu)
+            context.cancel()
+
+        thread = threading.Thread(target=send_input)
+        thread.start()
+
+        for e in mt_chain(
+                send_output(),
+                self._relay.exec_stream(
+                    forward_iter,
+                    next_req_array)):
+            yield e
+
+    def _register(self):
+        logging.debug("Registering hostagent/vms/%s", self._vmid)
         Config().batch.write_key('cluster/user',
-                                 "hostagent/vms/{0}".format(self.vmid),
+                                 "hostagent/vms/{0}".format(self._vmid),
                                  "{0}:{1}:{2}".format(
-                                     self.vmid,
+                                     self._vmid,
                                      socket.gethostname(),
-                                     self.port
-                                 )
-                                 )
+                                     self._port))
 
-    def register(self):
-        if self.discover == DiscoverMode.Etcd:
-            self.register_etcd()
 
-    #
-    # This is the command interface
-    #
-
-    def process_local(self, command):
+    def _process_local(self, command):
         # print("SRC:" + str(command.source))
         # print("DEST:" + str(command.destination))
         # logging.info("PL CMD:" + command.cmd)
         # print("DATA:" + command.data)
         # resp = "RET : " + command.data
-        if self.handler:
-            cmd, data = self.handler(command)
+        if self._handler:
+            cmd, data = self._handler(command)
         sdata = json.dumps(data)
         # logging.info("RESP" + sdata)
         return pcocc_pb2.Response(cmd=cmd, data=sdata)
 
-    # This is Called for all incoming commands
 
     def route_command(self, request, context=None):
         resp = None
@@ -611,7 +592,7 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
         # There is a race between the listening server
         # and the start of the relay our solution
         # is then to wait a little to do the __init__
-        while self.relay is None:
+        while self._relay is None:
             cnt = cnt + 1
             time.sleep(1)
             if cnt == 60:
@@ -622,50 +603,14 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
                                          data=json.dumps(
                                              "VM TBON start timemout"))
 
-        if request.destination == self.vmid:
+        if request.destination == self._vmid:
             # Local Command
-            resp = self.process_local(request)
+            resp = self._process_local(request)
         else:
-            resp = self.relay.route(request)
+            resp = self._relay.route(request)
+
         return resp
 
-    def command(self, dest, cmd, data):
-        json_dat = json.dumps(data)
-        docommand = pcocc_pb2.Command(source=self.vmid,
-                                      destination=dest,
-                                      cmd=cmd,
-                                      data=json_dat)
-        return self.route_command(docommand)
-
-    def exec_stream(self, request_iterator, context):
-        local_iter, forward_iter = mt_tee(request_iterator)
-
-        next_req_array = []
-
-        context.add_callback(context.cancel)
-
-        def send_output():
-            if self.exec_output_handler:
-                for output in self.exec_output_handler(context.is_active):
-                    yield output
-
-        def send_input():
-            for inpu in local_iter:
-                if inpu.eof is True:
-                    break
-                if self.exec_input_handler:
-                    self.exec_input_handler(inpu)
-            context.cancel()
-
-        thread = threading.Thread(target=send_input)
-        thread.start()
-
-        for e in mt_chain(
-                send_output(),
-                self.relay.exec_stream(
-                    forward_iter,
-                    next_req_array)):
-            yield e
 
 #
 # TBON Client Code
@@ -683,16 +628,16 @@ class TreeClient(object):
             enable_ssl=True,
             enable_client_auth=True
     ):
-        self.vmid = connect_info[0]
-        self.host = connect_info[1]
-        self.port = connect_info[2]
-        self.stub = None
-        self.channel = None
+        self._vmid = connect_info[0]
+        self._host = connect_info[1]
+        self._port = connect_info[2]
+        self._stub = None
+        self._channel = None
 
         if enable_ssl is False:
             if enable_client_auth:
                 raise PcoccError("Client Auth requires SSL support")
-            self.channel = grpc.insecure_channel(self.host + ":" + self.port)
+            self._channel = grpc.insecure_channel(self._host + ":" + self._port)
         else:
             client_cert = Config().batch.client_cert
             if enable_client_auth:
@@ -705,15 +650,16 @@ class TreeClient(object):
                 credential = grpc.ssl_channel_credentials(
                     root_certificates=client_cert.ca_cert
                 )
-            self.channel = grpc.secure_channel(
-                self.host
+            self._channel = grpc.secure_channel(
+                self._host
                 + ":"
-                + self.port, credential)
-        self.stub = pcocc_pb2_grpc.pcoccNodeStub(self.channel)
+                + self._port, credential)
+
+        self._stub = pcocc_pb2_grpc.pcoccNodeStub(self._channel)
 
     def __del__(self):
-        del self.stub
-        del self.channel
+        del self._stub
+        del self._channel
 
     def command(self, dest, cmd, data):
         json_dat = json.dumps(data)
@@ -721,7 +667,7 @@ class TreeClient(object):
                                          destination=dest,
                                          cmd=cmd,
                                          data=json_dat)
-        return self.stub.route_command(grpc_command)
+        return self._stub.route_command(grpc_command)
 
     def exec_stream(self, input_iterator):
-        return self.stub.exec_stream(input_iterator)
+        return self._stub.exec_stream(input_iterator)

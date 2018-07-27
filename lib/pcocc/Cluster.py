@@ -29,6 +29,7 @@ from . import Hypervisor
 from . import Batch
 from .Error import PcoccError, NoAgentError
 from .Config import Config
+from .Misc import ThreadPool
 from .scripts import click
 from Tbon import TreeNode, TreeClient
 
@@ -52,42 +53,6 @@ class ClusterSetupError(PcoccError):
     def __init__(self, error):
         super(ClusterSetupError, self).__init__('Failed to start cluster: ' + error)
 
-class Worker(Thread):
-    """Thread executing tasks from a given tasks queue"""
-    def __init__(self, pool):
-        Thread.__init__(self)
-        self.pool = pool
-        self.daemon = True
-        self.start()
-
-    def run(self):
-        while True:
-            func, args, kargs = self.pool.tasks.get()
-            try:
-                func(*args, **kargs)
-            except Exception as e:
-                self.pool.exception = e
-            finally:
-                self.pool.tasks.task_done()
-
-class ThreadPool(object):
-    """Pool of threads consuming tasks from a queue"""
-    def __init__(self, num_threads):
-        self.tasks = Queue(num_threads)
-        self.exception = None
-        for _ in range(num_threads):
-            Worker(self)
-
-    def add_task(self, func, *args, **kargs):
-        """Add a task to the queue"""
-        self.tasks.put((func, args, kargs))
-
-    def wait_completion(self):
-        """Wait for completion of all the tasks in the queue"""
-        self.tasks.join()
-
-        if self.exception is not None:
-            raise self.exception # pylint: disable-msg=E0702
 
 def do_checkpoint_vm(vm, ckpt_dir):
     vm.checkpoint(ckpt_dir)
@@ -502,17 +467,17 @@ class Cluster(object):
 
         print "Checkpointing disks..."
         for vm in self.vms:
-            pool.add_task(do_save_vm, vm, ckpt_dir)
+            pool.add_task(do_save_vm, None, vm, ckpt_dir)
         pool.wait_completion()
 
         print "Checkpointing memory..."
         for vm in self.vms:
-            pool.add_task(do_checkpoint_vm, vm, ckpt_dir)
+            pool.add_task(do_checkpoint_vm, None, vm, ckpt_dir)
         pool.wait_completion()
 
         print "Checkpoint complete."
         for vm in self.vms:
-            pool.add_task(do_quit_vm, vm)
+            pool.add_task(do_quit_vm, None, vm)
         pool.wait_completion()
 
 

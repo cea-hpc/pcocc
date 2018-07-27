@@ -28,6 +28,9 @@ import datetime
 import jsonschema
 import yaml
 
+from Queue import Queue
+from threading import Thread
+
 from pcocc.Backports import  enum
 from pcocc.Config import Config
 from pcocc.Error import PcoccError
@@ -281,3 +284,46 @@ class IDAllocator(object):
                                    'batchid': batch.batchid})
 
         return yaml.dump(id_alloc_state), id_indexes
+
+class Worker(Thread):
+    """Thread executing tasks from a given tasks queue"""
+    def __init__(self, pool):
+        Thread.__init__(self)
+        self.pool = pool
+        self.daemon = True
+        self.start()
+
+    def run(self):
+        while True:
+            func, key, args, kargs = self.pool.tasks.get()
+            try:
+                if key is not None:
+                    ret = func(key, *args, **kargs)
+                    self.pool.returns[key] = ret
+                else:
+                    func(*args, **kargs)
+            except Exception as e:
+                self.pool.exception = e
+            finally:
+                self.pool.tasks.task_done()
+
+class ThreadPool(object):
+    """Pool of threads consuming tasks from a queue"""
+    def __init__(self, num_threads):
+        self.tasks = Queue(num_threads)
+        self.exception = None
+        self.returns = {}
+
+        for _ in range(num_threads):
+            Worker(self)
+
+    def add_task(self, func, key, *args, **kargs):
+        """Add a task to the queue"""
+        self.tasks.put((func, key, args, kargs))
+
+    def wait_completion(self):
+        """Wait for completion of all the tasks in the queue"""
+        self.tasks.join()
+
+        if self.exception is not None:
+            raise self.exception # pylint: disable-msg=E0702

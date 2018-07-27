@@ -195,31 +195,32 @@ def mt_tee(source_iterator):
 
     def queue_gen(q, run):
         while True:
-            if not q.empty():
-                yield q.get()
-            elif run[0] == 0:
-                break
-        return
+            ret = q.get()
+            if ret is None:
+                return
+            else:
+                yield ret
 
-    ret1 = queue_gen(q1, is_running)
-    ret2 = queue_gen(q2, is_running)
+    iter1 = queue_gen(q1, is_running)
+    iter2 = queue_gen(q2, is_running)
 
     def tee_th(run):
         try:
             for d in source_iterator:
                 q1.put(d)
                 q2.put(d)
-            # I'm done
-            run[0] = 0
         except:
-            run[0] = 0
+            pass
+
+        q1.put(None)
+        q2.put(None)
 
     # Start the TEE th
     th = threading.Thread(target=tee_th, args=(is_running, ))
     th.setDaemon(True)
     th.start()
 
-    return ret1, ret2
+    return iter1, iter2
 
 
 def mt_chain(*iterators):
@@ -227,46 +228,31 @@ def mt_chain(*iterators):
     Chain two generators in a MT
     fashion (as 'chain')
     """
-    active = [None] * len(iterators)
-    for i in range(0, len(iterators)):
-        active[i] = 1
-
+    active = len(iterators)
     queue = Queue()
 
-    def iterator_progress(it, ident):
-        while True:
-            try:
-                n = next(it)
-                queue.put(n)
-            except:
-                active[ident] = 0
-                break
+    def iterator_progress(it):
+        for n in it:
+            queue.put(n)
+        queue.put(None)
 
-    workers = [None] * len(iterators)
-
+    workers = []
     for i in range(0, len(iterators)):
-        workers[i] = threading.Thread(
+        workers.append(threading.Thread(
             target=iterator_progress,
-            args=(iterators[i], i, ))
-        workers[i].setDaemon(True)
+            args=(iterators[i], )))
+
         workers[i].start()
 
-    while True:
-        all_inactive = 1
-
-        for k in range(0, len(iterators)):
-            if active[k]:
-                all_inactive = 0
-                break
-        if all_inactive and queue.empty():
-            return
-
-        try:
-            data = queue.get(False)
+    while active:
+        data = queue.get()
+        if data is None:
+            active = active - 1
+        else:
             yield data
-        except:
-            pass
 
+    for i in range(0, len(iterators)):
+        workers[i].join()
 
 class TreeNodeClient(object):
     """
@@ -364,8 +350,6 @@ class TreeNodeClient(object):
             for e in mt_chain(lreq, rreq):
                 yield e
 
-            lreq.cancel()
-            rreq.cancel()
         else:
             target = self._rs
             if self._ls:
@@ -375,8 +359,6 @@ class TreeNodeClient(object):
                 req_array.push(req)
             for e in req:
                 yield e
-            req.cancel()
-
 
     def _gen_children_list(self):
         me = self._vmid
@@ -537,7 +519,9 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
 
         next_req_array = []
 
-        context.add_callback(context.cancel)
+        # FIXME: Pourquoi ? Semble inutile de cancel une RPC qui se
+        # termine
+        # context.add_callback(context.cancel)
 
         def send_output():
             if self._exec_output_handler:
@@ -550,7 +534,6 @@ class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
                     break
                 if self._exec_input_handler:
                     self._exec_input_handler(inpu)
-            context.cancel()
 
         thread = threading.Thread(target=send_input)
         thread.start()

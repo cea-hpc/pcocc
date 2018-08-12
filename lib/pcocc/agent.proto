@@ -1,0 +1,259 @@
+syntax = "proto3";
+option go_package = "agent_protocol";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+
+service pcoccNode
+{
+    rpc route_command(RouteMessage) returns(RouteMessageResult);
+    rpc route_stream( stream McastMessage ) returns (stream RouteMessageResult);
+}
+
+
+message RouteMessage
+{
+    int32  destination   = 1;
+    string name = 2;
+    google.protobuf.Any    args = 3;
+}
+
+message McastMessage
+{
+    string destinations = 1;
+    string name = 2;
+    google.protobuf.Any    args = 3;
+}
+
+message RouteMessageResult
+{
+    oneof result_type {
+        GenericError error = 1;
+        google.protobuf.Any  result = 2;
+    }
+    int32 source = 3;
+}
+
+message GenericError
+{
+    enum ErrorKind {
+        GenericError = 0;
+        Timeout = 1;
+        Unreachable = 2;
+        Cancelled = 3;
+        PayloadError = 4;
+	AgentError = 5;
+    }
+
+    ErrorKind  kind = 1;
+    string     description = 2;
+    google.protobuf.Any details = 3;
+}
+
+message AgentMessage
+{
+    enum MsgKind {
+        Request = 0;
+        Reply = 1;
+        Async = 2;
+        StreamRequest = 3;
+        StreamReply = 4;
+        Error = 5;
+   }
+
+   MsgKind kind = 1;
+   string name = 2;
+   int64 tag = 3;
+   google.protobuf.Any data = 4;
+}
+
+message ExecMessage
+{
+  int64  exec_id = 1;
+  string filename = 2;
+  repeated string args = 3;
+  repeated string env = 4;
+  string username = 5;
+}
+
+message ExecResult
+{
+}
+
+message ListExecMessage {
+}
+
+message ExecInfo {
+	string filename = 1;
+	bool   attached = 2;
+	bool   running  = 3;
+}
+
+message ListExecResult {
+	map<int64, ExecInfo> execs = 1;
+}
+
+message AttachMessage
+{
+  int64 exec_id = 2;
+}
+
+message AttachResult
+{
+}
+
+message DetachMessage
+{
+  int64 exec_id = 2;
+  int64 tag = 3;
+}
+
+message DetachResult
+{
+}
+
+message KillMessage
+{
+  int64 exec_id = 2;
+}
+
+message KillResult
+{
+}
+
+message IOMessage
+{
+    enum MsgKind {
+        stdin  = 0;
+        stdout = 1;
+        stderr = 2;
+   }
+
+   MsgKind kind = 1;
+   bool eof = 2;
+   bytes data = 3;
+   int64 exec_id = 4;
+}
+
+message IOResult
+{
+}
+
+message ExitStatus
+{
+   int32 status = 1;
+}
+
+message ThawMessage {
+}
+
+message ThawResult {
+}
+
+message FreezeMessage {
+}
+
+message FreezeResult {
+}
+
+message HelloMessage {
+}
+
+message HelloResult {
+   int64 epoch = 1;
+   int32 version = 2;
+}
+
+message MkdirMessage {
+   string path = 1;
+   uint32 mode = 2;
+   bool make_parent = 3;
+}
+
+message MkdirResult {
+}
+
+message HostnameMessage {
+}
+
+message HostnameResult {
+   string hostname = 1;
+}
+
+message ChmodMessage {
+   string path = 1;
+   uint32 mode = 2;
+   bool recurse = 3;
+}
+
+message ChmodResult {
+}
+
+message ChownMessage {
+   string path = 1;
+   uint32 uid = 2;
+   uint32 gid = 3;
+   bool recurse = 4;
+}
+
+message ChownResult {
+}
+
+message SymlinkMessage {
+   string src = 1;
+   string dst = 2;
+}
+
+message SymlinkResult {
+}
+
+message RemoveMessage {
+   string path = 1;
+   bool recurse = 2;
+}
+
+message RemoveResult {
+}
+
+message MoveMessage {
+   string src = 1;
+   string dst = 2;
+}
+
+message MoveResult {
+}
+
+message TruncateMessage {
+   string path = 1;
+   int64  size = 2;
+}
+
+message TruncateResult {
+}
+
+message StatMessage {
+   string path = 1;
+}
+
+message StatResult {
+   string name = 1;
+   int64 size = 2;
+   int32 mode = 3;
+   google.protobuf.Timestamp mod_time = 4;
+   bool is_dir = 5;
+}
+
+message WriteFileMessage {
+   string path   = 1;
+   bytes  data   = 2;
+   int32  perms  = 4;
+   bool   append = 3;
+}
+
+message WriteFileResult {
+   int64  written = 1;
+}
+
+
+
+

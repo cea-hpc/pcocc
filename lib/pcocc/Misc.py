@@ -295,31 +295,46 @@ class Worker(Thread):
 
     def run(self):
         while True:
-            func, key, args, kargs = self.pool.tasks.get()
             try:
-                if key is not None:
+                func, key, args, kargs = self.pool.tasks.get()
+                try:
                     ret = func(key, *args, **kargs)
-                    self.pool.returns[key] = ret
-                else:
-                    func(*args, **kargs)
-            except Exception as e:
-                self.pool.exception = e
-            finally:
-                self.pool.tasks.task_done()
+                    self.pool.retq.put((key, ret))
+                except Exception as e:
+                    self.pool.exception = e
+                    self.pool.retq.put((key, e))
+                finally:
+                    self.pool.tasks.task_done()
+            except:
+                # Workaround python2 race condition issue
+                # at interpretor shutdwon for daemon threads
+                return
+
 
 class ThreadPool(object):
     """Pool of threads consuming tasks from a queue"""
     def __init__(self, num_threads):
-        self.tasks = Queue(num_threads)
+        self.tasks = Queue()
+        self.retq = Queue()
         self.exception = None
-        self.returns = {}
+        self.num_tasks = 0
 
         for _ in range(num_threads):
             Worker(self)
 
     def add_task(self, func, key, *args, **kargs):
         """Add a task to the queue"""
+        self.num_tasks = self.num_tasks + 1
         self.tasks.put((func, key, args, kargs))
+
+    def completion_iterator(self, timeout=None):
+        """Iterate over task results as they complete"""
+        while True:
+            if self.num_tasks <= 0:
+                return
+
+            self.num_tasks = self.num_tasks - 1
+            yield self.retq.get(timeout=timeout)
 
     def wait_completion(self):
         """Wait for completion of all the tasks in the queue"""

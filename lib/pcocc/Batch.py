@@ -802,6 +802,8 @@ class EtcdManager(BatchManager):
                     u.password = requested_cred
 
             u.write()
+            self.make_dir('cluster/user', '')
+
 
     def cleanup_cluster_keys(self):
         try:
@@ -1466,7 +1468,7 @@ class SlurmManager(EtcdManager):
                     jobs = self.list_all_jobs(get_infos=True)
                     me = [ v for v in jobs if  v["batchid"] == batchid]
                     if len(me) == 0:
-                        raise InvalidJobError("No such AllocID")
+                        raise InvalidJobError("No match found in Slurm for batch id {}".format(batchid))
                     self.batchuser = me[0]["user"]
                 else:
                     # Assume we are the caller

@@ -1,4 +1,4 @@
-python -m grpc_tools.protoc --proto_path=./ --python_out=./ --grpc_python_out=./ ./pcocc.proto
+python -m grpc_tools.protoc --proto_path=./ --python_out=./ --grpc_python_out=./ ./agent.proto
 
 if test "x$?" = "x0"
 then

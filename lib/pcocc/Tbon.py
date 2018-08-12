@@ -17,8 +17,8 @@
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
 import grpc
-import pcocc_pb2
-import pcocc_pb2_grpc
+import agent_pb2
+import agent_pb2_grpc
 import os
 import time
 import tempfile
@@ -33,7 +33,10 @@ from OpenSSL import crypto
 from concurrent import futures
 from Queue import Queue
 from Config import Config
-from Error import PcoccError
+from Error import PcoccError, AgentTransportError, AgentCommandError
+from ClusterShell.NodeSet import RangeSet
+
+
 
 #
 # Helper functions from pyOpenSSL
@@ -184,16 +187,17 @@ class UserCA(Cert):
 # Multi-Threaded Generator Plumbing
 #
 
-def mt_tee(source_iterator):
-    """
-    Duplicate a generator function
-    stream in a MT fashion 'tee'
-    """
-    q1 = Queue()
-    q2 = Queue()
-    is_running = [1]
+def mt_tee(source_iterator, count=2):
+    """Multi-threaded duplication of a blocking generator (similar to the tee command)
 
-    def queue_gen(q, run):
+    Resulting generators can be read concurrently.
+    """
+
+    # TODO: should we limit the queue size in case one of the sink
+    # generators are not beeing read fast enough ?
+    queues = [Queue() for i in range(count)]
+
+    def queue_gen(q):
         while True:
             ret = q.get()
             if ret is None:
@@ -201,33 +205,33 @@ def mt_tee(source_iterator):
             else:
                 yield ret
 
-    iter1 = queue_gen(q1, is_running)
-    iter2 = queue_gen(q2, is_running)
+    iters = [queue_gen(q) for q in queues]
 
-    def tee_th(run):
+    def tee_th():
         try:
             for d in source_iterator:
-                q1.put(d)
-                q2.put(d)
-        except:
+                for q in queues:
+                    q.put(d)
+        except Exception as e:
+            #FIXME: Clarify how to properly handle this error
+            logging.error("Exception while duplicating request for tee:", str(e) )
             pass
 
-        q1.put(None)
-        q2.put(None)
+        for q in queues:
+            logging.debug("mt_tee: source ended, terminating all sinks")
+            q.put(None)
 
-    # Start the TEE th
-    th = threading.Thread(target=tee_th, args=(is_running, ))
+    th = threading.Thread(target=tee_th)
     th.setDaemon(True)
     th.start()
 
-    return iter1, iter2
+    return iters
 
+def mt_chain(iterators):
+    """Multi-threaded gathering of multiple blocking generators into a single one
 
-def mt_chain(*iterators):
     """
-    Chain two generators in a MT
-    fashion (as 'chain')
-    """
+
     active = len(iterators)
     queue = Queue()
 
@@ -248,139 +252,286 @@ def mt_chain(*iterators):
         data = queue.get()
         if data is None:
             active = active - 1
+            logging.debug("mt_chain: source stream completed, %d sources remaining", active)
         else:
+            logging.debug("mt_chain: got data from a sink: %s", data)
             yield data
 
     for i in range(0, len(iterators)):
         workers[i].join()
 
-class TreeNodeClient(object):
-    """
-    TreeNode is a node in the TBON
-    tree as a consequence it is connected
-    in a BTREE fashion
+    logging.debug("mt_chain: all srouce streams completed and joined")
+
+class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
+    """Services RPC request to a node in the tree.
+
+    When RPCs have to be routed to other tree nodes, it defers work to
+    a TreeNodeRelay which establishes connections to adjacent tree
+    nodes and knows the correct route.
     """
     def __init__(self,
-                 vmid=0,
-                 enable_ssl=True,
-                 enable_client_auth=False):
+                 vmid,
+                 handler,
+                 stream_init_handler,
+                 port=0):
 
-        if enable_client_auth and not enable_ssl:
-            raise PcoccError("Client auth is only avalaible with SSL")
+        self._relay = None
+        self._vmid = int(vmid)
+        self._port = port
+        self._handler = handler
+        self._stream_init_handler = stream_init_handler
+        self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=25))
+        self._ready = threading.Event()
 
-        self._endpoints = {}
-        self._endpoints_lock = threading.Lock()
+        agent_pb2_grpc.add_pcoccNodeServicer_to_server(self, self._server)
+
+        server_cert = Config().batch.ca_cert.gen_cert(socket.gethostname())
+        credential = grpc.ssl_server_credentials(
+            ((server_cert.key, server_cert.cert), ),
+            server_cert.ca_cert,
+            True
+        )
+        self._port = self._server.add_secure_port(
+            "[::]:{0}".format(port),
+            credential
+        )
+        self._server.start()
+
+        logging.debug("Tree node listening on port %s", self._port)
+
+        Config().batch.write_key('cluster/user',
+                                 "hostagent/vms/{0}".format(self._vmid),
+                                 "{0}:{1}:{2}".format(
+                                     self._vmid,
+                                     socket.gethostname(),
+                                     self._port))
+
+
+        # Establish connections to adjacent nodes in the tree for relaying
+        # messages
+        self._relay = TreeNodeRelay(self._vmid)
+
+        self._ready.set()
+
+    def route_stream(self, request_iterator, req_ctx):
+        #FIXME: Refactor this
+        #First, see from the header message if we are part of the recipients
+        init_msg = next(request_iterator)
+        stream_local = False
+
+        if self._vmid in RangeSet(init_msg.destinations.encode('ascii', 'ignore')):
+            # If we are part of the recipients, use a tee to get a
+            # local copy of the stream while forwarding it
+            local_iter, forward_iter = mt_tee(request_iterator)
+
+            # Unpack the header message to initialize the stream and
+            # find out how to handle the next messages
+            req = getattr(agent_pb2, init_msg.args.TypeName())()
+            init_msg.args.Unpack(req)
+            input_handler, output_handler, ret = self._stream_init_handler(init_msg.name, req, req_ctx)
+
+            if isinstance(ret, agent_pb2.GenericError):
+                ret_msg = agent_pb2.RouteMessageResult(source=self._vmid,
+                                                       error=ret)
+                # If the header handling resulted in error, we stop
+                # the stream handling on this node
+                stream_local = False
+            else:
+                stream_local = True
+                ret_msg = agent_pb2.RouteMessageResult(source=self._vmid)
+                ret_msg.result.Pack(ret)
+
+            logging.debug("Tbon: %d returning first reply for stream", self._vmid)
+            yield ret_msg
+
+        if stream_local:
+            # Build input and output handlers for the following
+            # messages based on the callbacks received from handling
+            # the header message
+            logging.debug("Tbon: %d continuing in local+relay mode", self._vmid)
+
+            def get_output():
+                # Get messages from the generator for this stream
+                for output_msg in output_handler(req_ctx):
+                    if isinstance(output_msg, agent_pb2.GenericError):
+                        ret_msg = agent_pb2.RouteMessageResult(source=self._vmid,
+                                                               error=output_msg)
+                    else:
+                        ret_msg = agent_pb2.RouteMessageResult(source=self._vmid)
+                        ret_msg.result.Pack(output_msg)
+                    yield ret_msg
+
+            def send_input():
+                # Push everything from the local iter to the handler
+                # for this stream
+                for input_msg in local_iter:
+                    req = getattr(agent_pb2, input_msg.args.TypeName())()
+                    input_msg.args.Unpack(req)
+                    input_handler(input_msg.name, req, req_ctx)
+
+            #Create a dedicated thread to block and push on the local iterator
+            thread = threading.Thread(target=send_input)
+            thread.start()
+
+            # Forward the header message + following messages to the
+            # next hops and yield everything they send us + what we
+            # produce locally
+            def new_iterin():
+                yield init_msg
+                for i in forward_iter:
+                    yield i
+
+            for e in mt_chain([
+                    get_output(),
+                    self._relay.route_stream(new_iterin())]):
+                yield e
+        else:
+            # We are not part of the recipients so just forward the
+            # whole stream to the next hops and yield everything they
+            # send us
+            def new_iterin():
+                yield init_msg
+                for i in request_iterator:
+                    yield i
+
+            logging.debug("Tbon: %d continuing stream in relay mode", self._vmid)
+
+            for e in self._relay.route_stream(new_iterin()):
+                logging.debug("Node %d ouputing message %s from children rpcs", self._vmid, e)
+                yield e
+
+            logging.debug("Tbon: %d finished with stream", self._vmid)
+
+
+    def _process_local(self, command, context):
+        req = getattr(agent_pb2, command.args.TypeName())()
+        command.args.Unpack(req)
+
+        result = self._handler(command.name, req, context)
+
+        if isinstance(result, agent_pb2.GenericError):
+            msg = agent_pb2.RouteMessageResult(source=self._vmid,
+                                               error=result)
+        else:
+            msg = agent_pb2.RouteMessageResult(source=self._vmid)
+            msg.result.Pack(result)
+
+        return msg
+
+    def route_command(self, request, context):
+        if not self._ready.wait(60):
+            logging.error("Timeout while establishing tree relay")
+            return agent_pb2.RouteMessageResult(error = agent_pb2.GenericError(
+                kind=agent_pb2.GenericError.TimeoutError,
+                description="Timeout while establishing tree relay"))
+
+        if request.destination == self._vmid:
+            resp = self._process_local(request, context)
+        else:
+            resp = self._relay.route_cmd(request,  context)
+
+        return resp
+
+
+class TreeNodeRelay(object):
+    """Manages connections between adjacent nodes in the tree.
+
+    Used by TreeNode to route messages.
+    """
+    def __init__(self, vmid=0, tree_width=16):
+
         self._vmid = vmid
-        self._enable_ssl = enable_ssl
-        self._enable_client_auth = enable_client_auth
-
+        self._tree_width = tree_width
         self._tree_size = Config().batch.vm_count()
 
-        self._pc = None
-        self._lc = None
-        self._rc = None
+        self._parent_id = -1
+        self._children_ids = []
 
-        self._ps = None
-        self._ls = None
-        self._rs = None
+        self._parent_chan = None
+        self._children_chans = {}
 
-        self._pid = -1
-        self._lid = -1
-        self._rid = -1
+        self._parent_stub = None
+        self._children_stubs =  {}
 
         self._routes = {}
+        self._endpoints = {}
+        self._endpoints_lock = threading.Lock()
 
         self._gen_children_list()
         self._connect()
+        logging.debug("Rank {}: routes:  {}".format(self._vmid, self._routes))
 
-    def __del__(self):
-        del self._ps
-        del self._ls
-        del self._rs
-        del self._pc
-        del self._rc
-        del self._lc
+    def route_cmd(self, command, context):
+        stub = None
 
-    class Target(object):
-        NotSet, Parent, Left, Right = range(4)
-
-    def route(self, command):
         try:
             route = self._routes[command.destination]
+            stub = self._children_stubs[route]
+            logging.debug("Routing for node {} through child {} ".format(command.destination,
+                                                                         route))
+
         except KeyError:
-            route = self.Target.Parent
+            logging.debug("Routing for node {} through parent".format(command.destination))
+            stub = self._parent_stub
 
-        ret = self._send_cmd(route, command)
 
-        return ret
+        if stub is None:
+            logging.error("Bad stub for {} from {}".format(command.destination, self._vmid))
 
-    def exec_stream(self, input_iterator, req_array=None):
         try:
-            children_it = self._send_exec(input_iterator, req_array)
-            for e in children_it:
-                yield e
-        except:
-            # We failed
-            return
+            # Route the command by executing a RPC on the next
+            # hop. Cancel that RPC if the Route RPC from our client is
+            # cancelled or timeouts
+            future = stub.route_command.future(command, context.time_remaining())
+            context.add_callback(future.cancel)
+            return future.result()
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                # Timeouts should be coherent along a route so the parent should timeout
+                # concurrently but we still return something just in case
+                return agent_pb2.RouteMessageResult(source=command.destination,
+                                                    error=agent_pb2.GenericError(
+                    kind=agent_pb2.GenericError.Timeout,
+                    description="Agent did not answer before time limit"))
+            else:
+                return agent_pb2.RouteMessageResult(source=command.destination,
+                                                    error=agent_pb2.GenericError(
+                    type=agent_pb2.GenericError.GenericError,
+                    description=str(e)))
+        except grpc.FutureCancelledError as e:
+                # Again should not be necessary as the parent should be
+                # cancelled too but just in case
+                return agent_pb2.RouteMessageResult(source=command.destination,
+                                                    error=agent_pb2.GenericError(
+                                                    kind=agent_pb2.GenericError.Cancelled,
+                                                    description="Route request cancelled"))
 
-    def _send_cmd(self, target, command):
-        stub = None
-        if target == self.Target.Left:
-            stub = self._ls
-        elif target == self.Target.Right:
-            stub = self._rs
-        elif target == self.Target.Parent:
-            stub = self._ps
+    def route_stream(self, input_iterator):
+        children_dups = mt_tee(input_iterator, len(self._children_ids))
+        children_rpcs = []
 
-        return stub.route_command(command)
+        for stub, dup in zip(self._children_stubs.itervalues(), children_dups):
+            logging.debug("Relay %d intiating child stream rpc", self._vmid)
+            children_rpcs.append(stub.route_stream(dup))
 
-    def _send_exec(self, request_stream, req_array=None):
-        if (self._ls is None) and (self._rs is None):
-            return
-
-        if self._ls and self._rs:
-            left_dup, right_dup = mt_tee(request_stream)
-            lreq = self._ls.exec_stream(left_dup)
-            rreq = self._rs.exec_stream(right_dup)
-
-            if req_array:
-                req_array.push(lreq)
-                req_array.push(rreq)
-
-            for e in mt_chain(lreq, rreq):
-                yield e
-
-        else:
-            target = self._rs
-            if self._ls:
-                target = self._ls
-            req = target.exec_stream(request_stream)
-            if req_array:
-                req_array.push(req)
-            for e in req:
-                yield e
+        for e in mt_chain(children_rpcs):
+            logging.debug("Relay %d relaying msg %s from children rpc", self._vmid, e)
+            yield e
 
     def _gen_children_list(self):
-        me = self._vmid
-        self._recurse_children_list(me, self._tree_size,
-                                    self.Target.NotSet)
+        self._recurse_children_list(self._vmid, -1)
 
-    def _recurse_children_list(self, current, bound, choice):
-        # Recursive scan on childs
-        left = (current + 1) * 2 - 1
-        right = (current + 1) * 2
-        route = choice
-        if left < bound:
-            if choice == self.Target.NotSet:
-                route = self.Target.Left
+    def _recurse_children_list(self, current, route):
+        for i in range (self._tree_width):
+            child = current * self._tree_width + i + 1
+            if child < self._tree_size:
+                if route == -1:
+                    newroute = child
+                else:
+                    newroute = route
 
-            self._routes[left] = route
-            self._recurse_children_list(left, bound, route)
-        if right < bound:
-            if choice == self.Target.NotSet:
-                route = self.Target.Right
-            self._routes[right] = route
-            self._recurse_children_list(right, bound, route)
+                self._routes[child] = newroute
+                self._recurse_children_list(child, newroute)
 
     def _get_endpoint(self, target):
         self._endpoints_lock.acquire()
@@ -395,263 +546,155 @@ class TreeNodeClient(object):
 
     def _connect(self):
         me = self._vmid
-        parent = (me + 1) // 2 - 1
-        leftc = (me + 1) * 2 - 1
-        rightc = (me + 1) * 2
-        if me == 0:
-            parent = -1
 
-        if self._tree_size <= leftc:
-            leftc = -1
+        parent_id = (me + self._tree_width - 1) // self._tree_width - 1
 
-        if self._tree_size <= rightc:
-            rightc = -1
+        children_ids = []
+        for i in range(self._tree_width):
+            child = me  * self._tree_width  + i + 1
+            if child < self._tree_size:
+                children_ids.append(child)
 
-        self._pid = parent
-        self._lid = leftc
-        self._rid = rightc
+        self._parent_id = parent_id
+        self._children_ids = children_ids
 
-        if self._enable_ssl is False:
-            if 0 <= parent:
-                pinfo = self._get_endpoint(parent)
-                self._pc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
-            if 0 <= leftc:
-                pinfo = self._get_endpoint(leftc)
-                self._lc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
-            if 0 <= rightc:
-                pinfo = self._get_endpoint(rightc)
-                self._rc = grpc.insecure_channel(pinfo[1] + ":" + pinfo[2])
-        else:
-            client_cert = Config().batch.ca_cert
-            if self._enable_client_auth:
-                credential = grpc.ssl_channel_credentials(
-                    root_certificates=client_cert.ca_cert,
-                    private_key=client_cert.key,
-                    certificate_chain=client_cert.cert
-                )
-            else:
-                credential = grpc.ssl_channel_credentials(
-                    root_certificates=keys[2])
-            if 0 <= parent:
-                pinfo = self._get_endpoint(parent)
-                self._pc = grpc.secure_channel(pinfo[1]
-                                              + ":" + pinfo[2], credential)
-            if 0 <= leftc:
-                pinfo = self._get_endpoint(leftc)
-                self._lc = grpc.secure_channel(pinfo[1]
-                                              + ":" + pinfo[2], credential)
-            if 0 <= rightc:
-                pinfo = self._get_endpoint(rightc)
-                self._rc = grpc.secure_channel(pinfo[1]
-                                              + ":" + pinfo[2], credential)
+        client_cert = Config().batch.ca_cert
+        credential = grpc.ssl_channel_credentials(
+            root_certificates=client_cert.ca_cert,
+            private_key=client_cert.key,
+            certificate_chain=client_cert.cert
+        )
 
-        if 0 <= parent:
-            self._ps = pcocc_pb2_grpc.pcoccNodeStub(self._pc)
-        if 0 <= leftc:
-            self._ls = pcocc_pb2_grpc.pcoccNodeStub(self._lc)
-        if 0 <= rightc:
-            self._rs = pcocc_pb2_grpc.pcoccNodeStub(self._rc)
+        if parent_id >= 0:
+            pinfo = self._get_endpoint(parent_id)
+            self._parent_chan = grpc.secure_channel(pinfo[1] + ":" + pinfo[2], credential)
+            self._parent_stub = agent_pb2_grpc.pcoccNodeStub(self._parent_chan)
 
-
-class TreeNode(pcocc_pb2_grpc.pcoccNodeServicer):
-    """
-    This class defines a TBON node it mostly
-    contains server side code the client
-    side code is in the TreeNodeClient
-    """
-    def __init__(self,
-                 vmid=0,
-                 port="50051",
-                 handler=None,
-                 enable_ssl=True,
-                 client_ssl_auth=True,
-                 exec_input_handler=None,
-                 exec_output_handler=None,
-                 exec_input_eof_notifier=None):
-
-        self._relay = None
-        self._vmid = int(vmid)
-        self._port = port
-        self._handler = handler
-        self._exec_output_handler = exec_output_handler
-        self._exec_input_handler = exec_input_handler
-        self._exec_input_eof_notifier = exec_input_eof_notifier
-        self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=25))
-
-        pcocc_pb2_grpc.add_pcoccNodeServicer_to_server(self, self._server)
-
-        if enable_ssl is False:
-            self._port = self._server.add_insecure_port("[::]:{0}".format(port))
-        else:
-            server_cert = Config().batch.ca_cert.gen_cert(socket.gethostname())
-            credential = grpc.ssl_server_credentials(
-                ((server_cert.key, server_cert.cert), ),
-                server_cert.ca_cert,
-                client_ssl_auth
-            )
-            self._port = self._server.add_secure_port(
-                "[::]:{0}".format(port),
-                credential
-            )
-
-        logging.debug("CommandServer Now Listening on %s:%s",
-                      socket.gethostname(),
-                      self._port)
-
-        self._server.start()
-        self._register()
-        # Server is ON now start the relay
-        self._relay = TreeNodeClient(self._vmid,
-                                    enable_ssl,
-                                    client_ssl_auth)
-
-
-    def command(self, dest, cmd, data):
-        json_dat = json.dumpsxo(data)
-        docommand = pcocc_pb2.Command(source=self._vmid,
-                                      destination=dest,
-                                      cmd=cmd,
-                                      data=json_dat)
-        return self._route_command(docommand)
-
-    def exec_stream(self, request_iterator, context):
-        local_iter, forward_iter = mt_tee(request_iterator)
-
-        next_req_array = []
-
-        # FIXME: Pourquoi ? Semble inutile de cancel une RPC qui se
-        # termine
-        # context.add_callback(context.cancel)
-
-        def send_output():
-            if self._exec_output_handler:
-                for output in self._exec_output_handler(context.is_active):
-                    yield output
-
-        def send_input():
-            for inpu in local_iter:
-                if inpu.eof is True:
-                    break
-                if self._exec_input_handler:
-                    self._exec_input_handler(inpu)
-
-        thread = threading.Thread(target=send_input)
-        thread.start()
-
-        for e in mt_chain(
-                send_output(),
-                self._relay.exec_stream(
-                    forward_iter,
-                    next_req_array)):
-            yield e
-
-    def _register(self):
-        logging.debug("Registering hostagent/vms/%s", self._vmid)
-        Config().batch.write_key('cluster/user',
-                                 "hostagent/vms/{0}".format(self._vmid),
-                                 "{0}:{1}:{2}".format(
-                                     self._vmid,
-                                     socket.gethostname(),
-                                     self._port))
-
-
-    def _process_local(self, command):
-        # print("SRC:" + str(command.source))
-        # print("DEST:" + str(command.destination))
-        # logging.info("PL CMD:" + command.cmd)
-        # print("DATA:" + command.data)
-        # resp = "RET : " + command.data
-        if self._handler:
-            cmd, data = self._handler(command)
-        sdata = json.dumps(data)
-        # logging.info("RESP" + sdata)
-        return pcocc_pb2.Response(cmd=cmd, data=sdata)
-
-
-    def route_command(self, request, context=None):
-        resp = None
-
-        cnt = 0
-        # Give us some time to start
-        # There is a race between the listening server
-        # and the start of the relay our solution
-        # is then to wait a little to do the __init__
-        while self._relay is None:
-            cnt = cnt + 1
-            time.sleep(1)
-            if cnt == 60:
-                logging.error("TBON relay was not up after %s seconds", cnt)
-                return pcocc_pb2.Command(source=-1,
-                                         destination=request.source,
-                                         cmd="error",
-                                         data=json.dumps(
-                                             "VM TBON start timemout"))
-
-        if request.destination == self._vmid:
-            # Local Command
-            resp = self._process_local(request)
-        else:
-            resp = self._relay.route(request)
-
-        return resp
-
-
-#
-# TBON Client Code
-#
-
+        for child in children_ids:
+            pinfo = self._get_endpoint(child)
+            self._children_chans[child] = grpc.secure_channel(pinfo[1] + ":" + pinfo[2], credential)
+            self._children_stubs[child] = agent_pb2_grpc.pcoccNodeStub(self._children_chans[child])
 
 class TreeClient(object):
     """
     An instance of this class is used to
     communicate as client over the TBON
     """
-    def __init__(
-            self,
-            connect_info,
-            enable_ssl=True,
-            enable_client_auth=True
-    ):
+    def __init__(self, connect_info):
+
         self._vmid = connect_info[0]
         self._host = connect_info[1]
         self._port = connect_info[2]
         self._stub = None
         self._channel = None
 
-        if enable_ssl is False:
-            if enable_client_auth:
-                raise PcoccError("Client Auth requires SSL support")
-            self._channel = grpc.insecure_channel(self._host + ":" + self._port)
-        else:
-            client_cert = Config().batch.client_cert
-            if enable_client_auth:
-                credential = grpc.ssl_channel_credentials(
-                    root_certificates=client_cert.ca_cert,
-                    private_key=client_cert.key,
-                    certificate_chain=client_cert.cert
-                )
+        client_cert = Config().batch.client_cert
+        credential = grpc.ssl_channel_credentials(
+            root_certificates=client_cert.ca_cert,
+            private_key=client_cert.key,
+            certificate_chain=client_cert.cert
+        )
+        self._channel = grpc.secure_channel(
+            self._host + ":" + self._port, credential)
+
+        self._stub = agent_pb2_grpc.pcoccNodeStub(self._channel)
+
+    @staticmethod
+    def _handle_route_result(cmd, res):
+        if res.HasField("error"):
+            if res.error.kind == agent_pb2.GenericError.AgentError:
+                logging.info("Agent returned error: {}".format(res.error.description))
+                raise AgentCommandError(cmd,
+                                        res.error.description,
+                                        res.error.details)
             else:
-                credential = grpc.ssl_channel_credentials(
-                    root_certificates=client_cert.ca_cert
-                )
-            self._channel = grpc.secure_channel(
-                self._host
-                + ":"
-                + self._port, credential)
+                raise AgentTransportError(res.error.kind,
+                                          res.error.description)
 
-        self._stub = pcocc_pb2_grpc.pcoccNodeStub(self._channel)
+        ret = getattr(agent_pb2, res.result.TypeName())()
+        res.result.Unpack(ret)
 
-    def __del__(self):
-        del self._stub
-        del self._channel
+        return ret
 
-    def command(self, dest, cmd, data):
-        json_dat = json.dumps(data)
-        grpc_command = pcocc_pb2.Command(source=-1,
-                                         destination=dest,
-                                         cmd=cmd,
-                                         data=json_dat)
-        return self._stub.route_command(grpc_command)
 
-    def exec_stream(self, input_iterator):
-        return self._stub.exec_stream(input_iterator)
+    @staticmethod
+    def _handle_grpc_error(e, source):
+        if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+            ex = agent_pb2.RouteMessageResult(source=source,
+                                              error=agent_pb2.GenericError(
+                                                  kind=agent_pb2.GenericError.Timeout,
+                                                  description="Timeout while waiting for agent to answer"))
+        elif e.code() == grpc.StatusCode.CANCELLED:
+            ex = agent_pb2.RouteMessageResult(source=source,
+                                              error=agent_pb2.GenericError(
+                                                  kind=agent_pb2.GenericError.Cancelled,
+                                                  description="RPC was cancelled"))
+        else:
+            logging.warning("RPC request failed with: {}".format(e.details()))
+            ex = agent_pb2.RouteMessageResult(source=source,
+                                              error=agent_pb2.GenericError(
+                                                  kind=agent_pb2.GenericError.GenericError,
+                                                  description="Transport error while "
+                                                  "relaying command: {}".format(e.details())))
+
+        return ex
+    def command(self, dest, cmd, data, timeout):
+        logging.info("sending {} to {}".format(cmd, dest))
+        try:
+            grpc_message = agent_pb2.RouteMessage(destination=dest, name=cmd)
+            grpc_message.args.Pack(data)
+
+        except Exception as e:
+            return self._handle_route_result(cmd,
+                                agent_pb2.RouteMessageResult(
+                                    source=dest,
+                                    error=agent_pb2.GenericError(
+                                        kind=agent_pb2.GenericError.PayloadError,
+                                        description="Unable to create message with payload: {}".format(e))))
+
+        try:
+            res = self._stub.route_command(grpc_message, timeout=timeout)
+        except grpc.RpcError as e:
+            res = self._handle_grpc_error(e, dest)
+        return self._handle_route_result(cmd, res)
+
+    def route_stream(self, rng, init_cmd, stream_cmd, msg_iterator, cancel_cb=None):
+        def route_iterator():
+            cmd = init_cmd
+            for msg in msg_iterator:
+                grpc_message = agent_pb2.McastMessage(destinations=str(rng),
+                                                      name=cmd)
+                grpc_message.args.Pack(msg)
+                yield grpc_message
+                cmd = stream_cmd
+        try:
+            res =  self._stub.route_stream(route_iterator())
+            if cancel_cb:
+                res.add_callback(cancel_cb)
+
+            def result_unpacker():
+                try:
+                    for r in res:
+                        try:
+                            logging.debug("Stream client: unpacking a result %s", r)
+                            yield r.source, self._handle_route_result(
+                                init_cmd, r)
+                        except PcoccError as e:
+                            yield r.source, e
+                except grpc.RpcError as e:
+                    logging.error("Stream client interrupted due to GRPC error")
+                    yield -1, self._handle_route_result(
+                        init_cmd, self._handle_grpc_error(e, -1))
+
+                logging.debug("Stream client: No more results to unpack")
+
+            return result_unpacker(), res
+        except Exception as e:
+            #FIXME: we should probably generate a more informative error
+            return [self._handle_route_result(
+                cmd,
+                agent_pb2.RouteMessageResult(
+                    source=-1,
+                    error=agent_pb2.GenericError(
+                        kind=agent_pb2.GenericError.GenericError,
+                        description="Unable to establish stream: {}".format(e))))]

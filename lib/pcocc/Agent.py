@@ -6,940 +6,413 @@ import json
 import logging
 import threading
 import atexit
+from abc import ABCMeta, abstractmethod
 
-from ClusterShell.NodeSet import RangeSet
-
+from ClusterShell.NodeSet import NodeSet,RangeSet
+from ClusterShell.MsgTree import MsgTree
+from google.protobuf.json_format import MessageToJson
 from .Misc import ThreadPool
+from .Error import AgentCommandError
 import pcocc.Error
+import agent_pb2
+
+
+from .Misc import fake_signalfd
+import Queue
+import signal
+import select
+import os
+import sys
+import errno
+
+
+class AgentCommandClass(ABCMeta):
+    def __init__(cls, name, bases, dct):
+        if '_name' in dct:
+            AgentCommand.register_command(dct['_name'],
+                                          dct['_request_pb'],
+                                          dct['_reply_pb'],
+                                          cls)
+        super(AgentCommandClass, cls).__init__(name, bases, dct)
 
 class AgentCommand(object):
-    """
-    This class is the entry point
-    to send commands to VMs
-    it requires an initialized Cluster
-    and relies on the pcoccagent in VMs
-    """
-    def __init__(self, cluster, direct=0, log=True):
-        if cluster is None:
-            raise Exception("No cluster provided")
+    __metaclass__ = AgentCommandClass
 
-        self._cluster = cluster
-        self._direct = direct
-        self.logging = log
+    """Base class for all AgentCommands"""
+    _request_pb = None
+    _reply_pb = None
 
-    def vm_count(self):
-        """Return the number of VMs
 
-        Returns:
-            int -- Number of VMs
-        """
-        return self._cluster.vm_count()
+    _lock = threading.Lock()
+    _registered_execs = []
 
-    def unfold_range(self, rng):
-        """Unfolds a range in pcocc sytax
+    def __init__(self):
+        raise Exception
 
-        This is where '-w' parameters
-        are parsed we currently use
-        ClusterShell Ranges and '-' is 'all'
+    @staticmethod
+    def validate_args(**kwargs):
+        pass
 
-        Arguments:
-            rng {string/int} -- The range to be unfolded
+    @staticmethod
+    def validate_reply(msg):
+        pass
 
-        Raises:
-            NoAgentError -- The agent was not ready
+    @classmethod
+    def pretty_str(cls, msg):
+        if isinstance(msg, Exception):
+            return str(msg)
 
-        Returns:
-            array -- The list of VMs matching the range
-        """
+        return "ok"
 
-        ret = []
-        if isinstance(rng, int):
-            ret = [rng]
+    @classmethod
+    def register_command(cls, name, request_pb, reply_pb, cmd_class):
+        def single_fn(index, cluster, timeout, direct, **kwargs):
+            cmd_class.validate_args(**kwargs)
+            request = request_pb(**kwargs)
+            reply =  cmd_class._send_rpc_single(cluster,
+                                                timeout,
+                                                direct,
+                                                index,
+                                                name,
+                                                request)
+            cmd_class.validate_reply(reply)
+            return reply
+
+        @staticmethod
+        def fn(cluster, rng, timeout=10, direct=0, **kwargs):
+            return cls._mt_run_func(name, cmd_class, cluster, timeout,
+                                    direct, rng,  single_fn, **kwargs)
+
+        setattr(cls, name, fn)
+
+    @staticmethod
+    def _send_rpc_single(cluster, timeout, direct, vmid, command, data):
+        if direct == 0 :
+            return cluster.vms[0].agent_client.command(vmid, command, data, timeout)
         else:
-            if rng == "-":
-                ret = range(0, self.vm_count())
-            else:
-                vmset = RangeSet(str(rng))
-                ret = []
-                for vmid in vmset:
-                    if int(vmid) in range(0, self.vm_count()):
-                        ret.append(int(vmid))
+            return cluster.vms[vmid].agent_client.command(vmid, command, data, timeout)
 
-        for vm in ret:
-            if self._cluster.check_agent(vm) == 0:
-                raise pcocc.Error.NoAgentError()
-
-        return ret
-
-    def run_func(self, rng, target, *args, **kwargs):
-        """Run a function sending cmd on the TBON
-
-                Run a function and its arguments
-        on a given number of threads while
-        managing retun values with indexes
-
-        Arguments:
-            rng {array} -- List of VMs
-            target {function} -- Function to be run
-            args {tuple} -- Arguments to be passed to 'target'
-
-        Returns:
-            dict -- Command object rescribing the response
-        """
-        pool = ThreadPool(16)
+    @staticmethod
+    def _mt_run_func(name, cmd_class, cluster, timeout, direct, rng, target, *args, **kwargs):
+        pool = ThreadPool(256)
 
         for i in range(0, len(rng)):
-            pool.add_task(target, rng[i], *args, **kwargs)
+            pool.add_task(target, rng[i], cluster, timeout, direct, *args, **kwargs)
 
-        pool.wait_completion()
-        print pool.returns
-        return pool.returns
+        # FIXME: we use an extremely long timeout instead of an
+        # infinite one otherwise python seems to block SIGINTs which
+        # we want to be able to catch for the CLI. We should maybe run
+        # everything in a thread instead.
 
-    def _chk(self, ret):
-        """
-        This function is used to check the return
-        value from the various commands it also
-        displays the corresponding error message
-        """
-        if ret is None:
-            return None
-        if ret.cmd == "error":
-            log = "\n****** Could not run command ******\n"
-            log += "Pcocc agent returned:\n{0}\n".format(ret.data)
-            log += "***********************************"
-            if self.logging:
-                logging.error(log)
-            return None
-        jdata = {}
-        try:
-            jdata = json.loads(ret.data)
-        except ValueError as e:
-            logging.error("Error loading data returned by the pcoccagent")
-            logging.error(e)
-        return jdata
+        return ParallelAgentResult(name,
+                                   pool.completion_iterator(2**32-1),
+                                   rng,
+                                   cmd_class.pretty_str)
 
-    #
-    # Commands supported by the agent
-    #
+    @classmethod
+    def add_intr_handler(cls, cluster, indices, execid, ctx):
+        cls._lock.acquire()
+        cls._registered_execs.append((cluster, indices, execid, ctx))
+        if len(cls._registered_execs) == 1:
+            cls._intr_r = fake_signalfd([signal.SIGINT, signal.SIGTERM])
+            cls._stop_sig_r, cls._stop_sig_w = os.pipe()
+            cls._intr_th_instance = threading.Thread(None, cls.intr_handler_th, None,
+                                                     args=(cls._intr_r, cls._stop_sig_r))
+            cls._intr_th_instance.start()
+        cls._lock.release()
 
-    def _exec(self, alloc_id, command, args, uid=0, gid=0):
-        data = {"exe": command,
-                "args": json.dumps(args),
-                "alloc_id": str(alloc_id),
-                "uid": str(uid),
-                "gid": str(gid)}
-        ret = self._cluster.command(
-            index,
-            "exec",
-            data,
-            self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
+    @classmethod
+    def del_intr_handler(cls, cluster, indices, execid, ctx):
+        logging.info("Removing interrupt handler")
+        cls._lock.acquire()
+        cls._registered_execs.remove((cluster, indices, execid, ctx))
+        if len(cls._registered_execs) == 0:
+            os.write(cls._stop_sig_w, "1")
+            inst = cls._intr_th_instance
+        cls._lock.release()
 
-    def doexec(self, indexr, alloc_id, command, args, uid=0, gid=0):
-        """
-        Run a command in a set of VMs
+    @classmethod
+    def intr_handler_th(cls, stop_sig_r, intr_r):
+        logging.info("Starting intr thread")
+        while True:
+            try:
+                rdr, _, _ = select.select([stop_sig_r, intr_r], [], [])
+            except select.error  as e:
+                logging.info("Ignoring interrupt in select")
+                if e[0] == 4:
+                    continue
+                else:
+                    logging.info("Abandonning interrupt monitoring due to error")
+                    break
+            if cls._intr_r in rdr:
+                logging.info("Interrupt received")
+                os.read(cls._intr_r, 1)
+                cls._lock.acquire()
+                for cluster, indices, eid, ctx in cls._registered_execs:
+                    logging.info("Interrupt received, sending kill to %d", eid)
+                    cls.kill(cluster, indices, exec_id=eid)
+                    timer = threading.Timer(10, ctx.cancel)
+                    ctx.add_callback(timer.cancel)
+                    timer.start()
+                cls._lock.release()
+                return
+            elif cls._stop_sig_r in rdr:
+                os.read(cls._stop_sig_r, 1)
+                logging.debug("Interrupt handler thread was asked to stop")
+                return
 
-        Arguments:
-            indexr {string/int} -- Range to run on
-            alloc_id {int} -- Allocation id to be used (global)
-            command {string} -- The command to run
-            args {array} -- Arguments to be passed to the command
+    @classmethod
+    def attach(cls, cluster, indices, execid, iterin, cancel_cb=None):
+        def encap_iterin():
+            yield agent_pb2.AttachMessage(exec_id=execid)
+            for i in iterin:
+                yield i
 
-        Keyword Arguments:
-            uid {int} -- UID to use to launch the commmand (default: {0})
-            gid {int} -- GID to use to launch the command (default: {0})
+        res, ctx = cluster.vms[0].agent_client.route_stream(indices,
+                                                            "attach",
+                                                            "stdin",
+                                                            encap_iterin())
+        def del_intr_handler():
+            cls.del_intr_handler(cluster, indices, execid, ctx)
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._exec, alloc_id, command,
-                              args, uid, gid)
+        cls.add_intr_handler(cluster, indices, execid, ctx)
+        ctx.add_callback(cancel_cb)
+        ctx.add_callback(del_intr_handler)
 
-    def exec_stream(self, inputs):
-        """
-        Attach to the excecution outputs
+        def canceller():
+            logging.info("Cancelling RPC")
+            ctx.cancel()
 
-        Arguments:
-            inputs {generator} -- Inputs generator
-        """
-        for v in self._cluster.exec_stream(inputs):
-            yield v
+        return ParallelAgentResult("attach",
+                                   res, indices, cls.attach_string,
+                                   canceller)
 
-    def _alloc(self, size, desc, global_alloc_id):
-        ret = self._cluster.command(index,
-                             "alloc_new",
-                             {"size": json.dumps(size),
-                              "desc": desc,
-                              "global_alloc_id": json.dumps(global_alloc_id)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return -1
-        if "alloc_id" in data:
-            return int(data["alloc_id"])
+    @classmethod
+    def attach_stdin(cls, cluster, indices, execid, stdin=None):
+        if stdin is None:
+            stdin=os.dup(sys.stdin.fileno())
 
-    def alloc(self, indexr, size, desc, global_alloc_id):
-        """
-        Allocate cores in a given set of VMs
+        def close_stdin():
+            logging.debug("Closing dup'ed stdin at RPC termination")
+            try:
+                os.close(stdin)
+            except OSError:
+                pass
 
-        Arguments:
-            indexr {string/int} -- Range to run on
-            size {int} -- Number of cores to allocate
-            desc {string} -- Allocation description (optionnal)
-            global_alloc_id {int} -- Global allocation ID
+        def iterin():
+            while True:
+                try:
+                    rdr, _, _ = select.select([stdin], [], [], 5)
+                    if not rdr:
+                        # Timeout, retry. We use this timeout to
+                        # recheck periodically whether the RPC has
+                        # been cancelled behing our back and we're
+                        # waiting for nothing. In that case the next
+                        # select will detect that the fd has gone bad
+                        continue
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - The LOCAL allocation ID in case of success
-                - -1 in case of error
-            {"0": -1, "1": 0, "2":8}
-        """
+                    data = os.read(stdin, 4096)
+                except OSError as e:
+                    if e.errno == errno.EBADF:
+                        data = None
+                    else:
+                        logging.warning("%s while reading from stdin, closing", str(e))
+                        return
 
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._alloc, size, desc, global_alloc_id)
+                except select.error  as e:
+                    if e[0] == errno.EBADF:
+                        data = None
+                    else:
+                        raise
+                if data:
+                    yield agent_pb2.IOMessage(kind=agent_pb2.IOMessage.stdin,
+                                              exec_id=execid,
+                                              data=data, eof=False)
+                else:
+                    logging.debug("Received stdin EOF")
+                    yield agent_pb2.IOMessage(kind=agent_pb2.IOMessage.stdin,
+                                              exec_id=execid,
+                                              eof=True)
+                    logging.debug("Input stream terminated")
+                    return
 
-    def _allocfree(self):
-        ret = self._cluster.command(index, "alloc_get_res", {}, self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return -1
-        if "ressource_left" in data:
-            return int(data["ressource_left"])
+        return cls.attach(cluster, indices, execid, iterin(), close_stdin)
 
-    def allocfree(self, indexr):
-        """
-        Get the number of free cores in a given set of VMs
 
-        Arguments:
-            indexr {string/int} -- Range to run on
+    @classmethod
+    def attach_string(cls, msg):
+        if isinstance(msg, agent_pb2.AttachResult):
+            return "attached to command stream"
+        elif isinstance(msg, agent_pb2.DetachResult):
+            return "detached from command stream"
+        elif isinstance(msg, agent_pb2.IOMessage):
+            return msg.data
+        elif isinstance(msg, agent_pb2.ExitStatus):
+            return "exit {}".format(msg.status)
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - The number of free cores on the vm
-                - -1 in case of error
-            {"0": -1, "1": 0, "2":8}
-        """
 
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._allocfree)
+class Hello(AgentCommand):
+    _name = "hello"
+    _request_pb = agent_pb2.HelloMessage
+    _reply_pb = agent_pb2.HelloResult
 
-    def _release(self, gid):
-        ret = self._cluster.command(index,
-                             "alloc_free",
-                             {"alloc_id": json.dumps(gid)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
+class Mkdir(AgentCommand):
+    _name = "mkdir"
+    _request_pb = agent_pb2.MkdirMessage
+    _reply_pb = agent_pb2.MkdirResult
 
-    def release(self, indexr, gid):
-        """
-        Release cores in a given set of VMs
+class Chmod(AgentCommand):
+    _name = "chmod"
+    _request_pb = agent_pb2.ChmodMessage
+    _reply_pb = agent_pb2.ChmodResult
 
-        Arguments:
-            indexr {string/int} -- Range to run on
-            gid {int} -- Global allocation id to release (-1 for all)
+class Hostname(AgentCommand):
+    _name = "hostname"
+    _request_pb = agent_pb2.HostnameMessage
+    _reply_pb = agent_pb2.HostnameResult
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
+    @classmethod
+    def pretty_str(cls, msg):
+        if isinstance(msg, Exception):
+            return str(msg)
 
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._release, gid)
+        return msg.hostname
 
-    def _freeze(self):
-        ret = self._cluster.command(index, "freeze", {}, self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
+class Chown(AgentCommand):
+    _name = "chown"
+    _request_pb = agent_pb2.ChownMessage
+    _reply_pb = agent_pb2.ChownResult
 
-    def freeze(self, indexr):
-        """
-        Suspend events from the agent
+class Truncate(AgentCommand):
+    _name = "truncate"
+    _request_pb = agent_pb2.TruncateMessage
+    _reply_pb = agent_pb2.TruncateResult
 
-        Arguments:
-            indexr {string/int} -- Range to run on
+class Stat(AgentCommand):
+    _name = "stat"
+    _request_pb = agent_pb2.StatMessage
+    _reply_pb = agent_pb2.StatResult
+    @classmethod
+    def pretty_str(cls, msg):
+        if isinstance(msg, Exception):
+            return str(msg)
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._freeze)
+        return MessageToJson(msg)
 
-    def _thaw(self, index):
-        ret = self._cluster.command(index, "thaw", {}, self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
+class Symlink(AgentCommand):
+    _name = "symlink"
+    _request_pb = agent_pb2.SymlinkMessage
+    _reply_pb = agent_pb2.SymlinkResult
 
-    def thaw(self, indexr):
-        """
-        Resume events from the agent
+class Remove(AgentCommand):
+    _name = "remove"
+    _request_pb = agent_pb2.RemoveMessage
+    _reply_pb = agent_pb2.RemoveResult
 
-        Arguments:
-            indexr {string/int} -- Range to run on
+class Move(AgentCommand):
+    _name = "move"
+    _request_pb = agent_pb2.MoveMessage
+    _reply_pb = agent_pb2.MoveResult
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._thaw)
+class Move(AgentCommand):
+    _name = "freeze"
+    _request_pb = agent_pb2.FreezeMessage
+    _reply_pb = agent_pb2.FreezeResult
 
-    def _detach(self, index):
-        ret = self._cluster.command(index, "exec_detach", {}, self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
+class Thaw(AgentCommand):
+    _name = "thaw"
+    _request_pb = agent_pb2.ThawMessage
+    _reply_pb = agent_pb2.ThawResult
 
-    def detach(self, indexr):
-        """
-        Notify detach from exec stream
-        (suspends Agent process IO polling)
+class Exec(AgentCommand):
+    _name = "execve"
+    _request_pb = agent_pb2.ExecMessage
+    _reply_pb = agent_pb2.ExecResult
+    @classmethod
+    def pretty_str(cls, msg):
+        if isinstance(msg, Exception):
+            return str(msg)
 
-        Arguments:
-            indexr {string/int} -- Range to run on
+        return "task launched"
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._detach)
+class Kill(AgentCommand):
+    _name = "kill"
+    _request_pb = agent_pb2.KillMessage
+    _reply_pb = agent_pb2.KillResult
 
-    def _eof(self, index):
-        ret = self._cluster.command(index, "exec_stdin_eof", {}, self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
+class Detach(AgentCommand):
+    _name = "detach"
+    _request_pb = agent_pb2.DetachMessage
+    _reply_pb = agent_pb2.DetachResult
 
-    def eof(self, indexr):
-        """
-        Notify end of input string for Agent processes
-        (closes stdin on agent processes)
+class WriteFile(AgentCommand):
+    _name = "writefile"
+    _request_pb = agent_pb2.WriteFileMessage
+    _reply_pb = agent_pb2.WriteFileResult
 
-        Arguments:
-            indexr {string/int} -- Range to run on
+class Listexec(AgentCommand):
+    _name = "listexec"
+    _request_pb = agent_pb2.ListExecMessage
+    _reply_pb = agent_pb2.ListExecResult
+    @classmethod
+    def pretty_str(cls, msg):
+        return "\n".join(["{}\t{}\t{}\t{}".format(execid, e.running,
+                                                  e.attached, e.filename)
+                          for execid, e in msg.execs.iteritems()])
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._eof)
+class ParallelAgentResult(object):
+    """
+    Manages the results for parallel client commands
+    """
+    def __init__(self, cmd, result_iter, rng, pretty_str, canceller=None):
+        self._result_iter = result_iter
+        self._rng = rng
+        self._pretty_str = pretty_str
+        self._errors = {}
+        self._res_tree = MsgTree()
+        self._canceller = canceller
+        self._cmd = cmd
 
-    def _attach(self, index):
-        ret = self._cluster.command(index, "exec_attach", {}, self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
+    def cancel(self):
+        self._canceller()
 
-    def attach(self, indexr):
-        """
-        Attach to execution streams
-        (resumes the output polling)
+    def iterate_all(self, print_results=False,
+                keep_results=True):
+        for _, _ in self.iterate(print_results, keep_results):
+            pass
 
-        Arguments:
-            indexr {string/int} -- Range to run on
+        self.raise_errors()
 
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._attach)
+    def iterate(self, yield_results=False, print_results=False,
+                keep_results=True):
 
-    def _hello(self, index):
-        ret = self._cluster.command(index, "hello", {}, self._direct)
-        data = self._chk(ret)
+        for key, res in self._result_iter:
+            if isinstance(res, Exception):
+                self._errors.setdefault(key, list()).append(res)
+                yield key, res
+            else:
+                if keep_results:
+                    self._res_tree.add(str(key),
+                                       self._pretty_str(res))
+                if yield_results:
+                    yield key, res
 
-        try:
-            return int(data["time"])
-        except (TypeError, ValueError):
-            return -1
-
-    def hello(self, indexr):
-        """
-        Used to test vm connectivity
-        returns the vm UNIX timestamp
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - Unix Timestamp in case of success
-                - -1 in case of error
-            {"0": -1, "1": 12589}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._hello)
-
-    def _hostname(self, index):
-        ret = self._cluster.command(index, "hostname", {}, self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
+    def raise_errors(self):
+        if not self._errors:
             return
-        if "hostname" in data:
-            pushret(index, data["hostname"])
 
-    def hostname(self, indexr):
-        """
-        Get the hostname from vms
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - Hostname in case of success
-                - 1 in case of error
-            {"0": 1, "1": "vm1"}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._hostname)
-
-    def _mkdir(self, index, path, mode=777):
-        ret = self._cluster.command(index, "mkdir",
-                             {"path": path, "mode": str(mode)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def mkdir(self, indexr, path, mode=777):
-        """
-        Create a directory in the vms
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- Path of the directory
-
-        Keyword Arguments:
-            mode {int} -- Mode of the new directory (default: {777})
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._mkdir, path, mode)
-
-    def _chmod(self, index, path, mode=777):
-        ret = self._cluster.command(index, "chmod",
-                             {"path": path, "mode": str(mode)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def chmod(self, indexr, path, mode=777):
-        """
-        Change rigths for a file on a set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- Path of the file to change rights
-
-        Keyword Arguments:
-            mode {int} -- Mode of the new directory (default: {777})
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._chmod, path, mode)
-
-    def _chown(self, index, path, uid, gid):
-        ret = self._cluster.command(index, "chown",
-                             {"path": path, "uid": str(uid), "gid": str(gid)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def chown(self, indexr, path, uid, gid):
-        """
-        Change ownership for a file on a set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- Path of the file to change rights
-            uid {int} -- UID of the file owner
-            gid {int} -- GID of the file owner
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._chown, path, uid, gid)
-
-    def _ln(self, index, src, dest):
-        ret = self._cluster.command(index, "ln",
-                             {"src": src, "dest": dest},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def ln(self, indexr, src, dest):
-        """
-        Create a symlink in a given set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            src {string} -- source path
-            dest {string} -- destination path
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._ln, src, dest)
-
-    def _mv(self, index, src, dest):
-        ret = self._cluster.command(index, "mv",
-                             {"src": src, "dest": dest},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def mv(self, indexr, src, dest):
-        """
-        Move a file in a set of vms
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            src {string} -- source path
-            dest {string} -- destination path
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._mv, src, dest)
-
-    def _stat(self, index, path):
-        ret = self._cluster.command(index, "stat",
-                             {"path": path},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            pushret(index, data)
-
-    def stat(self, indexr, path):
-        """
-        Get file info in a given set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- path of the file
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - dict with infos in case of success
-                - 1 in case of error
-            {"0": 1, "1": {"size":12231}}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._stat, path)
-
-    def _rm(self, index, path):
-        ret = self._cluster.command(index, "rm",
-                             {"path": path},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def rm(self, indexr, path):
-        """
-        Delete a file in a given set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- path of the file
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._rm, path)
-
-    def _truncate(self, path, size):
-        ret = self._cluster.command(index, "truncate",
-                             {"path": path, "size": str(size)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def truncate(self, indexr, path, size):
-        """
-        Truncate a file in a given set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- path of the file
-            size {int} -- size to truncate to (bytes)
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._truncate, path, size)
-
-    def _userinfo(self, index, login):
-        ret = self._cluster.command(index, "userinfo",
-                             {"login": login},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            pushret(index, data)
-
-    def userinfo(self, indexr, login):
-        """
-        Get user info in a given set of VMs
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._userinfo, login)
-
-    def _lookup(self, index, hostname):
-        ret = self._cluster.command(index, "lookup",
-                             {"host": hostname},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            pushret(index, data["ips"])
-
-    def lookup(self, indexr, hostname="vm0"):
-        """
-        Get IPs for a given hostname
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._lookup, hostname)
-
-    def _getip(self, index, iface):
-        ret = self._cluster.command(index, "getip",
-                             {"iface": iface},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            pushret(index, data["ip"])
-
-    def getip(self, indexr, iface="eth0"):
-        """
-        Get IPs for a network interface
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._getip, iface)
-
-    def _unsetenv(self, index, key):
-        ret = self._cluster.command(index, "unsetenv",
-                             {"key": key},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def unsetenv(self, indexr, key):
-        """
-        Unsets an env variable in the agent env on given set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            key {string} -- variable to be unset
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._unsetenv, key)
-
-    def _getenv(self, index, key):
-        ret = self._cluster.command(index, "getenv",
-                             {"key": key},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            pushret(index, data["value"])
-
-    def getenv(self, indexr, key):
-        """
-        Get an env variable in the agent env on given set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            key {string} -- variable to be unset
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - the variable in case of success
-                - 1 in case of error
-            {"0": 1, "1": "Foo"}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._getenv, key)
-
-    def _setenv(self, index, key, value):
-        ret = self._cluster.command(index, "setenv",
-                             {"key": key, "value": value},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def setenv(self, indexr, key, value):
-        """
-        Set an env variable in the agent env on given set of VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            key {string} -- variable to be unset
-            value {string} -- The value to be set
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._setenv, key, value)
-
-    def _vmstat(self, index, interupt):
-        ret = self._cluster.command(index, "vmstat",
-                             {"interupt": str(interupt)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            pushret(index, data)
-
-    def vmstat(self, indexr, interupt=False):
-        """
-        Read statistics from VMs
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            interupt {bool} -- Defines if interrupts are to be shown
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - dict of perf data in case of success
-                - 1 in case of error
-            {"0": 1, "1": {"cpu":100, ...}}
-        """
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._vmstat, interupt)
-
-    def _readfile(self, index, path, base64):
-        ret = self._cluster.command(index, "readfile",
-                             {"path": path, "base64": str(base64)},
-                             self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            pushret(index, data["content"])
-
-    def readfile(self, indexr, path, base64=0):
-        """
-        Read a file in a set of vms
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- Path to the file to read
-
-        Keyword Arguments:
-            base64 {int} -- Whether to read in Base64 (default: {0})
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - File content in case of success
-                - 1 in case of error
-            {"0": 1, "1": "lorem ipsum"}
-        """
-
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._readfile, path, base64)
-
-    def _writefile(self, index, path, content, base64, append):
-        sappend = "false"
-
-        if append:
-            sappend = "true"
-
-        if base64:
-            ret = self._cluster.command(index, "writefile",
-                                 {"path": path,
-                                  "content64": content,
-                                  "base64": str(base64),
-                                  "append": str(sappend)},
-                                 self._direct)
-        else:
-            ret = self._cluster.command(index, "writefile",
-                                        {"path": path,
-                                         "content": content,
-                                         "base64": str(base64),
-                                         "append": str(sappend)},
-                                        self._direct)
-        data = self._chk(ret)
-        if data is None:
-            return False
-        else:
-            return True
-
-    def writefile(self, indexr, path, content, base64=False, append=False):
-        """
-        Write a file to a set of vms
-
-        Arguments:
-            indexr {string/int} -- Range to run on
-            path {string} -- Path to the file to write
-            content {string} -- Data to write in the file
-
-        Keyword Arguments:
-            base64 {bool} -- If the data are provided in base64 (default: {False})
-            append {bool} -- If the data are to be appended at end of file (default:{False})
-
-        Returns:
-            dict -- Result of the command on each vm
-            For each vm:
-                - 0 in case of success
-                - 1 in case of error
-            {"0": 1, "1": 0}
-        """
-
-        rng = self.unfold_range(indexr)
-        return self.run_func(rng, self._writefile,
-                             path, content, base64, append)
-
-
-class AgentCommandPrinter(object):
-    """
-    This is an helper class to print
-    the return dict from each of the
-    previous commands
-    """
-    def __init__(self, action, data):
-        self.action = action
-        self.data = data
+        raise AgentCommandError(
+            self._cmd,
+            "{} failed on {}".format(
+                self._cmd,
+                NodeSet.fromlist(["vm{}".format(i) for i in self.errors.keys()])),
+            self._errors)
+
+    @property
+    def errors(self):
+        return self._errors
 
     def __str__(self):
-        return json.dumps(self.data, sort_keys=True,
-                          indent=4, separators=(',', ': '))
+        return '\n'.join(["{0}: {1}".format(
+            NodeSet.fromlist(map(lambda x: "vm"+x, keys)),
+            m) for m, keys in self._res_tree.walk()])

@@ -16,18 +16,17 @@
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
-
 import sys
 import yaml
 import json
 import time
 import logging
+import threading
 from Queue import Queue
-from threading import Thread
 
 from . import Hypervisor
 from . import Batch
-from .Error import PcoccError, NoAgentError
+from .Error import PcoccError
 from .Config import Config
 from .Misc import ThreadPool
 from .scripts import click
@@ -54,15 +53,15 @@ class ClusterSetupError(PcoccError):
         super(ClusterSetupError, self).__init__('Failed to start cluster: ' + error)
 
 
-def do_checkpoint_vm(vm, ckpt_dir):
+def do_checkpoint_vm(key, vm, ckpt_dir):
     vm.checkpoint(ckpt_dir)
 
-def do_save_vm(vm, ckpt_dir):
+def do_save_vm(key, vm, ckpt_dir):
     if not vm.image_dir is None:
         vm.save(vm.checkpoint_img_file(ckpt_dir),
                 freeze=Hypervisor.VM_FREEZE_OPT.NO)
 
-def do_quit_vm(vm):
+def do_quit_vm(key, vm):
     vm.quit()
 
 
@@ -74,11 +73,17 @@ class VM(object):
         self.eth_ifs = {}
         self.vfio_ifs = {}
         self.mounts = {}
-        self.command_client = None
-        self.command_node = None
 
-    def __del__(self):
-        self.tbon_disconnect()
+        # Local access to the VM agent through the hypervisor
+        self._agent = None
+        # Client to access to the agent of a remote VM
+        self._agent_client = None
+        # Server implementing the remote access to a VM
+        self._agent_server = None
+
+        # The agent client is initialized lazily on demand
+        # so make sure it's only initialized by one thread
+        self._agent_client_lock = threading.Lock()
 
     def is_on_node(self):
         return Config().batch.is_rank_local(self.rank)
@@ -101,58 +106,33 @@ class VM(object):
             'vf_name': vf_name
         }
 
-    def vm_command_hander(self, command):
-        try:
-            json.loads(command.data)
-        except Exception as e:
-            return "error", {"error":"could not parse JSON in data " + str(e)}
-        return Config().hyp.send_command_host_agent( command )
-
-    def exec_eof_handler(self):
-        return Config().hyp.send_eof_host_agent()
-
-    def exec_input_handler(self, inpu):
-        return Config().hyp.send_input_host_agent( inpu )
-
-    def exec_output_handler(self, is_active ):
-        return Config().hyp.get_output_host_agent( is_active )
-
-    def _set_host_agent_ctx(self, vm_rank):
-        self.command_node = TreeNode(
-            vmid=vm_rank,
-            port=0,
-            handler=self.vm_command_hander,
-            exec_input_handler=self.exec_input_handler,
-            exec_output_handler=self.exec_output_handler,
-            exec_input_eof_notifier=self.exec_eof_handler
+    def enable_agent_server(self, hypervisor_agent):
+        self._agent = hypervisor_agent
+        self._agent_server = TreeNode(
+            vmid    = self.rank,
+            handler = self._agent.send_message,
+            stream_init_handler = self._agent.stream_init_handler
         )
 
-
-    def command_tree_get_info(self):
-        key_name =  "hostagent/vms/" + str(self.rank)
-        root_info = Config().batch.read_key(
-            "cluster/user",
-            key_name,
-            blocking=True
-        )
-        info = root_info.split(":")
-        if len(info) != 3:
-            raise Exception("Failed to parse VM info")
-        return info
-
-    def check_command_client(self):
-        if self.command_client is None:
-            info = self.command_tree_get_info()
-            self.command_client = TreeClient(
-                info
+    @property
+    def agent_client(self):
+        self._agent_client_lock.acquire()
+        if self._agent_client is None:
+            key_name =  "hostagent/vms/" + str(self.rank)
+            root_info = Config().batch.read_key(
+                "cluster/user",
+                key_name,
+                blocking=True
             )
+            info = root_info.split(":")
+            if len(info) != 3:
+                raise Exception("Failed to parse VM info")
+            self._agent_client = TreeClient(info)
+        self._agent_client_lock.release()
 
-    def tbon_disconnect( self ):
-        del self.command_client
-        del self.command_node
+        return self._agent_client
 
     def run(self, ckpt_dir=None):
-        self._set_host_agent_ctx(self.rank)
         Config().hyp.run(self, ckpt_dir)
 
     def exec_cmd(self, cmd, user):
@@ -270,7 +250,7 @@ class VM(object):
     @property
     def emulator_cores(self):
         return self._template.emulator_cores
-    
+
     @property
     def state(self):
         state, _ = Config().hyp.get_vm_state(self.rank)
@@ -291,10 +271,8 @@ class Cluster(object):
         self.vms = VMList()
         self.resource_definition = ""
         self.definition = template_string
-        count = 0
-        self.command_client = None
-        self.live_agents = {}
 
+        count = 0
         # Parse definition to generate the list of VMs
         try:
             for tpl_def in template_string.split(','):
@@ -321,88 +299,8 @@ class Cluster(object):
 
         self.resource_definition = self.resource_definition[:-1]
 
-    def command_tree_get_root(self):
-        root_info = Config().batch.read_key(
-            "cluster/user",
-            "hostagent/vms/0",
-            blocking=True
-        )
-        info = root_info.split(":")
-        if len(info) != 3:
-            raise Exception("Failed to parse VM0 info")
-        return info
-
-    def check_command_client(self):
-        if self.command_client is None:
-            info = self.command_tree_get_root()
-            self.command_client = TreeClient(
-                info
-            )
-
-    def tbon_disconnect(self):
-        del self.command_client
-        self.command_client = None
-
     def vm_count(self):
         return len(self.vms)
-
-
-    def check_agent(self, rank, timeout=60):
-        """This checks if the agent has started with a graceful timeout
-        
-        Arguments:
-            rank {int} -- The rank to be checked
-            timeout {int} -- How long to wait for the agent
-        
-        Returns:
-            int -- (1) agent found (0) no agent yet (after 60 seconds by default)
-        """
-
-        if str(rank) in self.live_agents:
-            return 1
-
-        data = None
-        try:
-            data = Config().batch.read_key('cluster/user', 
-                                            "hostagent/vms/{0}-agent".format(rank),
-                                            blocking=True, timeout=timeout)
-        except:
-            pass
-
-        if data is None:
-            return 0
-        else:
-            self.live_agents[str(rank)] = True
-            return 1
-
-
-    def command(self, vmid, command, data, direct = 0 ):
-        if len(self.vms) <= vmid:
-            raise PcoccError("No such vmid")
-
-        if self.check_agent(vmid) == 0:
-            raise NoAgentError()
-
-        try:
-            if direct == 0 :
-                self.check_command_client()
-                return self.command_client.command(vmid, command, data)
-            else: 
-                self.vms[ vmid ].check_command_client()
-                return self.vms[vmid].command_client.command(vmid, command, data)
-        except:
-            return None
-
-    def exec_stream( self, inputs ):
-        self.check_command_client()
-        logging.info("Cluster Exec Streeam")
-        for v in  self.command_client.exec_stream(inputs):
-            yield v
-
-    def state(self, vmid):
-        if len(self.vms) <= vmid:
-            raise Exception("No such VMID")
-        return self.vms[ vmid ].state
 
     def alloc_node_resources(self):
         self._set_host_state('network-config',
@@ -429,7 +327,7 @@ class Cluster(object):
                                  str(e))
             raise
 
-        self._set_host_state('running',
+        self._set_host_state('complete',
                              2,
                              'done',
                              None)
@@ -509,7 +407,7 @@ class Cluster(object):
         return '{0}/{1}'.format(self._host_state_dir(), host_rank)
 
     def _check_host_state(self, host_state):
-        if host_state['state'] == 'running':
+        if host_state['state'] == 'complete':
             return True
         elif host_state['state'] == 'failed':
             raise ClusterSetupError(host_state['desc'])
@@ -533,8 +431,6 @@ class Cluster(object):
         else:
             return False, min(host_states,
                                  key=lambda x: x['priority'])
-
-
 
     def wait_host_config(self, host_rank=None):
         """Waits for hosts to be configured"""
@@ -594,5 +490,9 @@ class Cluster(object):
                 bar.current_item = last_state
                 if sys.stderr.isatty():
                     bar.update(1)
+
+                logging.debug("Seen host state " + str(last_state))
+
                 if done:
+                    logging.debug("Finished wiating for host states")
                     break

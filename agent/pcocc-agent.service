@@ -1,0 +1,12 @@
+[Unit]
+Description=pcoccagent
+After=syslog.target network.target
+
+[Service]
+Type=simple
+PIDFile=/var/pcocc-agent.pid
+ExecStart=/sbin/pcocc-agent
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

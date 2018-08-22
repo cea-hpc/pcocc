@@ -1169,12 +1169,14 @@ def pcocc_tpl_show(template):
         handle_error(err)
 
 class CLIRangeSet(RangeSet):
-    def __init__(self, indices, cluster):
+    def __init__(self, indices=None, cluster=None):
         try:
             if indices == "all":
                 super(CLIRangeSet, self).__init__("0-{}".format(cluster.vm_count() - 1))
-            else:
+            elif indices is not None:
                 super(CLIRangeSet, self).__init__(ascii(indices))
+            else:
+                super(CLIRangeSet, self).__init__()
         except RangeSetParseError as e:
             raise PcoccError(str(e))
 

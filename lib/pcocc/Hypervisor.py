@@ -1195,27 +1195,6 @@ username={3}@pcocc
 
         s_mon.close()
 
-        qemu_socket_path = batch.get_vm_state_path(vm.rank,
-                                                   'qemu_console_socket')
-        pcocc_socket_path = batch.get_vm_state_path(vm.rank,
-                                                   'pcocc_console_socket')
-
-        logging.debug('Connecting to qemu console %s',
-                      qemu_socket_path)
-        qemu_console_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            qemu_console_sock.settimeout(30)
-            qemu_console_sock.connect(qemu_socket_path)
-            qemu_console_sock.settimeout(None)
-        except socket.error:
-            logging.error('Failed to connect to qemu console')
-            qemu_console_sock = None
-
-        pcocc_console_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        pcocc_console_sock.bind(pcocc_socket_path)
-        pcocc_console_sock.listen(0)
-
-
         if ckpt_dir:
             # Signal VM restore
             self._set_vm_state('qemu-start',
@@ -1228,17 +1207,19 @@ username={3}@pcocc
             mon.cont()
             mon.close_monitor()
 
-        # Signal VM started
-        self._set_vm_state('running',
-                           'The vm has started',
-                           None, vm.rank)
-
         # If we need to properly shutdown the guest, catch SIGTERMs
         # and SIGINTS
         if vm.wait_for_poweroff:
             term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
         else:
             term_sigfd = None
+
+        if systemd_notify('VM is booting...', ready=True):
+            watchdog = threading.Thread(None, self.watchdog, args=[vm])
+            watchdog.start()
+
+
+        vm.enable_agent_server(HostAgent(vm.rank))
 
         # Proxy the VM console until Qemu closes it
         client_sock = None
@@ -1247,6 +1228,15 @@ username={3}@pcocc
                                                    'qemu_console_log'), 'w+',
                                 1)
 
+        qemu_socket_path = batch.get_vm_state_path(vm.rank,
+                                                   'qemu_console_socket')
+        pcocc_socket_path = batch.get_vm_state_path(vm.rank,
+                                                   'pcocc_console_socket')
+
+        logging.debug('Connecting to qemu console %s',
+                      qemu_socket_path)
+        qemu_console_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
         t = None
         shutdown_attempts = 0
         if term_sigfd is None:
@@ -1254,13 +1244,22 @@ username={3}@pcocc
         else:
             base_list = [term_sigfd, qemu_console_sock]
 
+        try:
+            qemu_console_sock.settimeout(30)
+            qemu_console_sock.connect(qemu_socket_path)
+            qemu_console_sock.settimeout(None)
+        except socket.error:
+            logging.error('Failed to connect to qemu console')
+            qemu_console_sock = None
 
-        if systemd_notify('VM is booting...', ready=True):
-            watchdog = threading.Thread(None, self.watchdog, args=[vm])
-            watchdog.start()
+        pcocc_console_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        pcocc_console_sock.bind(pcocc_socket_path)
+        pcocc_console_sock.listen(0)
 
-
-        vm.enable_agent_server(HostAgent(vm.rank))
+        # Signal VM started
+        self._set_vm_state('running',
+                           'The vm has started',
+                           None, vm.rank)
 
         while qemu_console_sock:
             # Only accept one client at a time

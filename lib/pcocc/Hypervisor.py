@@ -885,7 +885,10 @@ username={3}@pcocc
             atexit.register(os.remove, snapshot_path)
 
             if vm.disk_model == 'virtio':
-                cmdline += ['-device', 'virtio-blk-pci,'
+                cmdline += ['-object',
+                            'iothread,id=ioth-bootdisk']
+                cmdline += ['-device',
+                            'virtio-blk-pci,id=ioth-bootdisk,multifunction=on,'
                             'drive=bootdisk,addr=06.0']
             elif vm.disk_model == 'ide':
                 cmdline += ['-device', 'ich9-ahci,id=ahci,addr=06.0']
@@ -1112,8 +1115,10 @@ username={3}@pcocc
                                        '-rock', user_data_file,
                                        meta_data_file], stdout=devnull, stderr=devnull)
 
-            cmdline += [ '-drive',
-                         'file={0},index=3,media=cdrom'.format(iso_file)]
+
+            cmdline += [ '-drive', 'id=cdrom0,if=none,format=raw,readonly=on,file={0}'.format(iso_file)]
+            cmdline += [ '-device', 'virtio-scsi-pci,id=scsi0']
+            cmdline += [ '-device', 'scsi-cd,bus=scsi0.0,drive=cdrom0']
 
         except (OSError, IOError, subprocess.CalledProcessError) as err:
             raise HypervisorError('unable to generate cloud-init iso: '

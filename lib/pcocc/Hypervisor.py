@@ -854,8 +854,8 @@ username={3}@pcocc
             f.close()
 
         cmdline += ['-rtc', 'base=utc']
-        #cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,'
-        #            'vram_size=67108864,vgamem_mb=16']
+        cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,'
+                   'vram_size=67108864,vgamem_mb=16']
 
         self._set_vm_state('temporary-disk',
                            'creating disk file',

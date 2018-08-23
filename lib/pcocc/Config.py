@@ -66,6 +66,7 @@ class Config(object):
         self.vnets = pcocc.Networks.VNetworkConfig()
         self.rsets = pcocc.Resources.ResSetConfig()
         self.tpls = pcocc.Templates.TemplateConfig()
+        self.repos = pcocc.Image.ImageRepoConfig()
 
         # Initalize later depending on what's provided in the config files
         self.batch = None
@@ -83,6 +84,7 @@ class Config(object):
         self.load_vnets(os.path.join(conf_dir, 'networks.yaml'))
         self.load_rsets(os.path.join(conf_dir, 'resources.yaml'))
         self.load_tpls(os.path.join(conf_dir, 'templates.yaml'))
+        self.load_repos(os.path.join(conf_dir, 'repos.yaml'))
         if jobid is None:
             jobid = os.getenv('PCOCC_LOCAL_JOB_ID')
         self.load_batch(os.path.join(conf_dir, 'batch.yaml'), jobid,
@@ -101,9 +103,14 @@ class Config(object):
         self.user_conf_dir = self.resolve_path(user_conf_dir)
         self.load_tpls(os.path.join(self.user_conf_dir,
                                     'templates.yaml'), required=False)
+        self.load_repos(os.path.join(self.user_conf_dir, 'repos.conf'),
+                        user_level=True)
 
     def load_vnets(self, network_conf_file):
         self.vnets.load(network_conf_file)
+
+    def load_repos(self, repo_conf_file, user_level=False):
+        self.repos.load(repo_conf_file, user_level)
 
     def load_rsets(self, resource_conf_file):
         self.rsets.load(resource_conf_file)

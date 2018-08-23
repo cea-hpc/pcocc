@@ -21,16 +21,19 @@ import os
 import re
 import errno
 import time
-
+import logging
+import pcocc.Image
 from .scripts.Shine.TextTable import TextTable
 from .Config import Config
 from .Error import InvalidConfigurationError
 from .Backports import OrderedDict
 
+
 # For each valid setting, is it required, whats the default value and is it
 # inheritable
 template_settings = {'image': (False, None, True),
                      'resource-set': (True, None, True),
+                     'ispod': (False, False, True),
                      'custom-args': (False, [], True),
                      'qemu-bin': (False, None, True),
                      'nic-model': (False, None, True),
@@ -106,6 +109,31 @@ class TemplateConfig(dict):
 
     def resource_template(self, tpl):
         return '___'+tpl
+
+
+def extract_repo_revision(image):
+    img_mgr = pcocc.Image.PcoccImage()
+    img_path, img_meta = img_mgr.get_by_name(image)
+    
+    #First assume rev is 0
+    rev=0
+    # Do we rely on the KVS ?
+    if img_path:
+        # Were meta correctly loaded ?
+        if img_meta:
+            # Find all the images in the repo matching the rev pattern (if present)
+            revs = img_mgr.find(img_meta['key'] + r"-rev(\d+)")
+            # If there was some
+            if len(revs):
+                # Get the one with the highest name
+                img_meta = sorted(revs, key=lambda k:int(k['key'].split("-rev")[-1]))[-1]
+                # Retrieve its informations and replace the image
+                img_path, _ = img_mgr.get_by_name(img_meta['repo'] + ":" + img_meta['key'])
+                rev = img_meta['key'].split("-rev")[-1]
+                logging.info("Retained " + img_meta['repo'] + ":" + img_meta['key'])
+    return img_meta, img_path, rev
+
+
 
 class Template(object):
     """Class holding a single template definition
@@ -196,6 +224,18 @@ class Template(object):
         if getattr(self, 'image') is None:
             return None, 0
 
+        # This is the repository-based image resolution
+        img_meta, img_path, rev = extract_repo_revision(getattr(self, 'image'))
+
+        if img_path:
+            #Flag as found in a repository
+            self.settings['fromrepo'] = True
+            self.settings['image_repo'] = img_meta['repo']
+            self.settings['image_key'] = img_meta['key']
+            return img_path, int(rev)
+
+        # This is the backward compatible file-system definition
+        # of the pcocc images
         image = Config().resolve_path(getattr(self, 'image'),
                                     vm)
         try:
@@ -221,8 +261,25 @@ class Template(object):
                 raise InvalidConfigurationError(
                     "template \"{}\" image directory "
                     "has no image ".format(self.name))
-
+    
+        #Flag as not coming from a pcocc repository
+        self.settings['fromrepo'] = False
         return image_file, revision
+
+
+    def from_repo(self):
+        self.resolve_image()
+        if "fromrepo" in self.settings:
+            return self.settings['fromrepo']
+        else:
+            return False
+
+    def image_repo_infos(self):
+        if self.from_repo():
+            return self.settings['image_repo'], self.settings['image_key']
+        else:
+            return None, None
+
 
     #TODO validate all template settings
     def validate(self):

@@ -1,0 +1,11 @@
+HELP: "This file defines pcocc repository list such repositories are checked in order"
+HELP0: "WARNING : The KVS will only create the last level directory if it does not exist (not the whole hierarchy) therefore parent directory MUST exist"
+HELP1: "You may use one of the following variable to generate repository paths:"
+HELP2: "%HOME% => User's home directory"
+HELP3: "%UID% => User's UID"
+HELP4: "%GID% => Users's GID"
+HELP5: "%USER% => Users's login"
+repos: 
+   - "%HOME%/.pcocc/repo"
+
+

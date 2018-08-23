@@ -80,10 +80,15 @@ class VM(object):
         self._agent_client = None
         # Server implementing the remote access to a VM
         self._agent_server = None
-
         # The agent client is initialized lazily on demand
         # so make sure it's only initialized by one thread
         self._agent_client_lock = threading.Lock()
+
+    def from_repo(self):
+        return self._template.from_repo()
+
+    def image_repo_infos(self):
+        return self._template.image_repo_infos()
 
     def is_on_node(self):
         return Config().batch.is_rank_local(self.rank)
@@ -172,8 +177,19 @@ class VM(object):
         return image_file
 
     @property
+    def is_container(self):
+        if self._template.container:
+            return True
+        return False
+
+    @property
     def image_dir(self):
+        #Make sure for container that image is resolved
+        self._template.resolve_image(self)
         if self._template.image is None:
+            return None
+
+        if self.from_repo():
             return None
 
         return Config().resolve_path(self._template.image, self)
@@ -279,7 +295,9 @@ class Cluster(object):
                 tpl_def = tpl_def.strip()
 
                 if ':' in tpl_def:
-                    tpl_name, tpl_count = tpl_def.split(':')
+                    spl = tpl_def.split(':')
+                    #Here we handle the case 'repo:vm:count'
+                    tpl_name, tpl_count = ":".join(spl[0:len(spl)-1]), spl[len(spl)-1]
                 else:
                     tpl_name, tpl_count = tpl_def, 1
 

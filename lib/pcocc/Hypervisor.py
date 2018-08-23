@@ -874,7 +874,7 @@ username={3}@pcocc
         # may save the image later if needed
         snapshot_path = batch.get_vm_state_path(vm.rank, 'image_snapshot')
 
-        if not vm.image_dir is None:
+        if (not vm.image_dir is None) or (vm.from_repo()):
             if ckpt_dir:
                 image_path = self.checkpoint_img_file(vm, ckpt_dir)
             else:

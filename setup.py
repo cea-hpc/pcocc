@@ -4,7 +4,7 @@ import glob
 from setuptools.command.bdist_rpm import bdist_rpm
 from setuptools.command.install import install
 from setuptools import setup, find_packages
-
+from distutils.core import Extension
 
 class pcocc_bdist_rpm(bdist_rpm):
     user_options = bdist_rpm.user_options + [
@@ -67,6 +67,7 @@ def recursive_scan_data_files(dest, src):
             local_files.append(fpath)
       f_files.append((destdir, local_files))
    return f_files
+
 
 setup(name= 'pcocc', version= '0.4.0', description= 'Spawn VMs on a HPC Cluster',
       long_description= 'Pcocc  allows users of a HPC cluster '

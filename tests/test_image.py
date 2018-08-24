@@ -18,7 +18,7 @@ except OSError:
 def test_check_qemu_image_ext():
     for fmt in Image.known_vm_image_formats:
         assert Image.check_qemu_image_ext(fmt) is True
-    
+
     with pytest.raises(Exception):
         Image.check_qemu_image_ext("whatisthis")
 
@@ -63,7 +63,7 @@ def test_convert(datadir):
     timg = str(datadir.join("thiswillneverbehere/out.qcow2"))
     with pytest.raises(Exception):
         Image.convert(simg, timg)
-    
+
 
     # All formats
     for ifmt in Image.known_vm_image_formats:
@@ -91,4 +91,3 @@ def test_convert(datadir):
             assert os.path.isfile(timg) is True
             with pytest.raises(Exception):
                 Image.convert(simg, timg)
-

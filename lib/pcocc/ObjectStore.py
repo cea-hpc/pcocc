@@ -38,7 +38,7 @@ class ObjectStore(object):
                     to_add_filtered.append(e)
                 except:
                     pass
-                
+
             #Save repolist
             self.repolist = to_add_filtered
             #Hash repolist

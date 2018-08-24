@@ -114,7 +114,7 @@ class TemplateConfig(dict):
 def extract_repo_revision(image):
     img_mgr = pcocc.Image.PcoccImage()
     img_path, img_meta = img_mgr.get_by_name(image)
-    
+
     #First assume rev is 0
     rev=0
     # Do we rely on the KVS ?
@@ -261,7 +261,7 @@ class Template(object):
                 raise InvalidConfigurationError(
                     "template \"{}\" image directory "
                     "has no image ".format(self.name))
-    
+
         #Flag as not coming from a pcocc repository
         self.settings['fromrepo'] = False
         return image_file, revision

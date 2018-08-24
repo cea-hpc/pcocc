@@ -20,7 +20,7 @@ def check_qemu_image_ext(ext):
         raise PcoccError("VM Image format not supported: " + ext)
     return True
 
-known_container_image_formats = ["containers-storage", "dir", "docker", 
+known_container_image_formats = ["containers-storage", "dir", "docker",
                                  "docker-archive", "docker-daemon", "oci",
                                  "oci-archive", "ostree", "tarball"]
 
@@ -147,7 +147,7 @@ class ImageRepoConfig(object):
             #This is the system-wide list
             # Just store the array
             self.glob = repo_config["repos"]
-        
+
         #It is not time to update repolist
         self.object_store.set_repo_list(self.get_list())
 
@@ -156,7 +156,7 @@ class ImageRepoConfig(object):
 
     def get_local(self):
         return self.local[:]
-    
+
     def get_global(self):
         return self.glob[:]
 
@@ -180,7 +180,7 @@ class ImageRepoConfig(object):
             if glob_found:
                 raise PcoccError("'{0}' is in a global repository and".format(value)
                                 +" cannot be removed from CLI")
-  
+
             raise PcoccError("No such entry '{0}' in local repositories".format(value))
 
     def add_local(self, value):
@@ -232,7 +232,7 @@ class PcoccImage(object):
     def __init__(self):
         self.object_store = Config().repos.object_store
 
-    
+
     def _tempfile(self, ext):
         fd, path = tempfile.mkstemp(suffix=ext)
         os.close(fd)
@@ -272,7 +272,7 @@ class PcoccImage(object):
         Returns:
             string -- Path to the image with this name
         """
-        image_name, repo = self.image_descriptor_parse(image_descriptor) 
+        image_name, repo = self.image_descriptor_parse(image_descriptor)
 
         logging.info("pcocc repo : Locating %s in %s" % (image_name, repo))
 
@@ -333,10 +333,10 @@ class PcoccImage(object):
         elif itype == "cont":
             if not check_container_image_ext( src_ext ):
                 raise PcoccError("Imported type '{0}' does not".format(src_ext)
-                                +" match CONTAINER type") 
+                                +" match CONTAINER type")
         else:
             raise PcoccError("Image type {0} not recognized make sure".format(src_ext)
-                            +" your file has the proper extension") 
+                            +" your file has the proper extension")
 
     def extract_extension(self, in_path):
         try:
@@ -378,11 +378,11 @@ class PcoccImage(object):
                 elif 2 <= len(spl):
                     src_ext = spl[0]
                     in_path = ":".join(spl[1:])
-        
-        self.check_image_type(itype, src_ext) 
-        
+
+        self.check_image_type(itype, src_ext)
+
         # Now check if image exists or shadows and force is passed
-        
+
         dst_file, dst_meta = self.get_by_name(key)
 
         if dst_file:
@@ -417,7 +417,7 @@ class PcoccImage(object):
             tmp = self._tempfile(ext=".tar.gz")
             used_tmp=True
             # Here we directly use skopeo to copy to an OCI tarball
-            # and pcocc accepts the skopeo subtypes 
+            # and pcocc accepts the skopeo subtypes
             cmd = ["skopeo", "copy", src_ext + ":" + in_path,  "oci-archive:" + tmp + ":latest"]
 
             def import_error():
@@ -429,10 +429,10 @@ class PcoccImage(object):
                 ret = subprocess.call(cmd)
             except subprocess.CalledProcessError:
                 import_error()
-            
+
             if ret != 0:
                 import_error()
-  
+
             in_path=tmp
         else:
             raise PcoccError("No such image type %s" % itype)
@@ -507,7 +507,7 @@ class PcoccImage(object):
 
 
     def move_image(self, source_descriptor, target_descriptor, force=False ):
-        # Check source 
+        # Check source
         src_name, _ = self.image_descriptor_parse(source_descriptor)
 
         # Check that image exists
@@ -534,6 +534,6 @@ class PcoccImage(object):
             if not force:
                 raise PcoccError("{0} image is already present in {1}".format(dest_name, dest_repo)
                                  +"you may use '-f/--force' to overwrite")
-        
+
         self.object_store.setval( dest_name, src_file, meta_data=src_meta["metadata"], repo_name=dest_repo)
         self.object_store.delval(src_name, src_meta["repo"])

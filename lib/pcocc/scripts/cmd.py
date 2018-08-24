@@ -283,7 +283,7 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts):
 def pcocc_scp(jobid, jobname, user, scp_opts):
     """Transfer files to a VM via scp
 
-       This requires the VM to have its ssh port reverse NAT'ed to the host in 
+       This requires the VM to have its ssh port reverse NAT'ed to the host in
        its NAT network configuration.
 
        \b
@@ -441,7 +441,7 @@ def pcocc_save(jobid, jobname, dest,  vm, safe):
         if dest:
             explicit_destination=True
         else:
-            explicit_destination=False 
+            explicit_destination=False
 
         #Check if full image is needed
         if explicit_destination:
@@ -471,11 +471,11 @@ def pcocc_save(jobid, jobname, dest,  vm, safe):
                 sys.exit(-1)
 
         click.secho('Saving image...')
-       
+
         #Compute Target Path
         if explicit_destination:
             # We have a target dir just add 'image' filename
-            save_path = os.path.join(dest_dir, 'image')    
+            save_path = os.path.join(dest_dir, 'image')
         else:
             if not repo_insert_back:
                 #We are not on a repo we thereofre use the image_dir
@@ -485,7 +485,7 @@ def pcocc_save(jobid, jobname, dest,  vm, safe):
             else:
                 #Here we are on a repo we therefore use a tempfile directly
                 save_path = dest
-    
+
         if safe:
             freeze_opt = Hypervisor.VM_FREEZE_OPT.YES
         else:
@@ -502,7 +502,7 @@ def pcocc_save(jobid, jobname, dest,  vm, safe):
 
             image_name = key.split("-rev")[0] + "-rev{0}".format(vm.revision + 1)
             img_mgr.import_image(save_path, image_name, itype="vm", img_type="qcow2")
-            
+
             #Now delete the temporary directory
             os.unlink(save_path)
         else:
@@ -1720,7 +1720,7 @@ def pcocc_image_delete_vm( descriptor ):
             raise PcoccError("Use 'pcocc image revisions' to manipulate revisions.")
 
         #Do not delete if revisions depend on this image
-        image_name, _ = img_mgr.image_descriptor_parse(descriptor) 
+        image_name, _ = img_mgr.image_descriptor_parse(descriptor)
         matches = img_mgr.find(image_name + r"-rev(\d+)")
         if len(matches):
             raise PcoccError("Cannot Delete an image which has revisions")
@@ -1806,7 +1806,7 @@ def print_image_list(val_list):
     for img in val_list:
         ts = time.localtime(img["timestamp"])
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
-    
+
         if "rev" in img:
             rev = str(img["rev"])
         else:
@@ -1862,7 +1862,7 @@ def pcocc_image_list( js, rev, repo ):
     except PcoccError as err:
 
         handle_error(err)
-    
+
 @image.command(name='find',
              short_help="Find images in repositories")
 @click.option('-j', '--js', is_flag=True,
@@ -1875,7 +1875,7 @@ def pcocc_image_find( js, regexpr, repo ):
         img_mgr = pcocc.Image.PcoccImage()
 
         val_list = img_mgr.find(regexpr, repo)
-      
+
         if js:
             print json.dumps(val_list, indent=4, sort_keys=True)
         else:
@@ -1965,13 +1965,13 @@ def internal_pcocc_image_revisions(img_mgr, rollback, ident, js, descriptor ):
 
 
                 if int(last_rev) < ident:
-                    raise PcoccError("Last revision is " 
+                    raise PcoccError("Last revision is "
                           + last_rev + ": Cannot rollback to " + str(ident))
             else:
                 #if no rev is specified it is as if we revert last_rev as id
                 ident = int(last_rev) - 1
                 sident = str(ident)
-            
+
             #Delete Vms in decreasing order
             for i  in  range(len(matches) - 1 , -1 , -1):
                 elem = matches[i]
@@ -1982,7 +1982,7 @@ def internal_pcocc_image_revisions(img_mgr, rollback, ident, js, descriptor ):
                     iname = elem['repo'] + ":" + elem['key']
                     print("Deleting {0}").format(iname)
                     img_mgr.delete_image(iname)
-            
+
             print("{0} has been reverted to revision '{1}'".format(descriptor, sident))
         else:
             if js:
@@ -1999,7 +1999,7 @@ def internal_pcocc_image_revisions(img_mgr, rollback, ident, js, descriptor ):
                 #Push Reference Image
                 rev = "origin"
                 ts = time.localtime(infos["timestamp"])
-                str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)      
+                str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
 
                 tbl.append({'rev': rev,
                             'size': formated_file_size(infos["path"]),

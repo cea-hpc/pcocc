@@ -21,6 +21,7 @@ import string
 import logging
 import errno
 import fcntl
+import pwd
 import pcocc
 from pcocc.Singleton import Singleton
 from os.path import expanduser
@@ -144,19 +145,28 @@ class Config(object):
         self.batch = None
 
     def resolve_path(self, path, vm=None):
+        """ Resolve a path from a custom template string
+        %{env:ENVVAR}   is expanded to the content of the environment variable ENVVAR
+        %{clusterdir}   to a temporary directory to store per-cluster data
+        %{vm_rank}      to the rank of the virtual machine
+        %{user}         to the current user name
+        %{homedir}      to home directory of the current user
+        %{clusterowner} to the user name of the cluster owner
+        """
         tpl = TemplatePath(path)
         tplvalues = {}
 
         try:
-            tplvalues['clusterdir'] = self.batch.cluster_state_dir
+            tplvalues['clusterdir']  = self.batch.cluster_state_dir
+            tplvalues['clusteruser'] = self.batch.batchuser
         except AttributeError:
             pass
 
         for key, val in os.environ.iteritems():
             tplvalues['env:%s' % (key)] = val
 
-        tplvalues['user'] =  self.batch.batchuser,
         tplvalues['homedir'] =  expanduser("~")
+        tplvalues['user'] =  pwd.getpwuid(os.getuid()).pw_name
 
         if vm:
             tplvalues['vm_rank'] = vm.rank

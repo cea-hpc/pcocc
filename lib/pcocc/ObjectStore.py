@@ -12,8 +12,8 @@ from pwd import getpwnam
 from shutil import copyfile
 import glob
 
-from .Error import InvalidConfigurationError
-from .Error import PcoccError
+from .Error import InvalidConfigurationError, PcoccError
+from .Config import Config
 
 class ObjectStore(object):
     def __init__(self, repolist=None):
@@ -160,18 +160,8 @@ class ObjectStore(object):
         if not self.default_repo:
             raise PcoccError("ObjectStore : No repository found")
 
-    def _unfoldpath(self,path):
-        user = getpass.getuser()
-        home = getpwnam(user).pw_dir
-        uid = getpwnam(user).pw_uid
-        gid = grp.getgrnam(user).gr_gid
-
-        #Apply subst
-        path = path.replace("%USER%", user)
-        path = path.replace("%HOME%", home)
-        path = path.replace("%UID%", str(uid))
-        path = path.replace("%GID%", str(gid))
-        return path
+    def _unfoldpath(self, path):
+        return Config().resolve_path(path)
 
     def _normalize_key(self, key):
         ascii_val = ( [chr(e) for e in range(48,57)] #0-9

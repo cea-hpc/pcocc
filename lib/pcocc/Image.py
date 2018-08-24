@@ -17,8 +17,7 @@ known_vm_image_formats = ["raw", "qcow2", "qed", "vdi", "vpc", "vmdk"]
 
 def check_qemu_image_ext(ext):
     if ext not in known_vm_image_formats:
-        raise PcoccError("VM Image format not supported: " + ext)
-    return True
+        raise PcoccError("VM image format {} not supported".format(ext))
 
 known_container_image_formats = ["containers-storage", "dir", "docker",
                                  "docker-archive", "docker-daemon", "oci",
@@ -26,63 +25,30 @@ known_container_image_formats = ["containers-storage", "dir", "docker",
 
 def check_container_image_ext(ext):
     if ext not in known_container_image_formats:
-        raise PcoccError("Container Image format not supported: " + ext)
-    return True
+        raise PcoccError("Container image format {} not supported".format(ext))
 
-
-def convert(src, dest, overwrite=False, quiet=True, src_type=None):
+def convert(src, dest, src_format, dest_format):
     src = os.path.abspath(src)
     dest = os.path.abspath(dest)
 
-    if not os.path.isfile(src):
-        raise PcoccError("No such file " + src)
-
-    if os.path.isfile(dest) and (overwrite is False):
-        raise PcoccError(
-            "Would overwrite "
-            + dest
-            + " set overwrite to true if you want to do so")
-
-    if not src_type:
-        src_ext = os.path.splitext(src)[-1].lower().replace(".", "")
-
-        if src_ext == "":
-            src_ext = "qcow2"
-    else:
-        src_ext=src_type
-
-    check_qemu_image_ext(src_ext)
-
-    dest_ext = os.path.splitext(dest)[-1].lower().replace(".", "")
-
-    if dest_ext == "":
-        dest_ext = "qcow2"
-
-    check_qemu_image_ext(dest_ext)
-
     try:
-        if not quiet:
-            sys.stderr.write(
-                "Convert '{0}'\n     to '{1}'... "
-                .format(src, dest))
+        print("Converting from format '{0}' "
+              "to '{1}'... ".format(src_format, dest_format))
 
         subprocess.check_output(
             ["qemu-img",
              "convert",
              "-p",
-             "-f", src_ext,
-             "-O", dest_ext,
+             "-f", src_format,
+             "-O", dest_format,
              src,
              dest],
             stderr=subprocess.STDOUT,
             shell=False)
-        if not quiet:
-            sys.stderr.write("OK\n")
-    except subprocess.CalledProcessError, e:
-        raise PcoccError("ERROR:" +
-                        "****** qemu-img output ******\n" +
-                        e.output +
-                        "*****************************\n")
+
+    except subprocess.CalledProcessError as e:
+        raise PcoccError("Unable to convert image. "
+                         "The qemu-img command failed with: " +e.output)
 
 
 def create(path, size="1M", iformat="qcow2", quiet=True):
@@ -284,8 +250,8 @@ class PcoccImage(object):
 
     def get_type_from_meta(self, meta_data):
         if "metadata" in meta_data:
-            if "type" in meta_data["metadata"]:
-                return meta_data["metadata"]["type"]
+            if "kind" in meta_data["metadata"]:
+                return meta_data["metadata"]["kind"]
         return None
 
 
@@ -326,27 +292,21 @@ class PcoccImage(object):
         except:
             raise PcoccError("No such image '{0}' in repository '{1}'".format(image_name, repo))
 
-    def check_image_type(self, itype, src_ext):
-        if itype == "vm":
-            if not check_qemu_image_ext(src_ext):
-                raise PcoccError("Imported type '{0}' does not match VM type".format(src_ext))
-        elif itype == "cont":
-            if not check_container_image_ext( src_ext ):
-                raise PcoccError("Imported type '{0}' does not".format(src_ext)
-                                +" match CONTAINER type")
-        else:
-            raise PcoccError("Image type {0} not recognized make sure".format(src_ext)
-                            +" your file has the proper extension")
+    def check_supported_format(self, ikind, iformat):
+        if ikind == "vm":
+            check_qemu_image_ext(iformat)
+        elif ikind == "cont":
+            check_container_image_ext(iformat)
 
     def extract_extension(self, in_path):
-        try:
-            src_ext = os.path.splitext(in_path)[-1].lower().replace(".", "")
-        except:
-            raise PcoccError("Could not infer image type through"\
-                            +" extension you may rely on direct tagging 'type:path'")
-        return src_ext
+        return os.path.splitext(in_path)[-1].lower().replace(".", "")
 
     def get_vm_type(self, path):
+        if not os.path.isfile(path):
+            raise PcoccError("Image file {} does not exist".format(path))
+        if not os.access(path, os.R_OK):
+            raise PcoccError("Image file {} is not readable".format(path))
+
         try:
             jsdata = subprocess.check_output(["qemu-img", "info","--output=json", path])
             data = json.loads(jsdata)
@@ -357,100 +317,86 @@ class PcoccImage(object):
         except:
             return None
 
-    def import_image(self, in_path, key, itype="vm", dest_repo="", img_type=None, force=False):
-        src_ext = None
-        # Fist extract input file type
-        if img_type:
-            #Type was given explicitly
-            src_ext = img_type
-        else:
-            #If no type given and is a VM try whith qemu-img info
-            if itype == "vm":
-                src_ext = self.get_vm_type(in_path)
+    def import_image(self, in_path, key, ikind="vm", dest_repo="", iformat="", force=False):
+        if iformat:
+            iformat = iformat.lower()
 
-            if src_ext is None:
-                #Type is given by prefix
-                spl = in_path.split(":")
+        #Check if the format was prefixed
+        if not iformat:
+            spl = in_path.split(":")
+            if len(spl) >= 2:
+                iformat = spl[0].lower()
+                in_path = ":".join(spl[1:])
 
-                if len(spl) == 1:
-                    in_path = in_path
-                    src_ext = self.extract_extension(in_path)
-                elif 2 <= len(spl):
-                    src_ext = spl[0]
-                    in_path = ":".join(spl[1:])
+        #Check if the format was suffixed
+        if not iformat:
+            iformat = self.extract_extension(in_path)
 
-        self.check_image_type(itype, src_ext)
+        # For VMs we can detect the input file type
+        if ikind == "vm":
+            detect = self.get_vm_type(in_path)
+            if iformat and iformat != detect:
+                raise PcoccError("Mismatch between specified format {} "
+                                 "and detected format {}".format(iformat, detect))
+            iformat = detect
+
+        self.check_supported_format(ikind, iformat)
 
         # Now check if image exists or shadows and force is passed
-
         dst_file, dst_meta = self.get_by_name(key)
 
         if dst_file:
             if not force:
-                raise PcoccError("'{0}' image is already present in '{1}' you"
+                raise PcoccError("'{0}' image is already present in repo '{1}' you"
                                 .format(key, dst_meta["repo"])
                                 +" may use '-f/--force' to overwrite or shadow existing image")
 
-        # Now handle import according to types
-
-        used_tmp=False
-        tmp = ""
+        did_convert = False
         # Save before possible convert/import override
-        input_path=in_path
-        if itype == "vm":
-            if src_ext != "qcow2":
+        orig_path=in_path
+
+        if ikind == "vm":
+            if iformat != "qcow2":
                 # The source needs conversion
                 tmp = self._tempfile(ext=".qcow2")
                 try:
                     # Convert to qcow2
-                    sys.stderr.write("Converting image to QCOW2 ... ")
-                    convert(in_path, tmp, overwrite=True, src_type=src_ext)
-                    sys.stderr.write("DONE\n")
+                    convert(in_path, tmp, iformat, "qcow2")
                 except Exception as e:
                     os.unlink(tmp)
                     raise PcoccError("Failed to import {0} : {1}".format(in_path, str(e)))
-                used_tmp=True
+                did_convert = True
                 in_path = tmp
-
         elif itype == "cont":
             # Create temp storage
             tmp = self._tempfile(ext=".tar.gz")
-            used_tmp=True
+            did_convert = True
+
+            print("Converting image to oci-archive ... ",)
             # Here we directly use skopeo to copy to an OCI tarball
             # and pcocc accepts the skopeo subtypes
             cmd = ["skopeo", "copy", src_ext + ":" + in_path,  "oci-archive:" + tmp + ":latest"]
-
-            def import_error():
+            try:
+                ret = subprocess.check_call(cmd)
+            except subprocess.CalledProcessError:
                 os.unlink(tmp)
                 raise PcoccError("An error occured when importing"
-                                +" container image see previous logs.")
-
-            try:
-                ret = subprocess.call(cmd)
-            except subprocess.CalledProcessError:
-                import_error()
-
-            if ret != 0:
-                import_error()
-
+                                +" container image (see previous logs).")
             in_path=tmp
-        else:
-            raise PcoccError("No such image type %s" % itype)
 
         # Save meta-data
         meta = {}
 
-        meta["type"] = itype
-        meta["source_type"] = src_ext
-        meta["source"] = input_path
+        meta["kind"] = ikind
+        meta["source_format"] = iformat
+        meta["source_path"] = orig_path
 
         # Set in KVS
-        sys.stderr.write("Storing image in repository as '{0}' ... ".format(key))
+        print("Storing image in repository as '{0}' ... ".format(key))
         self.object_store.setval( key, in_path, meta_data=meta, repo_name=dest_repo)
-        sys.stderr.write("DONE\n")
 
         # Remove TMP if needed
-        if used_tmp:
+        if did_convert:
             os.unlink(tmp)
 
 
@@ -477,12 +423,12 @@ class PcoccImage(object):
 
         itype = self.get_type_from_meta(meta)
 
-        self.check_image_type(itype, targ_ext)
+        self.check_supported_format(itype, targ_ext)
 
         if itype == "vm":
             sys.stderr.write("Exporting image '{0}' to '{1}' in '{2}' format ... "
                              .format(descriptor, out_path, targ_ext))
-            convert(in_path, out_path, overwrite=True)
+            convert(in_path, out_path, "qcow2", targ_ext)
             sys.stderr.write("DONE\n")
         elif itype == "cont":
             # Here we directly use skopeo to copy from an OCI tarball to the target type

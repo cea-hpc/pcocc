@@ -1663,8 +1663,8 @@ def pcocc_image_import_vm( force, imgtype, descriptor, input_uri):
         img_mgr = pcocc.Image.PcoccImage()
         dest_name, dest_repo = img_mgr.image_descriptor_parse(descriptor)
         check_import_name_is_correct(dest_name)
-        img_mgr.import_image(input_uri, dest_name, itype="vm",
-                             dest_repo=dest_repo, img_type=imgtype, force=force)
+        img_mgr.import_image(input_uri, dest_name, ikind="vm",
+                             dest_repo=dest_repo, iformat=imgtype, force=force)
     except PcoccError as err:
         handle_error(err)
 
@@ -1813,7 +1813,7 @@ def print_image_list(val_list):
             rev = "-"
 
         tbl.append({'name': img["key"],
-                    'type' : img["metadata"]["type"],
+                    'type' : img["metadata"]["kind"],
                     'revisions' : rev,
                     'repo': img["repo"],
                     'owner': img["author"],

@@ -1113,9 +1113,13 @@ username={3}@pcocc
 
             f.close()
 
-            if vm.user_data:
+            if isinstance(vm.user_data, str):
                 shutil.copyfile(Config().resolve_path(vm.user_data, vm),
                                 user_data_file)
+            elif isinstance(vm.user_data, dict):
+                with open(user_data_file, 'w') as f:
+                    f.write("#cloud-config\n")
+                    yaml.safe_dump(vm.user_data, f)
             else:
                 shutil.copyfile('/dev/null', user_data_file)
 

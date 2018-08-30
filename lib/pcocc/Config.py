@@ -103,6 +103,12 @@ class Config(object):
         self.load_tpls(os.path.join(self.user_conf_dir,
                                     'templates.yaml'), required=False)
 
+        tpl_dir = os.path.join(self.user_conf_dir, 'templates.d')
+        if os.path.isdir(tpl_dir):
+            for tpl_file in os.listdir(tpl_dir):
+                if tpl_file.endswith('.yaml'):
+                    self.load_tpls(os.path.join(tpl_dir, tpl_file), required=False)
+
         user_repos_path = os.path.join(self.user_conf_dir, 'repos.yaml')
         if os.path.exists(user_repos_path):
             self.load_repos(user_repos_path, 'user')

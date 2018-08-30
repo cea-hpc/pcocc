@@ -81,7 +81,8 @@ class TemplateConfig(dict):
             if name not in self:
                 self[name] = Template(name,
                                       {'resource-set': rset,
-                                       'placeholder': True})
+                                       'placeholder': True},
+                                      None)
 
         if not tpl_config:
             return
@@ -89,20 +90,22 @@ class TemplateConfig(dict):
         for name, tpl_attr in tpl_config.iteritems():
             if name[0] == '_':
                 raise InvalidConfigurationError(
-                    "template name \"%s\" is "
-                    "restricted (starts with _)" % name)
+                    "template name '{}' is "
+                    "restricted (starts with _)".format(name))
             if name in self:
                 raise InvalidConfigurationError(
-                    "template name \"%s\" is "
-                    "already in use" % name)
+                    "template name '{}' is "
+                    "already in use (defined in {} and {})".format(name,
+                                                                   self[name].source,
+                                                                   filename))
 
             for setting in tpl_attr:
                 if not setting in template_settings:
                     raise InvalidConfigurationError(
-                        "template \"%s\" has unknown setting \"%s\"" % (
+                        "template '{}' has unknown setting '{}'".format(
                             name, setting))
 
-            self[name] = Template(name, tpl_attr)
+            self[name] = Template(name, tpl_attr, filename)
 
         # Finish validation once everything has been loaded
         for tpl in self.itervalues():
@@ -118,10 +121,11 @@ class Template(object):
     Template inheritance is automatically managed when accessing attributes
 
     """
-    def __init__(self, name, settings):
+    def __init__(self, name, settings, source_file):
         self.name = name
         self.settings = settings
         self.validated = False
+        self.source = source_file
 
     def __getattr__(self, attr):
         if attr == 'rset':
@@ -130,8 +134,8 @@ class Template(object):
                 return Config().rsets[resource_set]
             except KeyError:
                 raise InvalidConfigurationError(
-                    "template \"%s\" has an "
-                    "invalid resource set: \"%s\"" % (self.name, resource_set))
+                    "template '{}' has an "
+                    "invalid resource set: '{}'".format(self.name, resource_set))
 
         # Attributes cannot have dashes so we convert to underscore
         user_attr =  attr.replace('_','-')
@@ -154,8 +158,8 @@ class Template(object):
         else:
             if required:
                 raise InvalidConfigurationError(
-                    "template \"%s\" has no "
-                    "%s setting" % (self.name, user_attr))
+                    "template '{}' has no "
+                    "'{}' setting".format(self.name, user_attr))
             else:
                 return default
 
@@ -233,8 +237,8 @@ class Template(object):
                     rev_list.append(int(match.group(1)))
         except OSError as err:
             raise InvalidConfigurationError(
-                "template \"%s\" image directory is "
-                "invalid: %s " % (self.name, str(err)))
+                "template '{}' image directory is "
+                "invalid: {} ".format(self.name, str(err)))
 
         if rev_list:
             top_rev = sorted(rev_list)[-1]
@@ -247,7 +251,7 @@ class Template(object):
                                       'image')
             if not os.path.isfile(image_file):
                 raise InvalidConfigurationError(
-                    "template \"{}\" image directory "
+                    "template '{}' image directory "
                     "has no image ".format(self.name))
 
         return image_file, revision
@@ -336,8 +340,8 @@ class Template(object):
                 return parent
             except KeyError:
                 raise InvalidConfigurationError(
-                    "template \"%s\" inherits from "
-                    "invalid template \"%s\"" %(
+                    "template '{}' inherits from "
+                    "invalid template '{}'".format(
                         self.name,
                         self.settings['inherits']))
         else:

@@ -1,232 +1,461 @@
-"""
-This is the Object Store Python interface
-"""
-import json
+#  Copyright (C) 2014-2018 CEA/DAM/DIF
+#
+#  This file is part of PCOCC, a tool to easily create and deploy
+#  virtual machines using the resource manager of a compute cluster.
+#
+#  PCOCC is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  PCOCC is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
+
+import jsonschema
 import os
-import md5
 import time
 import getpass
-import grp
-import time
-from pwd import getpwnam
-from shutil import copyfile
 import glob
+import yaml
+import re
+import hashlib
+import shutil
+import errno
+import logging
+import tempfile
 
 from .Error import InvalidConfigurationError, PcoccError
 from .Config import Config
+from .Backports import OrderedDict
+
+repo_config_schema="""
+type: object
+properties:
+  repos:
+    type: array
+    items:
+      type: object
+      properties:
+        name:
+           type: string
+        path:
+           type: string
+      required:
+           - name
+           - path
+      additionalProperties: false
+required:
+  - repos
+additionalProperties: false
+"""
+
+metadata_schema="""
+type: object
+properties:
+  name:
+    type: string
+  revision:
+    type: integer
+  data_blobs:
+    type: array
+    items:
+      type: string
+  description:
+    type: string
+  kind:
+    type: string
+  owner:
+    type: string
+  timestamp:
+    type: number
+  custom_meta:
+    type: object
+required:
+  - name
+  - revision
+  - data_blobs
+  - kind
+  - owner
+  - timestamp
+additionalProperties: false
+"""
+
+repo_config_schema="""
+type: object
+properties:
+  version:
+    type: number
+required:
+  - version
+additionalProperties: false
+"""
+
+repo_definition_schema="""
+type: object
+properties:
+  repos:
+    type: array
+    items:
+      type: object
+      properties:
+        name:
+           type: string
+        path:
+           type: string
+      required:
+           - name
+           - path
+      additionalProperties: false
+required:
+  - repos
+additionalProperties: false
+"""
+
+class ObjectNotFound(PcoccError):
+    def __init__(self, name,  repo=None, revision=None):
+        err = 'Object {0}{1} not found{2}'.format(
+            name,
+            self._revision_msg(revision),
+            self._repo_msg(repo))
+
+        super(ObjectNotFound, self).__init__(err)
+
+    @staticmethod
+    def _revision_msg(revision):
+        if revision:
+            return ' revision {0}'.format(revision)
+        else:
+            return ''
+
+    @staticmethod
+    def _repo_msg(repo):
+        if repo:
+            return ' in repository {0}'.format(repo)
+        else:
+            return ' in configured repositories'
+
+
+class HierarchObjectStore(object):
+    def __init__(self):
+        self._repos = OrderedDict()
+
+    def load_repos(self, repo_config_file, tag):
+        try:
+            stream = file(repo_config_file, 'r')
+            repo_config = yaml.safe_load(stream)
+        except (yaml.YAMLError, IOError) as err:
+            raise InvalidConfigurationError(str(err))
+
+        try:
+            jsonschema.validate(repo_config,
+                                yaml.safe_load(repo_definition_schema))
+        except jsonschema.exceptions.ValidationError as err:
+            raise InvalidConfigurationError(err.message)
+
+        for repo in repo_config['repos']:
+            if repo['name'] in self._repos.keys():
+                raise InvalidConfigurationError('Duplicate repository: {0}'.format(
+                    repo['name']))
+
+            repo['tag'] = tag
+            repo['store'] = ObjectStore(Config().resolve_path(repo['path']),
+                                        repo['name'])
+            self._repos[repo['name']] = repo
+
+    @property
+    def default_repo(self):
+        try:
+            return self._repos.values()[0]['name']
+        except IndexError:
+            raise InvalidConfigurationError('No repository configured')
+
+    def get_repo(self, repo_name):
+        if repo_name:
+            try:
+                return self._repos[repo_name]['store']
+            except KeyError:
+                raise PcoccError('Unknown repository {0}'.format(repo_name))
+
+        try:
+            return self._repos.values()[0]['store']
+        except IndexError:
+            raise InvalidConfigurationError('No repository configured')
+
+    def list_repos(self, tag):
+        return [ r['store'] for r in self._repos.itervalues() if not tag or
+                 r['tag'] == tag ]
+
+    def get_meta(self, name, revision=None, repo=None):
+        if repo:
+            return self.get_repo(repo).get_meta(name, revision)
+
+        for r in self._repos.itervalues():
+            obj_store = r['store']
+            try:
+                return obj_store.get_meta(name, revision)
+            except ObjectNotFound:
+                pass
+
+        raise ObjectNotFound(name, repo, revision)
+
+    def get_revisions(self, name, repo=None):
+        if repo:
+            return self.get_revisions(repo).get_revisions(name)
+
+        for r in self._repos.itervalues():
+            obj_store = r['store']
+            try:
+                return obj_store.get_revisions(name)
+            except ObjectNotFound:
+                pass
+
+        raise ObjectNotFound(name, repo, None)
+
+    def load_meta(self, repo=None):
+        if repo:
+            return self.get_repo(repo).load_meta()
+
+        glob_meta = {}
+        for r in reversed(self._repos.values()):
+            meta = r['store'].load_meta()
+            glob_meta.update(meta)
+
+        return glob_meta
 
 class ObjectStore(object):
-    def __init__(self, repolist=None):
-        #Variables
-        self.default_repo = ""
-        self.repolist = []
-        self.reponames = []
-        self.repos = {}
-        # Check parameters
-        if repolist:
-            if type(repolist) != type([]):
-                raise Exception("Repolist must be an array")
-            #Unfold paths
-            to_add =[self._unfoldpath(e) for e in repolist]
-            #Normalize paths
-            to_add = [ os.path.normpath(e) for e in to_add]
-            #Check paths
-            to_add_filtered = []
-            for e in to_add:
-                try:
-                    self._check_repodir(e)
-                    to_add_filtered.append(e)
-                except:
-                    pass
+    def __init__(self, path, name):
+        self._path = Config().resolve_path(path)
+        self._name = name
 
-            #Save repolist
-            self.repolist = to_add_filtered
-            #Hash repolist
-            self._hash_repos()
+        self._data_path    = os.path.join(self._path, 'data')
+        self._meta_path    = os.path.join(self._path, 'meta')
+        self._tmp_path     = os.path.join(self._path, '.tmp')
+        self._config_path  = os.path.join(self._path, '.config')
 
+        self._init_repodir()
 
-    def set_repo_list(self, repolist):
-        #Unfold paths
-        to_add =[self._unfoldpath(e) for e in repolist]
-        #Check if already present
-        to_add = [os.path.normpath(e) for e in to_add if not os.path.normpath(e) in self.repolist]
-        #Check if correct
-        to_add_filtered = []
-        for e in to_add:
-            try:
-                self._check_repodir(e)
-                to_add_filtered.append(e)
-            except:
-                pass
-        #Save in list
-        self.repolist = self.repolist + to_add_filtered
-        #Rehash
-        self._hash_repos()
+    def _check_path_in_tmp(self, path):
+        real_tmp_path = os.path.realpath(self._tmp_path)
+        real_file_path = os.path.realpath(path)
 
-    def reloadconfig(self):
-        pass
+        return real_file_path.startswith(real_tmp_path + os.sep)
 
-    def setval(self, key, file_path, meta_data=None, repo_name=""):
-        clean_key = self._normalize_key(key)
+    @staticmethod
+    def _hash_file(path):
+        h = hashlib.sha256()
+        with open(path, 'rb', buffering=0) as f:
+            while True:
+                b = f.read(128*1024)
+                if not b:
+                    break
+                h.update(b)
+            return h.hexdigest()
 
-        #Force parent dir refresh
-        os.listdir(os.path.dirname(file_path))
+    @staticmethod
+    def _hash_meta(name, revision):
+        h = hashlib.sha256()
+        h.update('{0}\n{1}'.format(name, revision).encode('ascii',
+                                                          'ignore'))
+        return h.hexdigest()
 
-        trial=5
-        while (not os.path.isfile(file_path)) and  (0 <= trial):
-            #Be gentle with NFS
-            time.sleep(1)
-            #Force parent dir refresh
-            os.listdir(os.path.dirname(file_path))
-            trial = trial - 1
+    @property
+    def path(self):
+        return self._path
 
-        if not os.path.isfile(file_path):
-            raise PcoccError("ObjectStore : %s is not a regular file" % file_path)
-        if not repo_name:
-            repo_name = self.default_repo
-        key_root = self._get_key_root(repo_name, clean_key)
-        #Make sure of repo's correctness
-        #And create the directory if needed
-        self._check_repodir(key_root)
-        #
-        # Prepare to write
-        #
-        target_blob = os.path.join(key_root, clean_key)
-        target_blob_meta = target_blob + ".meta"
+    @property
+    def name(self):
+        return self._name
 
-        meta = self._gen_metadata(key,
-                                  repo_name,
-                                  file_path,
-                                  target_blob,
-                                  meta_data)
-        #First try to copy file
-        copyfile(file_path, target_blob)
-        #Proceed to write meta-data
-        with open(target_blob_meta, 'w') as m:
-            json.dump(meta, m, indent=4)
-
-    def getval(self, key, repo_name=""):
-        if not repo_name:
-            #Scan repos in decreasing order of priority
-            for r in reversed(self.reponames):
-                target_blob, meta = self._getval(key, r)
-                if target_blob and meta:
-                    return target_blob, meta
+    def get_obj_path(self, obj_type, obj_hash, check_exists = False, relative = False):
+        if obj_type == 'data':
+            base = self._data_path
+        elif obj_type == 'meta':
+            base = self._meta_path
         else:
-            return self._getval(key, repo_name)
+            raise PcoccError('Bad object type {0}'.format(obj_type))
 
-    def listval(self, repo_name=""):
-        if not repo_name:
-            #All repos
-            ret = []
-            for r in self.repos:
-                ll = self._get_meta_for_repo(r)
-                ret = ret + ll
-            return ret
-        else:
-            return self._get_meta_for_repo(repo_name)
-
-    def delval(self, key, repo_name="" ):
-        target_blob, target_blob_meta = self._get_blob_infos(key, repo_name)
-        os.remove(target_blob_meta)
-        os.remove(target_blob)
-
-    #
-    # Internal functions
-    #
-    def _check_repodir(self, rdir):
-        parent_dir = os.path.dirname(rdir)
-        if not os.path.isdir(parent_dir):
-            raise InvalidConfigurationError("ObjectStore : %s is not a directory" % parent_dir)
         try:
-            os.stat(rdir)
-            if not os.path.isdir(rdir):
-                raise InvalidConfigurationError("ObjectStore : %s is not a directory" % rdir)
-        except:
-            #We need to create it
-            os.mkdir(rdir)
+            os.mkdir(os.path.join(base, obj_hash[:2]))
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise e
 
-    def _hash_repos(self):
-        self.default_repo = ""
-        if len(self.repolist) == 0:
-            return
-        for e in self.repolist:
-            name = os.path.basename(e)
-            self.reponames.append(name)
-            #The last repository is the default
-            self.default_repo = name
-            directory = e
-            self.repos[name] = {'path': directory}
-        if not self.default_repo:
-            raise PcoccError("ObjectStore : No repository found")
+        if check_exists and not os.path.exists(os.path.join(base,
+                                                            obj_hash[:2],
+                                                            obj_hash)):
+            raise PcoccError('Object {} not found in repository {}'.format(
+                obj_hash, self.name))
 
-    def _unfoldpath(self, path):
-        return Config().resolve_path(path)
+        if relative:
+            base = os.path.join('../../', obj_type)
 
-    def _normalize_key(self, key):
-        ascii_val = ( [chr(e) for e in range(48,57)] #0-9
-                    + [chr(e) for e in range(65,90)] #A-Z
-                    + [chr(e) for e in range(97,122)] #a-z
-                    + ['.','_']) #Some special chars
-        return "".join([e for e in key if e in ascii_val])
+        return os.path.join(base, obj_hash[:2], obj_hash)
 
-    def _hash_key(self, key):
-        md = md5.new()
-        md.update("".join(key))
-        return md.hexdigest()[:2]
+    def tmp_file(self, ext=None):
+        fd, path = tempfile.mkstemp(suffix="", dir=self._tmp_path)
+        os.close(fd)
+        return path
 
-    def _gen_metadata(self, key, repo, source, dest, meta):
+    def put_data_blob(self, file_path, known_hash=None):
+        if not os.path.isfile(file_path):
+            raise PcoccError("{0} is not a regular file".format(file_path))
+
+        if known_hash:
+            h = known_hash
+        else:
+            h = self._hash_file(file_path)
+
+        target = self.get_obj_path('data', h)
+
+        if os.path.exists(target):
+            logging.info('Skipping import of data blob %s '
+                         'already in repository', h)
+            return h
+
+        move = self._check_path_in_tmp(file_path)
+        if move:
+            shutil.move(file_path, target)
+        else:
+            tmp = self.tmp_file()
+            shutil.copyfile(file_path, tmp)
+            shutil.move(tmp, target)
+
+        return h
+
+    def put_meta(self, name, revision, kind, data_blobs, custom_meta=None):
+        self._validate_name(name)
+        h = self._hash_meta(name, revision)
+        target = self.get_obj_path('meta', h)
+
+        meta = {}
+        meta['name'] = name
+        meta['revision'] = revision
+        meta['kind'] = kind
+        meta['owner'] = getpass.getuser()
+        meta['timestamp'] = time.time()
+        meta['data_blobs'] = data_blobs
+        meta['custom_meta'] = custom_meta
+
+        # Check that all the data blobs referred in the meta data are
+        # already in the repo
+        for b in data_blobs:
+            self.get_obj_path('data', b, True)
+
+        with open(target, 'w') as f:
+            yaml.safe_dump(meta, f)
+
+        return meta
+
+    def _read_meta(self, meta_path, name, revision):
+        if not os.path.isfile(meta_path):
+            raise ObjectNotFound(name, self._name, revision)
+
+        try:
+            with open(meta_path, 'r') as f:
+                meta = yaml.safe_load(f)
+        except (OSError, IOError) as e:
+            raise PcoccError('Unable to get metadata for {0}: {1}'.format(
+                    name, e))
+        except yaml.YAMLError as e:
+            raise PcoccError('Bad metadata for {0}: {1}'.format(
+                    name, e))
+
+        try:
+            jsonschema.validate(meta,
+                                yaml.safe_load(metadata_schema))
+        except jsonschema.exceptions.ValidationError as e:
+            raise PcoccError('Bad metadata for {0}: {1}'.format(
+                    name, e))
+
+        return meta
+
+    def get_meta(self, name, revision=None):
+        if revision is None:
+            revision = max(self.get_revisions(name))
+        h = self._hash_meta(name, revision)
+        target = self.get_obj_path('meta', h)
+        meta = self._read_meta(target, name, revision)
+        meta['repo'] = self._name
+        return meta
+
+    def get_revisions(self, name):
+        try:
+            return self.load_meta()[name].keys()
+        except KeyError:
+            raise ObjectNotFound(name, self._name, None)
+
+    def load_meta(self):
+        meta_list = glob.glob(os.path.join(self._meta_path, '*/*'))
         ret = {}
-        ret["key"] = key
-        ret["author"] = getpass.getuser()
-        ret["src_path"] = source
-        ret["filename"] = os.path.dirname(source)
-        ret["path"] = dest
-        ret["repo"] = repo
-        ret["metadata"] = meta
-        ret["timestamp"] = time.time()
+        for meta_path in meta_list:
+            meta = self._read_meta(meta_path, None, None)
+            meta['repo'] = self._name
+            ret.setdefault(meta['name'], {})[meta['revision']] = meta
+
         return ret
 
-    def _get_key_root(self, repo_name, clean_key):
-        if not repo_name in self.repos:
-            raise PcoccError("ObjectStore : No such repo %s" % repo_name)
-        repo_root = self.repos[repo_name]["path"]
-        key_hash = self._hash_key(clean_key)
-        key_root = os.path.join(repo_root, key_hash)
-        return key_root
+    def delete(self, name, revision=None):
+        if revision:
+            revisions = [ revision ]
+        else:
+            revisions = self.get_revisions(name)
 
+        for r in revisions:
+            h = self._hash_meta(name, r)
+            target = self.get_obj_path('meta', h)
+            os.unlink(target)
 
-    def _get_meta_for_repo(self, repo_name):
-        if not repo_name in self.repos:
-            raise PcoccError("ObjectStore : No such repo %s" % repo_name)
-        base = self.repos[repo_name]["path"]
-        metalist = glob.glob(base + "/*/*.meta")
-        ret = []
-        for m in metalist:
-            with open(m) as mf:
-                ret.append(json.load(mf))
-        return ret
+    def _validate_repo_config(self):
+        try:
+            with open(self._config_path) as f:
+                repo_config = yaml.safe_load(f)
+                jsonschema.validate(repo_config,
+                                        yaml.safe_load(repo_config_schema))
 
-    def _get_blob_infos(self, key, repo_name):
-        clean_key = self._normalize_key(key)
-        if not repo_name:
-            repo_name = self.default_repo
-        key_root = self._get_key_root(repo_name, clean_key)
-        target_blob = os.path.join(key_root, clean_key)
-        target_blob_meta = target_blob + ".meta"
-        # Check for existence
-        if not os.path.isfile(target_blob_meta):
-            return None, None
-        if not os.path.isfile(target_blob):
-            return None, None
-        return target_blob, target_blob_meta
+        except (yaml.YAMLError,
+                IOError,
+                jsonschema.exceptions.ValidationError) as err:
+            raise PcoccError(
+                'Bad repository config file {0} : {1}'.format(self._config_path,
+                                                                      err))
 
-    def _getval(self, key, repo_name):
-        target_blob, target_blob_meta = self._get_blob_infos(key, repo_name)
-        # Load meta-data
-        meta = None
-        if target_blob_meta:
-            with open(target_blob_meta) as m:
-                meta = json.load(m)
-        #Now return the blob and its meta
-        return target_blob, meta
+        if repo_config['version'] != 1:
+            raise InvalidConfigurationError(
+                'unsupported repository {0} version'.format(self.name))
+
+    def _init_repodir(self):
+        if os.path.isdir(self._path):
+            self._validate_repo_config()
+            return
+
+        if os.path.exists(self._path):
+            raise PcoccError("Repository path {0} is not a directory".format(
+                    self._path))
+
+        parent_dir = os.path.dirname(self._path)
+        if not os.path.isdir(parent_dir):
+            raise PcoccError("Invalid repository parent directory {0}".format(
+                    parent_dir))
+
+        try:
+            os.mkdir(self._path)
+            os.mkdir(self._data_path)
+            os.mkdir(self._meta_path)
+            os.mkdir(self._tmp_path)
+            with open(self._config_path, 'w') as f:
+                yaml.safe_dump({'version': 1}, f)
+
+        except OSError as e:
+            raise PcoccError('Unable to create repository directory {0}: {1}: '.format(
+                    self._path, str(e)))
+
+    def _validate_name(self, name):
+        if re.search(r"[^a-zA-Z0-9_\.-]+", name):
+            raise PcoccError('Object name contains invalid characters')
+        if not name:
+            raise PcoccError('Empty object name')

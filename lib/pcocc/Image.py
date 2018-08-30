@@ -1,485 +1,357 @@
+#  Copyright (C) 2014-2018 CEA/DAM/DIF
+#
+#  This file is part of PCOCC, a tool to easily create and deploy
+#  virtual machines using the resource manager of a compute cluster.
+#
+#  PCOCC is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  PCOCC is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
 import logging
 import os
-import stat
 import subprocess
-import sys
-import ObjectStore
-from Error import PcoccError, InvalidConfigurationError
-import tempfile
-import yaml
 import json
-import errno
 import re
-from Config import DEFAULT_CONF_DIR, DEFAULT_USER_CONF_DIR, Config
 
-known_vm_image_formats = ["raw", "qcow2", "qed", "vdi", "vpc", "vmdk"]
+import ObjectStore
 
-def check_qemu_image_ext(ext):
-    if ext not in known_vm_image_formats:
-        raise PcoccError("VM image format {} not supported".format(ext))
+from .Error import PcoccError
+from .scripts import click
 
-known_container_image_formats = ["containers-storage", "dir", "docker",
-                                 "docker-archive", "docker-daemon", "oci",
-                                 "oci-archive", "ostree", "tarball"]
-
-def check_container_image_ext(ext):
-    if ext not in known_container_image_formats:
-        raise PcoccError("Container image format {} not supported".format(ext))
-
-def convert(src, dest, src_format, dest_format):
-    src = os.path.abspath(src)
-    dest = os.path.abspath(dest)
-
-    try:
-        print("Converting from format '{0}' "
-              "to '{1}'... ".format(src_format, dest_format))
-
-        subprocess.check_output(
-            ["qemu-img",
-             "convert",
-             "-p",
-             "-f", src_format,
-             "-O", dest_format,
-             src,
-             dest],
-            stderr=subprocess.STDOUT,
-            shell=False)
-
-    except subprocess.CalledProcessError as e:
-        raise PcoccError("Unable to convert image. "
-                         "The qemu-img command failed with: " +e.output)
-
-
-def create(path, size="1M", iformat="qcow2", quiet=True):
-    path = os.path.abspath(path)
-    check_qemu_image_ext(iformat)
-
-    try:
-        if not quiet:
-            sys.stderr.write(
-                "Creating image '{0}' format '{1}' size '{2}'... "
-                .format(path, iformat, size))
-        subprocess.check_output(
-            ["qemu-img",
-             "create",
-             "-f", iformat,
-             path,
-             size],
-            stderr=subprocess.STDOUT,
-            shell=False)
-        if not quiet:
-            sys.stderr.write("OK\n")
-    except subprocess.CalledProcessError, e:
-        raise PcoccError("ERROR:" +
-                        "****** qemu-img output ******\n" +
-                        e.output +
-                        "*****************************\n")
-
-
-class ImageRepoConfig(object):
-
+class ImageMgr(object):
     def __init__(self):
-        self.local = []
-        self.glob = []
-        self.object_store = ObjectStore.ObjectStore()
+        self.object_store = ObjectStore.HierarchObjectStore()
 
-    def load(self, repo_file, user_level=False):
-        try:
-            stream = file(repo_file, 'r')
-            repo_config = yaml.load(stream)
-        except IOError as err:
-            if user_level == False or err.errno != errno.ENOENT:
-                raise InvalidConfigurationError(str(err))
-            else:
-                return
-        except Exception as err:
-            raise InvalidConfigurationError(str(err))
+    def load_repos(self, conf, tag):
+        self.object_store.load_repos(conf, tag)
 
-        # There should be a repo list if we get a file
-        if not "repos" in repo_config:
-            raise InvalidConfigurationError("Could not find a 'repos' key in configuration")
+    def list_repos(self, tag=None):
+        return self.object_store.list_repos(tag=None)
 
-        if type(repo_config["repos"]) != type([]):
-            raise InvalidConfigurationError("The 'repos' key must be an array")
-
-        # Now inspect the configuration
-        if user_level:
-            # Save in local config
-            self.local = repo_config["repos"]
-            # We need to populate the REPO env variable
-            # for dynamically inserted repos
-        else:
-            #This is the system-wide list
-            # Just store the array
-            self.glob = repo_config["repos"]
-
-        #It is not time to update repolist
-        self.object_store.set_repo_list(self.get_list())
-
-    def get_list(self):
-        return self.local + self.glob
-
-    def get_local(self):
-        return self.local[:]
-
-    def get_global(self):
-        return self.glob[:]
-
-    def save(self):
-        out = {}
-        out["repos"] = self.local
-        user_config = Config().resolve_path(os.path.join(DEFAULT_USER_CONF_DIR, 'repos.yaml'))
-        with open(user_config, 'w') as outfile:
-            yaml.dump(out, outfile)
-
-    def remove_local(self, value):
-        try:
-            idx = self.local.index(value)
-            # Delete it
-            del self.local[idx]
-            # Save the new config
-            self.save()
-        except ValueError:
-            # Might have tried to delete a global repo
-            glob_found = len([i for i in self.glob if (value == self.object_store._unfoldpath(i))])
-            if glob_found:
-                raise PcoccError("'{0}' is in a global repository and".format(value)
-                                +" cannot be removed from CLI")
-
-            raise PcoccError("No such entry '{0}' in local repositories".format(value))
-
-    def add_local(self, value):
-        # First make sure it could be a valid repo
-        # before pushin it to the config and getting
-        # the same error later on
-        abspath = os.path.abspath(value)
-        path = os.path.dirname(abspath)
-
-        # Is it already in the list ?
-        try:
-            self.local.index(abspath)
-            raise PcoccError("{0} is already ub the local repository list".format(abspath))
-        except ValueError:
-            pass
-
-        # Parent path exists
-        try:
-            mode = os.stat(path).st_mode
-            # It is a directory
-            if not stat.S_ISDIR(mode):
-                raise PcoccError("A pccocc repository must be located"\
-                                +" in a directory (check {0})".format(path))
-        except os.error as e:
-            raise PcoccError(str(e))
-
-        try:
-            mode = os.stat(abspath).st_mode
-            # If path exists make sure it is a directory
-            if not stat.S_ISDIR(mode):
-                raise PcoccError("A pccocc repository must a directory (check {0})".format(abspath))
-        except os.error as e:
-            # Repo path do not exists make sure parent is writable
-            if not os.access(path, os.W_OK):
-                raise PcoccError("Parent directory for {0} is not writable".format(abspath)
-                                +" cannot create pcocc repository")
-            # If we are here the ObjectStore will create the directory
-
-        # We passed all the checks lets now add a repo
-        self.local.append(abspath)
-        # And save the config
-        self.save()
-        # Also save to environ for immediate effect
-        self.object_store.set_repo_list(self.get_list())
-
-
-class PcoccImage(object):
-
-    def __init__(self):
-        self.object_store = Config().repos.object_store
-
-
-    def _tempfile(self, ext):
-        fd, path = tempfile.mkstemp(suffix=ext)
-        os.close(fd)
-        return path
-
-    def image_descriptor_parse(self, image_descriptor):
-        repo=""
-        image_name=""
-        # First extract reponame from the descriptor
-        s = image_descriptor.split(":")
+    def parse_image_uri(self, image_uri):
+        s = image_uri.split("@")
         if len(s) == 1:
-            repo = ""
-            image_name = image_descriptor
+            revision = None
+        else:
+            image_uri = '@'.join(s[:-1])
+            try:
+                revision = int(s[-1])
+            except ValueError:
+                raise PcoccError('Bad revision: {0}'.format(s[-1]))
+
+        s = image_uri.split(":")
+        if len(s) == 1:
+            repo = None
+            image_name = image_uri
         else:
             repo = s[0]
             image_name = s[1]
-        return image_name, repo
 
-    def reloadconfig(self):
-        self.object_store.reloadconfig()
+        return image_name, repo, revision
 
-    def find(self, regexpr, repo=""):
-        val_list = self.object_store.listval(repo)
+    def find(self, regex=None, repo=None):
+        meta = self.object_store.load_meta(repo)
+
+        if not regex:
+            return meta
+
         try:
-            search = re.compile(regexpr)
+            search = re.compile(regex)
         except re.error as e:
             raise PcoccError("Could not parse regular expression :%s" % str(e))
 
-        def filter_by_key(entry):
-            return search.match(entry["key"])
+        return { key: value  for key, value in meta.iteritems()
+                 if search.search(key) }
 
-        return filter(filter_by_key, val_list)
+    def get_image(self, image_uri, image_revision=None):
+        image_name, repo, revision = self.parse_image_uri(image_uri)
 
-    def get_by_name(self, image_descriptor):
-        """
-        Get a pcocc image from repository by name
-        Returns:
-            string -- Path to the image with this name
-        """
-        image_name, repo = self.image_descriptor_parse(image_descriptor)
+        if image_revision is not None:
+            revision=image_revision
 
         logging.info("pcocc repo : Locating %s in %s" % (image_name, repo))
 
+        meta = self.object_store.get_meta(image_name, revision=revision, repo=repo)
+
+        return meta, self.object_store.get_repo(meta['repo']).get_obj_path(
+            'data',
+            meta['data_blobs'][-1])
+
+    def image_revisions(self, uri):
+        image_name, repo_name, _ = self.parse_image_uri(uri)
+        return self.object_store.get_repo(repo_name).get_revisions(image_name)
+
+    def delete_image(self, uri):
+        name, repo, revision = self.parse_image_uri(uri)
+        dest_store = self.object_store.get_repo(repo)
+
+        dest_store.delete(name, revision)
+
+    def prepare_vm_import(self, dst_uri):
+        _, dst_repo, _ = self.parse_image_uri(dst_uri)
+        dst_store = self.object_store.get_repo(dst_repo)
+
+        return dst_store.tmp_file(ext=".qcow2")
+
+    def add_revision_layer(self, dst_uri, path):
+        _, dst_repo, _ = self.parse_image_uri(dst_uri)
+        dst_store = self.object_store.get_repo(dst_repo)
+
+        backing_file = self.read_vm_image_backing_file(path)
+        backing_blob = os.path.basename(backing_file)
+
+        rel_backing_file = dst_store.get_obj_path('data',
+                                                  backing_blob,
+                                                  True,
+                                                  True)
+
+        self.rebase(path, rel_backing_file, True)
+        meta, _ = self.get_image(dst_uri)
+        h = dst_store.put_data_blob(path)
+        meta['data_blobs'].append(h)
+
+
+        return dst_store.put_meta(meta['name'], meta['revision'] + 1,
+                                  meta['kind'], meta['data_blobs'],
+                                  meta['custom_meta'])
+
+    def add_revision_full(self, kind, dst_uri, path):
+        dst_name, dst_repo, _ = self.parse_image_uri(dst_uri)
+        dst_store = self.object_store.get_repo(dst_repo)
+
+        if self.read_vm_image_backing_file(path):
+            raise PcoccError("Tried to make a full revision with an image "
+                             "that has a backing file")
+
         try:
-            path, meta = self.object_store.getval(image_name, repo_name=repo)
-            return path, meta
-        except:
-            return None, None
+            meta, _ = self.get_image(dst_uri)
+        except ObjectStore.ObjectNotFound:
+            meta = None
+            revision = 0
 
-    def get_type_from_meta(self, meta_data):
-        if "metadata" in meta_data:
-            if "kind" in meta_data["metadata"]:
-                return meta_data["metadata"]["kind"]
-        return None
+        if meta:
+            revision = meta['revision'] + 1
+            if kind != meta['kind']:
+                raise PcoccError(
+                    "Unable to mix {0} and {1} image kinds".format(
+                        kind,
+                        meta['kind']))
 
+        h = dst_store.put_data_blob(path)
+        return dst_store.put_meta(dst_name, revision, kind, [h], {})
 
-    def image_infos(self, image_descriptor):
-        # Get the image and its meta-data
-        src_file, src_meta = self.get_by_name(image_descriptor)
+    def import_image(self, kind, src_path, dst_uri, src_fmt=None):
+        dst_name, dst_repo, _ = self.parse_image_uri(dst_uri)
+        dst_store = self.object_store.get_repo(dst_repo)
 
-        if not src_file:
-            raise PcoccError("No such image '{0}'".format(image_descriptor))
+        src_path, src_fmt = self._guess_format(src_path, kind, src_fmt)
+        if not os.path.isfile(src_path):
+            raise PcoccError("{0} is not an image file".format(src_path))
 
-        # Enrich with Skopeo when possible
-        if src_meta:
-            if "metadata" in src_meta:
-                if self.get_type_from_meta(src_meta) == "cont":
-                    #Proceed to extract container infos
-                    cmd = ["skopeo", "inspect", "oci-archive:" + src_file]
+        self._check_supported_format(kind, src_fmt)
 
-                    try:
-                        result = subprocess.check_output(cmd)
-                        info = json.loads(result)
-                        #If we get someting JSON-y
-                        src_meta["metadata"]["skopeo"] = info
-                    except:
-                        pass
+        self.check_overwrite(dst_uri)
 
-        return src_meta
+        if kind == "vm":
+            tmp_path = dst_store.tmp_file(ext=".qcow2")
+            if src_fmt != "qcow2":
+                print("Converting image...")
+            else:
+                print("Copying image...")
 
+            try:
+                convert(src_path, tmp_path, src_fmt, "qcow2")
+            except PcoccError as e:
+                os.unlink(tmp_path)
+                raise PcoccError("Failed to import {0} : {1}".format(src_path,
+                                                                     str(e)))
 
-    def delete_image(self, image_descriptor):
-        image_name, repo = self.image_descriptor_parse(image_descriptor)
+        print("Storing image in repository '{0}' as '{1}' ... ".format(dst_store.name,
+                                                                       dst_name))
+        h = dst_store.put_data_blob(tmp_path)
+        return dst_store.put_meta(dst_name, 0, kind, [h], {})
 
-        if repo == "":
-            raise PcoccError("Cannot delete an image which is not fully"
-                            +" described (use complete image descriptor REPO:IMAGENAME)")
+    def export_image(self, src_uri, dst, dst_fmt):
+        _, src_repo, src_revision = self.parse_image_uri(src_uri)
+        meta, _ = self.get_image(src_uri, src_revision)
+        kind = meta['kind']
+        dst_path, dst_fmt = self._guess_format(dst, kind, dst_fmt)
+        if os.path.exists(dst_path):
+            raise PcoccError('File {0} already exists'.format(dst_path))
+
+        self._check_supported_format(kind, dst_fmt)
+
+        if kind == "vm":
+            src_store = self.object_store.get_repo(src_repo)
+            convert(src_store.get_obj_path('data', meta['data_blobs'][0]),
+                    dst_path, "qcow2", dst_fmt)
+
+    def copy_image(self, src_uri, dst_uri):
+        _, src_repo, src_revision = self.parse_image_uri(src_uri)
+        dst_name, dst_repo, _ = self.parse_image_uri(dst_uri)
+        src_meta, _ = self.get_image(src_uri, src_revision)
+
+        self.check_overwrite(dst_uri)
+
+        src_store = self.object_store.get_repo(src_repo)
+        dst_store = self.object_store.get_repo(dst_repo)
+
+        for b in src_meta['data_blobs']:
+            path = src_store.get_obj_path('data', b)
+            dst_store.put_data_blob(path, b)
+
+        return dst_store.put_meta(dst_name, 0, src_meta["kind"],
+                                  src_meta["data_blobs"],
+                                  src_meta["custom_meta"])
+
+    def check_overwrite(self, dst_uri):
+        dst_name, dst_repo, _ = self.parse_image_uri(dst_uri)
+        # Check if we would overwrite or shadow an other image
 
         try:
-            self.object_store.delval(image_name, repo_name=repo)
-        except:
-            raise PcoccError("No such image '{0}' in repository '{1}'".format(image_name, repo))
+            dst_meta = self.object_store.get_repo(dst_repo).get_meta(dst_name)
+        except ObjectStore.ObjectNotFound:
+            dst_meta = None
 
-    def check_supported_format(self, ikind, iformat):
-        if ikind == "vm":
-            check_qemu_image_ext(iformat)
-        elif ikind == "cont":
-            check_container_image_ext(iformat)
+        if dst_meta:
+            raise PcoccError("Image {0} already exists in repo {1}".format(
+                                 dst_name, dst_meta['repo']))
+
+        try:
+            dst_meta = self.object_store.get_meta(dst_name)
+        except ObjectStore.ObjectNotFound:
+            dst_meta = None
+
+        if dst_meta:
+            click.secho("Warning: an image with name {0} "
+                        "already exists in another repo ({1})".format(
+                            dst_name, dst_meta["repo"]), fg="magenta")
+
+    @staticmethod
+    def _check_supported_format(kind, fmt):
+        if kind == "vm":
+            check_qemu_image_fmt(fmt)
+
+    def _guess_format(self, path, kind, fmt):
+        if fmt:
+            fmt = fmt.lower()
+
+        #Check if the format was prefixed
+        if not fmt:
+            spl = path.split(":")
+            if len(spl) >= 2:
+                fmt = spl[0].lower()
+                path = ":".join(spl[1:])
+
+        #Check if the format was suffixed
+        if not fmt:
+            fmt = self.extract_extension(path)
+
+        # For VMs we can detect the input file type
+        if kind == "vm" and os.path.exists(path):
+            detect = self.read_vm_image_type(path)
+            if fmt and fmt != detect:
+                raise PcoccError("Mismatch between specified format {} "
+                                 "and detected format {}".format(fmt, detect))
+            fmt = detect
+
+        # Default type
+        if not fmt:
+            if kind == "vm":
+                fmt = "raw"
+
+        return path, fmt
+
+    @staticmethod
+    def read_vm_image_type(path):
+        if not os.path.isfile(path):
+            raise PcoccError("{} is not an image file".format(path))
+        if not os.access(path, os.R_OK):
+            raise PcoccError("{} is not readable".format(path))
+
+        try:
+            jsdata = subprocess.check_output(["qemu-img", "info","--output=json", path])
+        except subprocess.CalledProcessError:
+            return None
+
+        try:
+            data = json.loads(jsdata)
+        except Exception:
+            return None
+
+        return data.get("format", None)
+
+    @staticmethod
+    def read_vm_image_backing_file(path):
+        if not os.path.isfile(path):
+            raise PcoccError("{} is not an image file".format(path))
+        if not os.access(path, os.R_OK):
+            raise PcoccError("{} is not readable".format(path))
+
+        try:
+            jsdata = subprocess.check_output(["qemu-img", "info","--output=json", path])
+        except subprocess.CalledProcessError:
+            return None
+
+        try:
+            data = json.loads(jsdata)
+        except Exception:
+            return None
+
+        return data.get("backing-filename", None)
 
     def extract_extension(self, in_path):
         return os.path.splitext(in_path)[-1].lower().replace(".", "")
 
-    def get_vm_type(self, path):
-        if not os.path.isfile(path):
-            raise PcoccError("Image file {} does not exist".format(path))
-        if not os.access(path, os.R_OK):
-            raise PcoccError("Image file {} is not readable".format(path))
-
+    @classmethod
+    def rebase(cls, image, backing_file="", unsafe=False):
         try:
-            jsdata = subprocess.check_output(["qemu-img", "info","--output=json", path])
-            data = json.loads(jsdata)
-            if "format" in data:
-                return data["format"]
-            else:
-                return None
-        except:
-            return None
+            cur_backing_file = cls.read_vm_image_backing_file(image)
+            if bool(cur_backing_file) == bool(backing_file):
+                if not backing_file:
+                    return
+                if cur_backing_file == backing_file:
+                    return
 
-    def import_image(self, in_path, key, ikind="vm", dest_repo="", iformat="", force=False):
-        if iformat:
-            iformat = iformat.lower()
+            unsafe_arg = []
+            if unsafe:
+                unsafe_arg = ["-u"]
 
-        #Check if the format was prefixed
-        if not iformat:
-            spl = in_path.split(":")
-            if len(spl) >= 2:
-                iformat = spl[0].lower()
-                in_path = ":".join(spl[1:])
+            subprocess.check_output(["qemu-img", "rebase"] + unsafe_arg +
+                                     ["-b", backing_file,
+                                     image])
+        except subprocess.CalledProcessError as e:
+            raise PcoccError("Unable to rebase image. "
+                             "The qemu-img command failed with: " + e.output)
 
-        #Check if the format was suffixed
-        if not iformat:
-            iformat = self.extract_extension(in_path)
+known_vm_image_formats = ["raw", "qcow2", "qed", "vdi", "vpc", "vmdk"]
 
-        # For VMs we can detect the input file type
-        if ikind == "vm":
-            detect = self.get_vm_type(in_path)
-            if iformat and iformat != detect:
-                raise PcoccError("Mismatch between specified format {} "
-                                 "and detected format {}".format(iformat, detect))
-            iformat = detect
+def check_qemu_image_fmt(ext):
+    if ext not in known_vm_image_formats:
+        raise PcoccError("VM image format {} not supported".format(ext))
 
-        self.check_supported_format(ikind, iformat)
+def convert(src, dst, src_format, dst_format):
+    try:
+        subprocess.check_output(
+            ["qemu-img", "convert", "-f", src_format, "-O", dst_format, src, dst])
+    except subprocess.CalledProcessError as e:
+        raise PcoccError("Unable to convert image. "
+                         "The qemu-img command failed with: " +e.output)
 
-        # Now check if image exists or shadows and force is passed
-        dst_file, dst_meta = self.get_by_name(key)
-
-        if dst_file:
-            if not force:
-                raise PcoccError("'{0}' image is already present in repo '{1}' you"
-                                .format(key, dst_meta["repo"])
-                                +" may use '-f/--force' to overwrite or shadow existing image")
-
-        did_convert = False
-        # Save before possible convert/import override
-        orig_path=in_path
-
-        if ikind == "vm":
-            if iformat != "qcow2":
-                # The source needs conversion
-                tmp = self._tempfile(ext=".qcow2")
-                try:
-                    # Convert to qcow2
-                    convert(in_path, tmp, iformat, "qcow2")
-                except Exception as e:
-                    os.unlink(tmp)
-                    raise PcoccError("Failed to import {0} : {1}".format(in_path, str(e)))
-                did_convert = True
-                in_path = tmp
-        elif itype == "cont":
-            # Create temp storage
-            tmp = self._tempfile(ext=".tar.gz")
-            did_convert = True
-
-            print("Converting image to oci-archive ... ",)
-            # Here we directly use skopeo to copy to an OCI tarball
-            # and pcocc accepts the skopeo subtypes
-            cmd = ["skopeo", "copy", src_ext + ":" + in_path,  "oci-archive:" + tmp + ":latest"]
-            try:
-                ret = subprocess.check_call(cmd)
-            except subprocess.CalledProcessError:
-                os.unlink(tmp)
-                raise PcoccError("An error occured when importing"
-                                +" container image (see previous logs).")
-            in_path=tmp
-
-        # Save meta-data
-        meta = {}
-
-        meta["kind"] = ikind
-        meta["source_format"] = iformat
-        meta["source_path"] = orig_path
-
-        # Set in KVS
-        print("Storing image in repository as '{0}' ... ".format(key))
-        self.object_store.setval( key, in_path, meta_data=meta, repo_name=dest_repo)
-
-        # Remove TMP if needed
-        if did_convert:
-            os.unlink(tmp)
-
-
-    def export_image(self, descriptor, out_path, img_type=None, silent=False):
-        in_path, meta = self.get_by_name(descriptor)
-
-        if not in_path:
-            raise PcoccError("Could not find image {0}".format(descriptor))
-
-        # Fist extract input file type
-        if img_type:
-            #Type was given explicitly
-            targ_ext = img_type
-        else:
-            #Type is given by prefix
-            spl = out_path.split(":")
-
-            if len(spl) == 1:
-                out_path = out_path
-                targ_ext = self.extract_extension(out_path)
-            elif 2 <= len(spl):
-                targ_ext = spl[0]
-                out_path = ":".join(spl[1:])
-
-        itype = self.get_type_from_meta(meta)
-
-        self.check_supported_format(itype, targ_ext)
-
-        if itype == "vm":
-            sys.stderr.write("Exporting image '{0}' to '{1}' in '{2}' format ... "
-                             .format(descriptor, out_path, targ_ext))
-            convert(in_path, out_path, "qcow2", targ_ext)
-            sys.stderr.write("DONE\n")
-        elif itype == "cont":
-            # Here we directly use skopeo to copy from an OCI tarball to the target type
-            cmd = ["skopeo", "copy",  "oci-archive:" + in_path,
-                   targ_ext + ":" + out_path + ":latest"]
-
-            def export_error():
-                raise PcoccError("An error occured when exporting"
-                                +" container image see previous logs.")
-
-            try:
-                if silent:
-                    with open("/dev/null", "w") as dn:
-                        subprocess.check_call(cmd, stdout=dn)
-                else:
-                    subprocess.check_call(cmd)
-            except subprocess.CalledProcessError:
-                export_error()
-
-        else:
-            raise PcoccError("No such image type %s" % itype)
-
-
-    def move_image(self, source_descriptor, target_descriptor, force=False ):
-        # Check source
-        src_name, _ = self.image_descriptor_parse(source_descriptor)
-
-        # Check that image exists
-        src_file, src_meta = self.get_by_name(source_descriptor)
-
-        if not src_file:
-            raise PcoccError("Could not locate source image {0}".format(source_descriptor))
-
-        # Check destination
-        dest_name, dest_repo = self.image_descriptor_parse(target_descriptor)
-
-        if dest_repo == "":
-            raise PcoccError("You must specify a destination"
-                            +" repo to push images '[DEST REPO]:[IMAGE NAME]'")
-
-        if  (src_name == dest_name) and (src_meta["repo"] == dest_repo):
-            raise PcoccError("Cannot move an image to itself {0}:{1} to {2}:{3}"
-                             .format(src_meta["repo"], src_name, dest_repo, dest_name))
-
-        # Check overwrite
-        dst_file, _ = self.get_by_name(target_descriptor)
-
-        if dst_file:
-            if not force:
-                raise PcoccError("{0} image is already present in {1}".format(dest_name, dest_repo)
-                                 +"you may use '-f/--force' to overwrite")
-
-        self.object_store.setval( dest_name, src_file, meta_data=src_meta["metadata"], repo_name=dest_repo)
-        self.object_store.delval(src_name, src_meta["repo"])
+def create(path, size, fmt):
+    check_qemu_image_fmt(fmt)
+    try:
+        subprocess.check_output(
+            ["qemu-img", "create", "-f", fmt, path, size])
+    except subprocess.CalledProcessError, e:
+        raise PcoccError("Unable to create image. "
+                         "The qemu-img command failed with: " + e.output)

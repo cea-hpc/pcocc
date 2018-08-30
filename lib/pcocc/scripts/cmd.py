@@ -37,8 +37,6 @@ import logging
 import pcocc
 import uuid
 import random
-from shutil import copyfile
-from pcocc.Config import DEFAULT_USER_CONF_DIR
 import Queue
 import stat
 
@@ -50,9 +48,8 @@ from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from pcocc.scripts.Shine.TextTable import TextTable
 from pcocc.Agent import AgentCommand
+from pcocc.Templates import TEMPLATE_IMAGE_TYPE
 from pcocc import agent_pb2
-import pcocc.Image
-
 
 from ClusterShell.NodeSet import NodeSet,RangeSet,RangeSetParseError
 
@@ -63,7 +60,7 @@ def handle_error(err):
 
     click.secho(str(err), fg='red', err=True)
     if Config().debug:
-        raise err
+        raise
     sys.exit(-1)
 
 def cleanup(spr, terminal_settings):
@@ -409,13 +406,16 @@ def vm_name_to_index(name):
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-d', '--dest',
-              help='Make a full copy in a new directory',
-              metavar='DIR')
+              help='Create a new image instead of a new revision')
 @click.option('-s', '--safe',
               help='Wait indefinitely for the Qemu agent to freeze filesystems',
               is_flag=True)
+@click.option('--full',
+              help='Save a full image even if not necessary',
+              default=False,
+              is_flag=True)
 @click.argument('vm', nargs=1, default='vm0')
-def pcocc_save(jobid, jobname, dest,  vm, safe):
+def pcocc_save(jobid, jobname, dest, vm, safe, full):
     """Save the disk of a VM to a new disk image
 
     By default the output file only contains the differences between
@@ -432,84 +432,65 @@ def pcocc_save(jobid, jobname, dest,  vm, safe):
 
     """
     try:
-        config = load_config(jobid, jobname, default_batchname='pcocc')
-        img_mgr = pcocc.Image.PcoccImage()
+        config  = load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
-        index = vm_name_to_index(vm)
+        index   = vm_name_to_index(vm)
         vm = cluster.vms[index]
 
-        if dest:
-            explicit_destination=True
-        else:
-            explicit_destination=False
+        if  vm.image_type == TEMPLATE_IMAGE_TYPE.NONE:
+            click.secho('Template is not based on a CoW image',
+                        fg='red', err=True)
+            sys.exit(-1)
 
-        #Check if full image is needed
-        if explicit_destination:
-            dest_dir = validate_save_dir(dest, False)
-            # This is the case where you save in a file
-            full = True
-            # No need to push back
-            repo_insert_back = False
-        else:
-            # Here we do a differential save
-            # either in directory 'image_dir' or to repo
-            full = False
-            repo_insert_back = False
-            # Is this VM located in a repository ?
-            if vm.from_repo():
-                # Do we have no destination file yet ?
-                if dest is None:
-                    # Use a temporary directory
-                    dest = dest_dir = tempfile.mktemp(
-                            dir=Config().resolve_path(DEFAULT_USER_CONF_DIR))
-                    # Flag as from repo and to be inserted
-                    # as a new rev
-                    repo_insert_back = True
-            elif vm.image_dir is None:
-                click.secho('Template is not based on a CoW image',
-                            fg='red', err=True)
-                sys.exit(-1)
+        if vm.image_type == TEMPLATE_IMAGE_TYPE.REPO:
+            if dest:
+                # For incremental save into a new image, start by making sure
+                # all the incremental data blobs are in the destination repo
+                if not full:
+                    config.images.copy_image(vm.image, dest)
+                else:
+                    # We dont allow silent overwrite so check if the
+                    # destination exists now instead of erroring out later
+                    # (in the non-full case, the copy catches it early)
+                    config.images.check_overwrite(dest)
 
-        click.secho('Saving image...')
+            else:
+                dest = vm.image
 
-        #Compute Target Path
-        if explicit_destination:
-            # We have a target dir just add 'image' filename
-            save_path = os.path.join(dest_dir, 'image')
+            save_path = config.images.prepare_vm_import(dest)
         else:
-            if not repo_insert_back:
-                #We are not on a repo we thereofre use the image_dir
-                #and simply increment the 'rev'
+            if dest:
+                validate_save_dir(dest, False)
+                save_path = os.path.join(dest, 'image')
+                full = True
+            else:
                 save_path = os.path.join(vm.image_dir,
                                          'image-rev%d'%(vm.revision + 1))
-            else:
-                #Here we are on a repo we therefore use a tempfile directly
-                save_path = dest
 
         if safe:
             freeze_opt = Hypervisor.VM_FREEZE_OPT.YES
         else:
             freeze_opt = Hypervisor.VM_FREEZE_OPT.TRY
 
+
         vm.save(save_path, full, freeze_opt)
 
-        if repo_insert_back:
-            #This image is from a repo we need to push it back
-            #First get current infos
-            repo, key = vm.image_repo_infos()
-            if repo is None:
-                raise PcoccError("Could not retrieve repository informations for image")
-
-            image_name = key.split("-rev")[0] + "-rev{0}".format(vm.revision + 1)
-            img_mgr.import_image(save_path, image_name, itype="vm", img_type="qcow2")
-
-            #Now delete the temporary directory
-            os.unlink(save_path)
+        if vm.image_type == TEMPLATE_IMAGE_TYPE.REPO:
+            if not full:
+                new_image = config.images.add_revision_layer(dest, save_path)
+            else:
+                new_image = config.images.add_revision_full("vm", dest, save_path)
+            click.secho('vm{0} disk succesfully saved to {1} revision {2}'.format(
+                            index,
+                            dest,
+                            new_image['revision']
+                        ),
+                        fg='green')
         else:
-            # This image is from the FS we are done
-            click.secho('vm%d disk '
-                        'succesfully saved to %s' % (index,
-                                                    save_path), fg='green')
+            click.secho('vm{0} disk succesfully saved to {1}'.format(
+                index,
+                save_path),
+                        fg='green')
 
     except PcoccError as err:
         handle_error(err)
@@ -1202,7 +1183,7 @@ def pcocc_tpl_list():
     print tbl
 
 @template.command(name='show',
-             short_help="Display a template")
+             short_help="Show details for a template")
 @click.argument('template', nargs=1)
 def pcocc_tpl_show(template):
     try:
@@ -1536,64 +1517,26 @@ def pcocc_ping(jobid, jobname, indices, cluster):
 
 @cli.group()
 def image():
-    """ Gathers all the commands linked to image management """
+    """ List and manage VM images """
     pass
 
 
-@image.group(name="repos")
+@image.group(name="repo")
 def img_repo():
-    """ Commands used to manage image repositories """
+    """ List and manage image repositories """
     pass
-
-@img_repo.command(name='add',
-             short_help="Add a new pcocc image repository")
-@click.argument('path', nargs=1, type=str)
-def pcocc_image_repo_add( path ):
-    try:
-        load_config(None, None, "")
-        img_config = Config().repos
-        img_mgr = pcocc.Image.PcoccImage()
-
-        # Add to config
-        img_config.add_local(path)
-        # Reload config
-        img_mgr.reloadconfig()
-
-        click.secho(path + " has been added to repositories.\n",
-                fg='blue')
-
-    except PcoccError as err:
-        handle_error(err)
-
-
-@img_repo.command(name='delete',
-             short_help="Delete a pcocc image repository")
-@click.argument('path', nargs=1, type=str)
-def pcocc_image_repo_delete( path ):
-    try:
-        load_config(None, None, "")
-        img_config = Config().repos
-        img_mgr = pcocc.Image.PcoccImage()
-
-        # Add to config
-        img_config.remove_local(path)
-        # Reload config
-        img_mgr.reloadconfig()
-
-        click.secho(path + " has been removed from config (actual directory not removed).\n",
-                fg='blue')
-
-    except PcoccError as err:
-        handle_error(err)
-
 
 def print_repolist(rlist):
     tbl = TextTable("%name %path %writable")
 
     for r in rlist:
-        tbl.append({'name': os.path.basename(r),
-                    'path': r,
-                    'writable': str(bool(os.access(r, os.W_OK)))})
+        if os.path.exists(r.path):
+            writable = str(bool(os.access(r.path, os.W_OK)))
+        else:
+            writable = 'N/A'
+        tbl.append({'name': r.name,
+                    'path': r.path,
+                    'writable': writable})
 
     print tbl
 
@@ -1601,298 +1544,140 @@ def print_repolist(rlist):
              short_help="List pcocc image repositories")
 def pcocc_image_repo_list():
     try:
-        load_config(None, None, "")
-        img_config = Config().repos
-        # Note that we launch the image manager
-        # to make sure all repos are created
-        pcocc.Image.PcoccImage()
+        config = load_config(None, None, "")
 
-        loc = img_config.get_local()
-
-        if len(loc):
-            click.secho("\nLocal repositories:\n",
-                    fg='blue')
-            print_repolist(loc)
-
-        glob = img_config.get_global()
-
-        if len(glob):
-            click.secho("\nGlobal repositories:\n",
-                fg='blue')
-            print_repolist(glob)
-
+        l = config.images.list_repos()
+        print_repolist(l)
     except PcoccError as err:
         handle_error(err)
 
-@image.group(name="import")
-def img_import():
-    """ Commands linked to image imports """
-    pass
+@image.command(name='import',
+             short_help="Import an image to a repository")
+@click.option('-t', '--fmt', type=str,
+              help='Force source image format')
+@click.argument('kind', nargs=1, type=str)
+@click.argument('source', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+def pcocc_image_import(kind, fmt, source, dest):
+    if kind not in ["vm"]:
+        raise PcoccError("Unsupported image kind {0}")
 
-def is_image_rev(name):
-    sauv = re.compile(".*-rev[0-9]*")
-
-    if sauv.match(name):
-        return True
-
-    return False
-
-
-def check_import_name_is_correct(name):
-    if is_image_rev(name):
-        raise PcoccError("Invalid image name '%s' conflicts"+
-                         "with image revisions (.*-rev[0-9]*)" % name )
-
-    if name.endswith(".meta"):
-        raise PcoccError("Invalid image name '%s' the '.meta' extension is not allowed" % name )
-
-    if name == "pod":
-        raise PcoccError("Invalid image name '%s' conflicts with the Pod keyword" % name )
-
-@img_import.command(name='vm',
-             short_help="Import a  VM image in the pcocc repository")
-@click.option('-f', '--force', is_flag=True,
-              help='Allow overwrite in the target repository')
-@click.option('-t', '--imgtype', type=str,
-              help='Force input type to be considered (qcow2, vdi, raw, ...)')
-@click.argument('descriptor', nargs=1, type=str)
-@click.argument('input_uri', nargs=1, type=str)
-def pcocc_image_import_vm( force, imgtype, descriptor, input_uri):
     try:
         load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
-        dest_name, dest_repo = img_mgr.image_descriptor_parse(descriptor)
-        check_import_name_is_correct(dest_name)
-        img_mgr.import_image(input_uri, dest_name, ikind="vm",
-                             dest_repo=dest_repo, iformat=imgtype, force=force)
+        Config().images.import_image(kind, source, dest, fmt)
     except PcoccError as err:
         handle_error(err)
-
-
-
-@img_import.command(name='container',
-             short_help="Import a  container image in the pcocc repository")
-@click.option('-f', '--force', is_flag=True,
-              help='Allow overwrite in the target repository')
-@click.option('-t', '--imgtype', type=str,
-              help='Force input type to be considered (docker, docker-archive, oci ...)')
-@click.argument('descriptor', nargs=1, type=str)
-@click.argument('input_uri', nargs=1, type=str)
-def pcocc_image_import_cont( force, imgtype, descriptor, input_uri):
-    try:
-        load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
-        dest_name, dest_repo = img_mgr.image_descriptor_parse(descriptor)
-        check_import_name_is_correct(dest_name)
-        img_mgr.import_image(input_uri, dest_name, itype="cont",
-                             dest_repo=dest_repo, img_type=imgtype, force=force)
-
-    except PcoccError as err:
-        handle_error(err)
-
-
-
-@image.command(name='export',
-             short_help="Export an image from the pcocc repository")
-@click.option('-t', '--imgtype', type=str,
-              help='Force output type to be considered')
-@click.argument('descriptor', nargs=1, type=str)
-@click.argument('output_file', nargs=1, type=str)
-def pcocc_image_export_vm( imgtype, descriptor, output_file):
-    try:
-        load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
-        img_mgr.export_image( descriptor, output_file, img_type=imgtype)
-    except PcoccError as err:
-        handle_error(err)
-
 
 @image.command(name='delete',
-             short_help="Delete an image from the pcocc repository")
-@click.argument('descriptor', nargs=1, type=str)
-def pcocc_image_delete_vm( descriptor ):
+             short_help="Delete an image from a repository")
+@click.argument('image', nargs=1, type=str)
+def pcocc_image_delete(image):
     try:
         load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
-
-        #Do not allow to delete revisions
-        if is_image_rev(descriptor):
-            raise PcoccError("Use 'pcocc image revisions' to manipulate revisions.")
-
-        #Do not delete if revisions depend on this image
-        image_name, _ = img_mgr.image_descriptor_parse(descriptor)
-        matches = img_mgr.find(image_name + r"-rev(\d+)")
-        if len(matches):
-            raise PcoccError("Cannot Delete an image which has revisions")
-
-        sys.stderr.write("Deleting image '{0}' ... ".format(descriptor))
-        img_mgr.delete_image(descriptor)
-        sys.stderr.write("DONE\n")
+        Config().images.delete_image(image)
     except PcoccError as err:
-        sys.stderr.write("ERROR\n")
         handle_error(err)
 
-@image.command(name='move',
-             short_help="Move an image from one repository to another")
-@click.option('-f', '--force', is_flag=True,
-              help='Allow overwrite in the target repository')
-@click.argument('source_descriptor', nargs=1, type=str)
-@click.argument('target_descriptor', nargs=1, type=str)
-def pcocc_image_move( force, source_descriptor, target_descriptor ):
+@image.command(name='export',
+             short_help="Export an image from a repository")
+@click.option('-t', '--fmt', type=str,
+              help='Force destination image format')
+@click.argument('source', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+def pcocc_image_export(fmt, source, dest):
     try:
         load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
-
-        sys.stderr.write("Moving image from '{0}' to '{1}' ... ".format(
-                            source_descriptor, target_descriptor))
-        img_mgr.move_image(source_descriptor, target_descriptor, force=force )
-        sys.stderr.write("DONE\n")
+        Config().images.export_image(source, dest, fmt)
     except PcoccError as err:
-        sys.stderr.write("ERROR\n")
         handle_error(err)
 
-import json
-
-@image.command(name='info',
-             short_help="Get info relatively to a given image")
-@click.option('-j', '--js', is_flag=True,
-              help="Get output as JSON")
-@click.argument('descriptor', nargs=1, type=str)
-def pcocc_image_info( js, descriptor ):
+@image.command(name='copy',
+               short_help="Copy an image from one repository to another")
+@click.argument('source', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+def pcocc_image_copy(source, dest):
     try:
         load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
-        infos = img_mgr.image_infos(descriptor)
-
-        if js:
-            print json.dumps(infos, indent=4, sort_keys=True)
-        else:
-            is_cont = img_mgr.get_type_from_meta(infos) == "cont"
-            print("------------------------------")
-            print("%5s %24s" % ("Repo:", infos["repo"]))
-            print("%5s %24s" % ("Name:", infos["key"]))
-            if is_cont:
-                print("%5s %24s" % ("Type:", "Container (OCI archive)"))
-            else:
-                print("%s %24s" % ("Type:", "Virtual Machine (qcow2)"))
-            print("------------------------------")
-            print("%5s %24s" % ("URL: ", infos["repo"] + ":" + infos["key"]))
-            print("------------------------------")
-            print("%7s %22s" % ("Owner: ", infos["author"]))
-            ts = time.localtime(infos["timestamp"])
-            str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
-            print("%7s %21s" % ("Date:   ", str_time))
-            print("------------------------------")
-            if is_cont:
-                if "skopeo" in infos["metadata"]:
-                    sko = infos["metadata"]["skopeo"]
-                    #Print internal image infos
-                    print("%7s %21s" % ("Arch:   ", sko["Architecture"]))
-                    print("%7s %21s" % ("Os:     ", sko["Os"]))
-                    print("------------------------------")
-                if infos["metadata"]["source_type"] == "docker":
-                    print("%6s %22s" % ("Docker:", "docker:"+infos["metadata"]["source"]))
-                    print("------------------------------")
-
-            internal_pcocc_image_revisions(img_mgr, False, None, False, descriptor )
-
+        click.secho("Copying image ...")
+        Config().images.copy_image(source, dest)
+        click.secho("Image successufly copied", fg="green")
     except PcoccError as err:
-
         handle_error(err)
 
-def print_image_list(val_list):
-    tbl = TextTable("%name %type %revisions %repo %owner %date")
-
-    for img in val_list:
-        ts = time.localtime(img["timestamp"])
+@image.command(name='show',
+             short_help="Show details for an image")
+@click.argument('uri', nargs=1, type=str)
+def pcocc_image_show(uri):
+    try:
+        load_config(None, None, "")
+        meta, _ = Config().images.get_image(uri)
+        ts = time.localtime(meta["timestamp"])
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
 
-        if "rev" in img:
-            rev = str(img["rev"])
-        else:
-            rev = "-"
+        print("------------------------------")
+        print("%5s %24s" % ("Repo:", meta["repo"]))
+        print("%5s %24s" % ("Name:", meta["name"]))
+        print("%s %24s" % ("Type:", "Virtual Machine (qcow2)"))
+        print("------------------------------")
+        print("%5s %24s" % ("URI: ", meta["repo"] + ":" + meta["name"]))
+        print("------------------------------")
+        print("%7s %22s" % ("Owner: ", meta["owner"]))
+        print("%7s %21s" % ("Date:   ", str_time))
+        print("------------------------------")
 
-        tbl.append({'name': img["key"],
-                    'type' : img["metadata"]["kind"],
-                    'revisions' : rev,
-                    'repo': img["repo"],
-                    'owner': img["author"],
-                    "date": str_time})
+        revisions = Config().images.image_revisions(uri)
+        print("")
+        tbl = TextTable("%rev %size %date")
+        tbl.header_labels = {'rev': 'Revision',
+                             'size' : 'Size',
+                             'date': 'Creation Date'}
+
+        for rev in revisions:
+            meta, data = Config().images.get_image(uri, rev)
+            ts = time.localtime(meta["timestamp"])
+            str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
+
+            tbl.append({'rev': str(rev),
+                        'size': formatted_file_size(data),
+                        'date': str_time})
+
+        print tbl
+    except PcoccError as err:
+        handle_error(err)
+
+def print_image_list(images):
+    tbl = TextTable("%name %type %revision %repo %owner %date")
+
+    for img in images.itervalues():
+        rev = max(img.keys())
+        ts = time.localtime(img[rev]["timestamp"])
+        str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
+        tbl.append({'name'     : img[rev]["name"],
+                    'type'     : img[rev]["kind"],
+                    'revision' : str(rev),
+                    'repo'     : img[rev]["repo"],
+                    'owner'    : img[rev]["owner"],
+                    "date"     : str_time})
 
     print tbl
 
 @image.command(name='list',
-             short_help="List images in repositories")
-@click.option('-j', '--js', is_flag=True,
-              help="Get output as JSON")
-@click.option('-r', '--rev', is_flag=True,
-              help="Include revisions images")
-@click.argument('repo', nargs=1, type=str, default="")
-def pcocc_image_list( js, rev, repo ):
-    try:
-        load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
-        val_list = img_mgr.object_store.listval(repo)
-
-        #Create hashtable by name
-        ht = {}
-        for e in val_list:
-            e['rev'] = 0
-            ht[e['key']] = e
-
-        #Count revisions
-        rev_regexpr = re.compile(".*-rev[0-9]*")
-
-        all_revs = [e for e in val_list if rev_regexpr.match(e['key'])]
-
-        for e in all_revs:
-            name = e['key'].split("-rev")[0]
-            if name in ht:
-                ht[name]["rev"] = ht[name]["rev"] + 1
-
-        if not rev:
-            #Filter out revisions from results
-            val_list = [e for e in val_list if not rev_regexpr.match(e['key'])]
-
-        if js:
-            print json.dumps(val_list, indent=4, sort_keys=True)
-        else:
-            print_image_list(val_list)
-
-    except PcoccError as err:
-
-        handle_error(err)
-
-@image.command(name='find',
              short_help="Find images in repositories")
-@click.option('-j', '--js', is_flag=True,
-              help="Get output as JSON")
-@click.argument('regexpr', nargs=1, type=str)
-@click.argument('repo', nargs=1, type=str, default="")
-def pcocc_image_find( js, regexpr, repo ):
+@click.option('-R', '--repo', type=str,
+              help='Restrict image list to a repository')
+@click.argument('regex', nargs=1, type=str, default="")
+def pcocc_image_list(regex, repo):
     try:
-        load_config(None, None, "")
-        img_mgr = pcocc.Image.PcoccImage()
+        config = load_config(None, None, "")
+        val_list = config.images.find(regex, repo)
 
-        val_list = img_mgr.find(regexpr, repo)
-
-        if js:
-            print json.dumps(val_list, indent=4, sort_keys=True)
-        else:
-            if repo == "":
-                print("Searching '%s' in all repositories" % regexpr)
-            else:
-                print("Searching '%s' in '%s'" % (regexpr, repo) )
-
-            print_image_list(val_list)
-
-
+        print_image_list(val_list)
     except PcoccError as err:
 
         handle_error(err)
 
 
-def formated_file_size(path):
+def formatted_file_size(path):
     size = os.path.getsize(path)
     if size < 1024:
         return "{0} Bytes".format(size)
@@ -1902,119 +1687,3 @@ def formated_file_size(path):
         return "{0} MB".format(float(size)//(1024.0*1024.0))
     elif size < 1024*1024*1024*1024:
         return "{0} GB".format(float(size)//(1024.0*1024.0*1024.0))
-
-
-
-@image.command(name='revisions',
-             short_help="List and manage revisions for a given image")
-@click.option('--rollback', is_flag=True,
-              help="Remove last revision")
-@click.option('-i', '--ident', type=str,
-              help='Revision which to rollback to')
-@click.option('-j', '--js', is_flag=True,
-              help='Get output as JSON')
-@click.argument('descriptor', nargs=1, type=str)
-def pcocc_image_revisions( rollback, ident, js, descriptor ):
-    load_config(None, None, "")
-    img_mgr = pcocc.Image.PcoccImage()
-    internal_pcocc_image_revisions(img_mgr, rollback, ident, js, descriptor)
-
-#This is to be called from other functions such as 'info'
-def internal_pcocc_image_revisions(img_mgr, rollback, ident, js, descriptor ):
-    try:
-        namearr = descriptor.split(":")
-
-        if len(namearr) == 2:
-            repo, key = namearr[0], namearr[1]
-        else:
-            repo = ""
-            key = namearr[0]
-
-        #
-        # List Revisions
-        #
-
-        # Get source image infos
-        infos = img_mgr.image_infos(descriptor)
-
-        matches = img_mgr.find(key + r"-rev(\d+)", repo)
-        matches = sorted(matches, key=lambda k: int(k['key'].split("-rev")[-1]))
-
-        #
-        # Handle Rollback
-        #
-        if rollback:
-            if js:
-                raise PcoccError("rollback has no JS output")
-
-            if len(matches) == 0:
-                raise PcoccError("No revisions found: cannot rollback")
-
-            last_rev = matches[-1]['key'].split("-rev")[-1]
-
-            sident = ""
-            if not ident is None:
-                # Convert to Int
-                if ident == "origin":
-                    #This means all revisions
-                    ident = -1
-                    sident = "origin"
-                else:
-                    ident = int(ident)
-                    sident = str(ident)
-
-
-                if int(last_rev) < ident:
-                    raise PcoccError("Last revision is "
-                          + last_rev + ": Cannot rollback to " + str(ident))
-            else:
-                #if no rev is specified it is as if we revert last_rev as id
-                ident = int(last_rev) - 1
-                sident = str(ident)
-
-            #Delete Vms in decreasing order
-            for i  in  range(len(matches) - 1 , -1 , -1):
-                elem = matches[i]
-                this_id = int(elem['key'].split("-rev")[-1])
-                # Is this id higher than the target ?
-                if ident < this_id:
-                    #Delete the revision
-                    iname = elem['repo'] + ":" + elem['key']
-                    print("Deleting {0}").format(iname)
-                    img_mgr.delete_image(iname)
-
-            print("{0} has been reverted to revision '{1}'".format(descriptor, sident))
-        else:
-            if js:
-                matches.insert(0, infos)
-                print json.dumps(matches, indent=4, sort_keys=True)
-            else:
-                print("")
-                tbl = TextTable("%rev %size %date")
-
-                tbl.header_labels = {'rev': 'Revision',
-                                    'size' : 'Size',
-                                    'date': 'Creation Date'}
-
-                #Push Reference Image
-                rev = "origin"
-                ts = time.localtime(infos["timestamp"])
-                str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
-
-                tbl.append({'rev': rev,
-                            'size': formated_file_size(infos["path"]),
-                            'date': str_time})
-
-                for elem in matches:
-                    rev = elem['key'].split("-rev")[-1]
-                    ts = time.localtime(elem["timestamp"])
-                    str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
-
-                    tbl.append({'rev': rev,
-                                'size': formated_file_size(elem["path"]),
-                                'date': str_time})
-
-                print tbl
-
-    except PcoccError as err:
-        handle_error(err)

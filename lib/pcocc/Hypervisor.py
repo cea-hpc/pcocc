@@ -50,6 +50,7 @@ from .Error import PcoccError
 from .Config import Config
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import stop_threads, systemd_notify
+from .Templates import TEMPLATE_IMAGE_TYPE
 
 lock = threading.Lock()
 
@@ -770,7 +771,8 @@ username={3}@pcocc
         # Find out hwloc version
         # Python hwloc bindings would be nice
         try:
-            version_string = subprocess_check_output(['lstopo-no-graphics', '--version'])
+            version_string = subprocess_check_output(['lstopo-no-graphics',
+                                                      '--version'])
         except (OSError, subprocess.CalledProcessError) as err:
             raise HypervisorError('hwloc (lstopo-no-graphics) is not available')
 
@@ -874,7 +876,7 @@ username={3}@pcocc
         # may save the image later if needed
         snapshot_path = batch.get_vm_state_path(vm.rank, 'image_snapshot')
 
-        if (not vm.image_dir is None) or (vm.from_repo()):
+        if vm.image_type != TEMPLATE_IMAGE_TYPE.NONE:
             if ckpt_dir:
                 image_path = self.checkpoint_img_file(vm, ckpt_dir)
             else:
@@ -1535,17 +1537,20 @@ username={3}@pcocc
         else:
             try:
                 img_info_output =  subprocess_check_output(['ssh', remote_host,
-                                                            'qemu-img', 'info',
+                                                            'qemu-img', 'info', "--output=json",
                                                             dest_img_file])
+
             except (OSError, subprocess.CalledProcessError):
                 raise ImageSaveError('unable to determine backing file')
 
-            match = re.search(r'backing file: (.+)\n', img_info_output)
-            if not match:
+            try:
+                data = json.loads(img_info_output)
+                backing_file = data.get("full-backing-filename", None)
+                if backing_file is None:
+                    backing_file = data["backing-filename"]
+            except Exception as e:
                 raise ImageSaveError('unable to determine backing file. Qemu-img '
-                                     'output was ' + img_info_output)
-
-            backing_file = match.group(1)
+                                     'output was ' + img_info_output + str(e))
 
             if not os.path.samefile(backing_file, vm_image_path):
                 need_rebase = True

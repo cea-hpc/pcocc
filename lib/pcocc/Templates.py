@@ -22,12 +22,14 @@ import re
 import errno
 import time
 import logging
-import pcocc.Image
+
 from .scripts.Shine.TextTable import TextTable
 from .Config import Config
 from .Error import InvalidConfigurationError
-from .Backports import OrderedDict
+from .Backports import OrderedDict, enum
 
+
+TEMPLATE_IMAGE_TYPE = enum('NONE', 'REPO', 'DIR')
 
 # For each valid setting, is it required, whats the default value and is it
 # inheritable
@@ -109,31 +111,6 @@ class TemplateConfig(dict):
 
     def resource_template(self, tpl):
         return '___'+tpl
-
-
-def extract_repo_revision(image):
-    img_mgr = pcocc.Image.PcoccImage()
-    img_path, img_meta = img_mgr.get_by_name(image)
-
-    #First assume rev is 0
-    rev=0
-    # Do we rely on the KVS ?
-    if img_path:
-        # Were meta correctly loaded ?
-        if img_meta:
-            # Find all the images in the repo matching the rev pattern (if present)
-            revs = img_mgr.find(img_meta['key'] + r"-rev(\d+)")
-            # If there was some
-            if len(revs):
-                # Get the one with the highest name
-                img_meta = sorted(revs, key=lambda k:int(k['key'].split("-rev")[-1]))[-1]
-                # Retrieve its informations and replace the image
-                img_path, _ = img_mgr.get_by_name(img_meta['repo'] + ":" + img_meta['key'])
-                rev = img_meta['key'].split("-rev")[-1]
-                logging.info("Retained " + img_meta['repo'] + ":" + img_meta['key'])
-    return img_meta, img_path, rev
-
-
 
 class Template(object):
     """Class holding a single template definition
@@ -218,26 +195,32 @@ class Template(object):
 
         print tbl
 
-    def resolve_image(self, vm=None):
-        rev_list = []
-
+    def image_type(self, vm=None):
         if getattr(self, 'image') is None:
+            return TEMPLATE_IMAGE_TYPE.NONE
+
+        image = Config().resolve_path(getattr(self, 'image'), vm)
+
+        # Historically: images could only be stored in folders. Since you almost
+        # always needed to use absolute paths we now enforce it and use that as
+        # a hacky heuristic to know whether the user is referring to a folder or
+        # a repository
+        if os.sep in image:
+            return TEMPLATE_IMAGE_TYPE.DIR
+        else:
+            return TEMPLATE_IMAGE_TYPE.REPO
+
+    def resolve_image(self, vm=None):
+        image = Config().resolve_path(getattr(self, 'image'), vm)
+
+        if self.image_type(vm) == TEMPLATE_IMAGE_TYPE.NONE:
             return None, 0
+        elif self.image_type(vm) == TEMPLATE_IMAGE_TYPE.REPO:
+            meta, data = Config().images.get_image(image)
+            return data, meta['revision']
 
-        # This is the repository-based image resolution
-        img_meta, img_path, rev = extract_repo_revision(getattr(self, 'image'))
-
-        if img_path:
-            #Flag as found in a repository
-            self.settings['fromrepo'] = True
-            self.settings['image_repo'] = img_meta['repo']
-            self.settings['image_key'] = img_meta['key']
-            return img_path, int(rev)
-
-        # This is the backward compatible file-system definition
-        # of the pcocc images
-        image = Config().resolve_path(getattr(self, 'image'),
-                                    vm)
+        # Directory based image
+        rev_list = []
         try:
             for f in os.listdir(image):
                 match = re.match(r'image-rev(\d+)', f)
@@ -262,8 +245,6 @@ class Template(object):
                     "template \"{}\" image directory "
                     "has no image ".format(self.name))
 
-        #Flag as not coming from a pcocc repository
-        self.settings['fromrepo'] = False
         return image_file, revision
 
 

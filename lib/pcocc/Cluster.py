@@ -30,7 +30,8 @@ from .Error import PcoccError
 from .Config import Config
 from .Misc import ThreadPool
 from .scripts import click
-from Tbon import TreeNode, TreeClient
+from .Tbon import TreeNode, TreeClient
+from .Templates import TEMPLATE_IMAGE_TYPE
 
 class InvalidClusterError(PcoccError):
     """Exception raised when the cluster definition cannot be parsed
@@ -57,7 +58,7 @@ def do_checkpoint_vm(key, vm, ckpt_dir):
     vm.checkpoint(ckpt_dir)
 
 def do_save_vm(key, vm, ckpt_dir):
-    if not vm.image_dir is None:
+    if  vm.image_type != TEMPLATE_IMAGE_TYPE.NONE:
         vm.save(vm.checkpoint_img_file(ckpt_dir),
                 freeze=Hypervisor.VM_FREEZE_OPT.NO)
 
@@ -177,20 +178,17 @@ class VM(object):
         return image_file
 
     @property
-    def is_container(self):
-        if self._template.container:
-            return True
-        return False
+    def image_type(self):
+        return self._template.image_type(self)
+
+    @property
+    def image(self):
+        return self._template.image
 
     @property
     def image_dir(self):
-        #Make sure for container that image is resolved
-        self._template.resolve_image(self)
-        if self._template.image is None:
-            return None
-
-        if self.from_repo():
-            return None
+        if self.image_type != TEMPLATE_IMAGE_TYPE.DIR:
+            raise PcoccError("VM image is not a directory")
 
         return Config().resolve_path(self._template.image, self)
 

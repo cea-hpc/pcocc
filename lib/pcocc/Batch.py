@@ -1343,7 +1343,7 @@ class LocalManager(EtcdManager):
 
             os.makedirs(self._cpuset_cluster())
         except OSError as e:
-            if e == errno.EEXIST:
+            if e.errno == errno.EEXIST:
                 pass
             else:
                 raise BatchError(

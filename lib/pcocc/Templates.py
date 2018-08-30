@@ -136,6 +136,11 @@ class Template(object):
         # Attributes cannot have dashes so we convert to underscore
         user_attr =  attr.replace('_','-')
         required, default, heritable = template_settings[user_attr]
+        # Resource sets are a special case where we may have a default
+        # value depending on the configuration
+        if user_attr == "resource-set" and Config().rsets.default_rset:
+            required = False
+            default = Config().rsets.default_rset
 
         if user_attr in self.settings:
             if self.settings[user_attr] is None:

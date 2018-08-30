@@ -30,9 +30,15 @@ class ResSetConfig(dict):
             raise InvalidConfigurationError(str(err))
 
         self._rsets = {}
+        self.default_rset = None
         for name, res_attr in res_config.iteritems():
             self[name] = ResSet(name, res_attr)
-
+            if res_attr.get('default', False):
+                if self.default_rset:
+                    raise InvalidConfigurationError(
+                        'multiple default resource sets configured')
+                else:
+                    self.default_rset = name
 class ResSet(object):
     def __init__(self, name, settings):
         self.name = name

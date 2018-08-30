@@ -4,6 +4,7 @@
 default:
   networks:
     - nat-rssh
+  default: True
 
 # ib-cluster:
 #   networks:

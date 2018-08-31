@@ -54,9 +54,9 @@ class TextTable(object):
 
     Display properties:
         fmt               Format used to display each row and header.
-        show_header       If True, display a uppercase header a the top of 
+        show_header       If True, display a uppercase header a the top of
                           the table (default: True)
-        header_labels     Mapping of key to header text. 
+        header_labels     Mapping of key to header text.
                           Default is to use the key as the header value.
         color             if True, displays table using colors.
         title             A title to display on top of the table
@@ -69,7 +69,7 @@ class TextTable(object):
         self._rows = []
         self._max_width = {}
         self._non_empty_cols = set()
-        
+
         # Behavior
         self.ignore_bad_keys = False
         self.aliases = {}
@@ -106,6 +106,9 @@ class TextTable(object):
         return [ match.group('name')
                  for match in re.finditer(self.RE_PATTERN, self.fmt) ]
 
+    def purge(self):
+        self._rows = []
+
     def append(self, row):
         """Append a new row to be displayed. `row' should be a dict."""
         leftover={}
@@ -115,7 +118,7 @@ class TextTable(object):
             header_length = len(self._header(key))
             real_value_len = len(str(value or ''))
 
-            
+
             if self._col_width(key) and real_value_len >  self._col_width(key):
                 wrap=textwrap.wrap(value, self._col_width(key))
                 leftover[key] = ' '.join(wrap[1:])

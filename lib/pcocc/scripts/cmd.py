@@ -1171,16 +1171,23 @@ def pcocc_tpl_list():
 
     try:
         config = load_config()
+        for t in 'user', 'system':
+            click.secho("{} repositories:".format(t.capitalize()),
+                        fg='blue', bold=True)
 
-        for name, tpl in config.tpls.iteritems():
-            if not tpl.placeholder:
-                tbl.append({'name': name,
-                            'image': tpl.image,
-                            'res': tpl.rset.name,
-                            'desc': tpl.description})
+            for name, tpl in sorted(config.tpls.iteritems()):
+                if tpl.source_type == t:
+                    tbl.append({'name': name,
+                                'image': tpl.image,
+                                'res': tpl.rset.name,
+                    'desc': tpl.description})
+            print tbl
+            print
+            tbl.purge()
+
     except PcoccError as err:
         handle_error(err)
-    print tbl
+
 
 @template.command(name='show',
              short_help="Show details for a template")

@@ -83,7 +83,7 @@ class Config(object):
         logging.debug('Loading system config')
         self.load_vnets(os.path.join(conf_dir, 'networks.yaml'))
         self.load_rsets(os.path.join(conf_dir, 'resources.yaml'))
-        self.load_tpls(os.path.join(conf_dir, 'templates.yaml'))
+        self.load_tpls(os.path.join(conf_dir, 'templates.yaml'), 'system')
         if jobid is None:
             jobid = os.getenv('PCOCC_LOCAL_JOB_ID')
         self.load_batch(os.path.join(conf_dir, 'batch.yaml'), jobid,
@@ -101,13 +101,14 @@ class Config(object):
         logging.debug('Loading user config')
         self.user_conf_dir = self.resolve_path(user_conf_dir)
         self.load_tpls(os.path.join(self.user_conf_dir,
-                                    'templates.yaml'), required=False)
+                                    'templates.yaml'), 'user', required=False)
 
         tpl_dir = os.path.join(self.user_conf_dir, 'templates.d')
         if os.path.isdir(tpl_dir):
             for tpl_file in os.listdir(tpl_dir):
                 if tpl_file.endswith('.yaml'):
-                    self.load_tpls(os.path.join(tpl_dir, tpl_file), required=False)
+                    self.load_tpls(os.path.join(tpl_dir, tpl_file),
+                                   'user', required=False)
 
         user_repos_path = os.path.join(self.user_conf_dir, 'repos.yaml')
         if os.path.exists(user_repos_path):
@@ -124,8 +125,9 @@ class Config(object):
     def load_rsets(self, resource_conf_file):
         self.rsets.load(resource_conf_file)
 
-    def load_tpls(self, template_conf_file='templates.yaml', required=True):
-        self.tpls.load(template_conf_file, required)
+    def load_tpls(self, template_conf_file='templates.yaml',
+                  source_type=None, required=True):
+        self.tpls.load(template_conf_file, source_type, required)
 
     def load_batch(self, batch_config_file, jobid, jobname, default_jobname,
                    process_type, batchuser):

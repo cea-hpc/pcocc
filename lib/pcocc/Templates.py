@@ -21,7 +21,6 @@ import os
 import re
 import errno
 import time
-import logging
 
 from .scripts.Shine.TextTable import TextTable
 from .Config import Config
@@ -35,7 +34,6 @@ TEMPLATE_IMAGE_TYPE = enum('NONE', 'REPO', 'DIR')
 # inheritable
 template_settings = {'image': (False, None, True),
                      'resource-set': (True, None, True),
-                     'ispod': (False, False, True),
                      'custom-args': (False, [], True),
                      'qemu-bin': (False, None, True),
                      'nic-model': (False, None, True),
@@ -55,7 +53,7 @@ template_settings = {'image': (False, None, True),
 
 class TemplateConfig(dict):
     """Manages the VM template definitions"""
-    def load(self, filename, required=True):
+    def load(self, filename, filetype=None, required=True):
         """Loads a template configuration File
 
         Populates a dict holding a template class for each defined
@@ -82,6 +80,7 @@ class TemplateConfig(dict):
                 self[name] = Template(name,
                                       {'resource-set': rset,
                                        'placeholder': True},
+                                      None,
                                       None)
 
         if not tpl_config:
@@ -105,7 +104,7 @@ class TemplateConfig(dict):
                         "template '{}' has unknown setting '{}'".format(
                             name, setting))
 
-            self[name] = Template(name, tpl_attr, filename)
+            self[name] = Template(name, tpl_attr, filename, filetype)
 
         # Finish validation once everything has been loaded
         for tpl in self.itervalues():
@@ -121,11 +120,12 @@ class Template(object):
     Template inheritance is automatically managed when accessing attributes
 
     """
-    def __init__(self, name, settings, source_file):
+    def __init__(self, name, settings, source_file, source_type):
         self.name = name
         self.settings = settings
         self.validated = False
         self.source = source_file
+        self.source_type = source_type
 
     def __getattr__(self, attr):
         if attr == 'rset':

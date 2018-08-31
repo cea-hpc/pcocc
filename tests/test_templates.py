@@ -12,7 +12,7 @@ def test_template_inheritance(datadir, config):
     config.rsets = ResSetConfig()
 
     config.rsets.load(str(datadir.join('resources.yaml')))
-    config.tpls.load(str(datadir.join('templates_herit.yaml')))
+    config.tpls.load(str(datadir.join('templates_herit.yaml')), 'user')
 
     # Check that we have all templates and resource placeholders
     assert(len(config.tpls) == 5)
@@ -51,7 +51,7 @@ def test_bad_templates(conf_file, expected_error, datadir, config):
     config.rsets.load(str(datadir.join('resources.yaml')))
 
     with pytest.raises(InvalidConfigurationError) as err:
-        config.tpls.load(str(datadir.join(conf_file)), required=True)
+        config.tpls.load(str(datadir.join(conf_file)), 'user', required=True)
     assert expected_error in str(err.value)
 
 
@@ -100,7 +100,7 @@ def test_template_display(template, expected_output, capsys, datadir, config):
     config.rsets = ResSetConfig()
 
     config.rsets.load(str(datadir.join('resources.yaml')))
-    config.tpls.load(str(datadir.join('templates_herit.yaml')))
+    config.tpls.load(str(datadir.join('templates_herit.yaml')), 'user')
 
     config.tpls[template].display()
     out, err = capsys.readouterr()
@@ -120,7 +120,7 @@ def test_template_resolve_image(image_path, resolved_image, revision,
     monkeypatch.setenv('EXAMPLE_IMAGE_PATH', str(datadir.join(image_path)))
 
     config.rsets.load(str(datadir.join('resources.yaml')))
-    config.tpls.load(str(datadir.join('templates_images.yaml')))
+    config.tpls.load(str(datadir.join('templates_images.yaml')), 'user',)
 
     if resolved_image:
         image, rev = config.tpls['example'].resolve_image()

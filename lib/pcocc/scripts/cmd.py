@@ -1687,3 +1687,41 @@ def formatted_file_size(path):
         return "{0} MB".format(float(size)//(1024.0*1024.0))
     elif size < 1024*1024*1024*1024:
         return "{0} GB".format(float(size)//(1024.0*1024.0*1024.0))
+
+
+@cli.command(name='ps',
+             short_help='List current pcocc jobs')
+@click.option('-a', '--all', is_flag=True, default=False,
+              help='List jobs for users')
+@click.option('-u', '--user', default = "",
+              help='List jobs of the specified user')
+def pcocc_ps(user, all):
+    """List current pcocc jobs
+    """
+    try:
+        config = load_config()
+
+        if not user:
+            user = pwd.getpwuid(os.getuid()).pw_name
+
+        if all:
+            # all superses --user
+            user = None
+
+        joblist = config.batch.get_job_details(user)
+
+        tbl = TextTable("%id %name %user %partition %nodes %duration %timelimit")
+        for j in joblist:
+            tbl.append({'id': str(j["batchid"]),
+                        'user': j["user"],
+                        'partition': j["partition"],
+                        'nodes': str(j["node_count"]),
+                        'name': j["jobname"],
+                        'duration': j["exectime"],
+                    'timelimit': j["timelimit"]
+            })
+
+        print tbl
+
+    except PcoccError as err:
+        handle_error(err)

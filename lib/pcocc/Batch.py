@@ -25,7 +25,6 @@ import shutil
 import errno
 import subprocess
 import sys
-import time
 import random
 import datetime
 import logging
@@ -44,7 +43,7 @@ import threading
 from ClusterShell.NodeSet import NodeSet, NodeSetException, RangeSet
 from abc import ABCMeta, abstractmethod
 
-from .Tbon import  UserCA, Cert
+from .Tbon import  UserCA
 from .Config import Config
 from .Backports import subprocess_check_output
 from .Error import PcoccError, InvalidConfigurationError
@@ -327,6 +326,7 @@ class BatchManager(object):
 
     load = staticmethod(load)
 
+
 def _retry_on_cred_expiry(func):
     """Wraps etcd call to automtically regenerate expired credentials"""
     def _wrapped_func(*args, **kwargs):
@@ -334,9 +334,8 @@ def _retry_on_cred_expiry(func):
             try:
                 return func(*args, **kwargs)
             except etcd.EtcdException as e:
-                args[0]._try_renew_credential(e)
+                args[0]._try_renew_credential(e) # pylint: disable=W0212
     return _wrapped_func
-
 
 class EtcdManager(BatchManager):
     """Common class for batch managers based on etcd"""
@@ -362,7 +361,8 @@ class EtcdManager(BatchManager):
         try:
             os.mkdir(self._get_vm_state_dir(self.task_rank), 0o700)
         except OSError as e:
-            raise PcoccError('Failed to create temporary directory for VM data: ' + str(e))
+            raise PcoccError('Failed to create temporary directory for '
+                             'VM data: ' + str(e))
 
         atexit.register(self._clean_vm_dir)
 
@@ -1180,9 +1180,6 @@ class LocalManager(EtcdManager):
 
         return batchids
 
-    def list_alive_jobs(self):
-        return self.list_all_jobs()
-
     def find_job_by_name(self, user, batchname,
                          host=None):
 
@@ -1463,16 +1460,8 @@ class SlurmManager(EtcdManager):
                 uid = int(os.environ['SLURM_JOB_UID'])
                 self.batchuser = pwd.getpwuid(uid).pw_name
             except KeyError:
-                if batchid:
-                    # If we have a batch id we can get the user from the alloc
-                    jobs = self.list_all_jobs(get_infos=True)
-                    me = [ v for v in jobs if  v["batchid"] == batchid]
-                    if len(me) == 0:
-                        raise InvalidJobError("No match found in Slurm for batch id {}".format(batchid))
-                    self.batchuser = me[0]["user"]
-                else:
-                    # Assume we are the caller
-                    self.batchuser = pwd.getpwuid(os.getuid()).pw_name
+                # Assume we are the caller
+                self.batchuser = pwd.getpwuid(os.getuid()).pw_name
 
         # Find the job id.
         # Look in order at the specified job id, job name, environment variable,
@@ -1575,78 +1564,78 @@ class SlurmManager(EtcdManager):
         except ValueError:
             raise InvalidJobError('name %s is ambiguous' % batchname)
 
-    def list_all_jobs(self, get_infos=False):
+    def list_all_jobs(self):
         """List all jobs in the cluster
-
-        If no get_infos [ 1234, 1235 ]
-        Otherwise list of dict with several keys:
-            - batchid
-            - user
-            - exectime
-            - timelimit
-            - partition
-            - node count
-            - jobname
-            - state
-
-        Keyword Arguments:
-            get_user {bool} -- Whether to show users (default: {False})
-
-        Raises:
-            BatchError -- Failled to retrieve joblist from SLURM
-
-        Returns:
-            array -- List of jobs (with or without user info)
+        Returns a list of the batchids of all jobs in the cluster
+        (including non pcocc jobs)
         """
-
         try:
             joblist = subprocess_check_output(['squeue', '-ho',
-                                               '%A %u %M %l %P %D %j %t']).split("\n")
-            ret=[]
-            for j in joblist:
-                entry=j.split(" ")
-                if len(entry) != 8:
-                    continue
-                ret.append({"batchid":int(entry[0]),
-                            "user":entry[1],
-                            "exectime":entry[2],
-                            "timelimit":entry[3],
-                            "partition":entry[4],
-                            "node_count":int(entry[5]),
-                            "jobname":entry[6],
-                            "state":entry[7]
-                            })
-            if get_infos is False:
-                return [ j["batchid"] for j in ret ]
-            else:
-                return ret
+                                               '%A']).split()
+            return [ int(j) for j in joblist ]
         except subprocess.CalledProcessError as err:
             raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
 
-    def list_user_jobs(self, user):
-        all_jobs = self.list_all_jobs(get_infos=True)
-        return [ j for j in all_jobs if j["user"] == user ]
-
-
-    def list_alive_jobs(self):
-        """Get Jobs currently running
-
-        This will return a list of the currently
-        running batch IDs
-
+    def get_job_details(self, user=None):
+        """Gather details about pcocc jobs
         """
-        all_jobs = self.list_all_jobs(get_infos=True)
 
-        ret=[]
-        # Filter out live Clusters by comparing to ETCD
-        for j in all_jobs:
-            bid = j["batchid"]
-            usr = j["user"]
-            def_found = self.read_key("cluster/user", "definition", user=usr, batchid=bid)
-            if def_found:
-                j["definition"] = def_found
-                ret.append(j)
+        candidates = []
+        try:
+            d = self.keyval_client.read('/pcocc/cluster/')
+        except etcd.EtcdKeyNotFound:
+            # No pcocc jobs, no need to go further
+            return []
+
+        for child in d.children:
+            try:
+                candidates.append(int(os.path.split(child.key)[-1]))
+            except ValueError:
+                pass
+
+        if user:
+            user_filter = ['-u', user]
+        else:
+            user_filter = []
+
+        try:
+            joblist = subprocess_check_output(['squeue'] + user_filter +
+                                              ['-ho','%A %u %M %l %P %D %t %j']).split("\n")
+        except subprocess.CalledProcessError as err:
+            raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
+
+        ret = []
+
+        for line in joblist:
+            if not line:
+                continue
+            entry = line.split()
+            try:
+                parsed_entry = {'batchid':    int(entry[0]),
+                                'user':       entry[1],
+                                'exectime':   entry[2],
+                                'timelimit':  entry[3],
+                                'partition':  entry[4],
+                                'node_count': int(entry[5]),
+                                'state':      entry[6],
+                                'jobname':    ' '.join(entry[7:])}
+            except (IndexError, ValueError):
+                logging.error('Skipping unexpected slurm output: %s-', line)
+                continue
+
+            if user and parsed_entry['user'] != user:
+                continue
+
+            if parsed_entry['batchid'] not in candidates:
+                continue
+
+            ret.append(parsed_entry)
+
         return ret
+
+    def list_user_jobs(self, user):
+        all_jobs = self.list_all_jobs()
+        return [ j for j in all_jobs if j["user"] == user ]
 
 
     def _build_rank_map(self, tasks_per_node=None):

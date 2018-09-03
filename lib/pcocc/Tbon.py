@@ -19,14 +19,9 @@
 import grpc
 import agent_pb2
 import agent_pb2_grpc
-import os
-import time
-import tempfile
 import socket
-import json
 import threading
 import logging
-import subprocess
 import yaml
 
 from OpenSSL import crypto
@@ -42,7 +37,7 @@ from ClusterShell.NodeSet import RangeSet
 # Helper functions from pyOpenSSL
 #
 
-def createKeyPair(type, bits):
+def createKeyPair(key_type, bits):
     """
     Create a public/private key pair.
     Arguments: type - Key type, must be one of TYPE_RSA and TYPE_DSA
@@ -50,7 +45,7 @@ def createKeyPair(type, bits):
     Returns:   The public/private key pair in a PKey object
     """
     pkey = crypto.PKey()
-    pkey.generate_key(type, bits)
+    pkey.generate_key(key_type, bits)
     return pkey
 
 def createCertRequest(pkey, digest="md5", **name):
@@ -195,7 +190,7 @@ def mt_tee(source_iterator, count=2):
 
     # TODO: should we limit the queue size in case one of the sink
     # generators are not beeing read fast enough ?
-    queues = [Queue() for i in range(count)]
+    queues = [Queue() for _ in range(count)]
 
     def queue_gen(q):
         while True:
@@ -214,8 +209,7 @@ def mt_tee(source_iterator, count=2):
                     q.put(d)
         except Exception as e:
             #FIXME: Clarify how to properly handle this error
-            logging.error("Exception while duplicating request for tee:", str(e) )
-            pass
+            logging.error("Exception while duplicating request for tee: %s", str(e))
 
         for q in queues:
             logging.debug("mt_tee: source ended, terminating all sinks")
@@ -313,7 +307,7 @@ class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
 
         self._ready.set()
 
-    def route_stream(self, request_iterator, req_ctx):
+    def route_stream(self, request_iterator, context):
         #FIXME: Refactor this
         #First, see from the header message if we are part of the recipients
         init_msg = next(request_iterator)
@@ -328,7 +322,8 @@ class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
             # find out how to handle the next messages
             req = getattr(agent_pb2, init_msg.args.TypeName())()
             init_msg.args.Unpack(req)
-            input_handler, output_handler, ret = self._stream_init_handler(init_msg.name, req, req_ctx)
+            input_handler, output_handler, ret = self._stream_init_handler(init_msg.name,
+                                                                           req, context)
 
             if isinstance(ret, agent_pb2.GenericError):
                 ret_msg = agent_pb2.RouteMessageResult(source=self._vmid,
@@ -352,7 +347,7 @@ class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
 
             def get_output():
                 # Get messages from the generator for this stream
-                for output_msg in output_handler(req_ctx):
+                for output_msg in output_handler(context):
                     if isinstance(output_msg, agent_pb2.GenericError):
                         ret_msg = agent_pb2.RouteMessageResult(source=self._vmid,
                                                                error=output_msg)
@@ -367,7 +362,7 @@ class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
                 for input_msg in local_iter:
                     req = getattr(agent_pb2, input_msg.args.TypeName())()
                     input_msg.args.Unpack(req)
-                    input_handler(input_msg.name, req, req_ctx)
+                    input_handler(input_msg.name, req, context)
 
             #Create a dedicated thread to block and push on the local iterator
             thread = threading.Thread(target=send_input)
@@ -459,7 +454,7 @@ class TreeNodeRelay(object):
 
         self._gen_children_list()
         self._connect()
-        logging.debug("Rank {}: routes:  {}".format(self._vmid, self._routes))
+        logging.debug("Rank %d: routes: %s",self._vmid, str(self._routes))
 
     def route_cmd(self, command, context):
         stub = None
@@ -467,16 +462,16 @@ class TreeNodeRelay(object):
         try:
             route = self._routes[command.destination]
             stub = self._children_stubs[route]
-            logging.debug("Routing for node {} through child {} ".format(command.destination,
-                                                                         route))
+            logging.debug("Routing for node %d through child %d", command.destination,
+                          route)
 
         except KeyError:
-            logging.debug("Routing for node {} through parent".format(command.destination))
+            logging.debug("Routing for node %d through parent", command.destination)
             stub = self._parent_stub
 
 
         if stub is None:
-            logging.error("Bad stub for {} from {}".format(command.destination, self._vmid))
+            logging.error("Bad stub for %d from %d", command.destination, self._vmid)
 
         try:
             # Route the command by executing a RPC on the next
@@ -499,12 +494,12 @@ class TreeNodeRelay(object):
                     type=agent_pb2.GenericError.GenericError,
                     description=str(e)))
         except grpc.FutureCancelledError as e:
-                # Again should not be necessary as the parent should be
-                # cancelled too but just in case
-                return agent_pb2.RouteMessageResult(source=command.destination,
-                                                    error=agent_pb2.GenericError(
-                                                    kind=agent_pb2.GenericError.Cancelled,
-                                                    description="Route request cancelled"))
+            # Again should not be necessary as the parent should be
+            # cancelled too but just in case
+            return agent_pb2.RouteMessageResult(source=command.destination,
+                                                error=agent_pb2.GenericError(
+                    kind=agent_pb2.GenericError.Cancelled,
+                    description="Route request cancelled"))
 
     def route_stream(self, input_iterator):
         children_dups = mt_tee(input_iterator, len(self._children_ids))
@@ -603,7 +598,7 @@ class TreeClient(object):
     def _handle_route_result(cmd, res):
         if res.HasField("error"):
             if res.error.kind == agent_pb2.GenericError.AgentError:
-                logging.info("Agent returned error: {}".format(res.error.description))
+                logging.info("Agent returned error: %s", res.error.description)
                 raise AgentCommandError(cmd,
                                         res.error.description,
                                         res.error.details)
@@ -622,24 +617,24 @@ class TreeClient(object):
         if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
             ex = agent_pb2.RouteMessageResult(source=source,
                                               error=agent_pb2.GenericError(
-                                                  kind=agent_pb2.GenericError.Timeout,
-                                                  description="Timeout while waiting for agent to answer"))
+                    kind=agent_pb2.GenericError.Timeout,
+                    description="Timeout while waiting for agent to answer"))
         elif e.code() == grpc.StatusCode.CANCELLED:
             ex = agent_pb2.RouteMessageResult(source=source,
                                               error=agent_pb2.GenericError(
-                                                  kind=agent_pb2.GenericError.Cancelled,
-                                                  description="RPC was cancelled"))
+                    kind=agent_pb2.GenericError.Cancelled,
+                    description="RPC was cancelled"))
         else:
-            logging.warning("RPC request failed with: {}".format(e.details()))
+            logging.warning("RPC request failed with: %s", e.details())
             ex = agent_pb2.RouteMessageResult(source=source,
                                               error=agent_pb2.GenericError(
-                                                  kind=agent_pb2.GenericError.GenericError,
-                                                  description="Transport error while "
-                                                  "relaying command: {}".format(e.details())))
+                    kind=agent_pb2.GenericError.GenericError,
+                    description="Transport error while "
+                    "relaying command: {}".format(e.details())))
 
         return ex
     def command(self, dest, cmd, data, timeout):
-        logging.info("sending {} to {}".format(cmd, dest))
+        logging.info("sending %d to %d", cmd, dest)
         try:
             grpc_message = agent_pb2.RouteMessage(destination=dest, name=cmd)
             grpc_message.args.Pack(data)
@@ -650,7 +645,8 @@ class TreeClient(object):
                                     source=dest,
                                     error=agent_pb2.GenericError(
                                         kind=agent_pb2.GenericError.PayloadError,
-                                        description="Unable to create message with payload: {}".format(e))))
+                                        description="Unable to create message "
+                                        "with payload: {}".format(e))))
 
         try:
             res = self._stub.route_command(grpc_message, timeout=timeout)
@@ -692,9 +688,9 @@ class TreeClient(object):
         except Exception as e:
             #FIXME: we should probably generate a more informative error
             return [self._handle_route_result(
-                cmd,
-                agent_pb2.RouteMessageResult(
-                    source=-1,
-                    error=agent_pb2.GenericError(
-                        kind=agent_pb2.GenericError.GenericError,
-                        description="Unable to establish stream: {}".format(e))))]
+                    init_cmd,
+                    agent_pb2.RouteMessageResult(
+                        source=-1,
+                        error=agent_pb2.GenericError(
+                            kind=agent_pb2.GenericError.GenericError,
+                            description="Unable to establish stream: {}".format(e))))]

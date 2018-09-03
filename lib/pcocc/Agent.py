@@ -2,28 +2,24 @@
 This module is responsible for sending
 commands to the pcocc agent
 """
-import json
 import logging
 import threading
-import atexit
-from abc import ABCMeta, abstractmethod
-
-from ClusterShell.NodeSet import NodeSet,RangeSet
-from ClusterShell.MsgTree import MsgTree
-from google.protobuf.json_format import MessageToJson
-from .Misc import ThreadPool
-from .Error import AgentCommandError
-import pcocc.Error
-import agent_pb2
-
-
-from .Misc import fake_signalfd
-import Queue
 import signal
 import select
 import os
 import sys
 import errno
+
+from abc import ABCMeta
+
+import agent_pb2
+
+from ClusterShell.NodeSet import NodeSet
+from ClusterShell.MsgTree import MsgTree
+from google.protobuf.json_format import MessageToJson
+from .Misc import ThreadPool
+from .Error import AgentCommandError
+from .Misc import fake_signalfd
 
 
 class AgentCommandClass(ABCMeta):
@@ -69,6 +65,7 @@ class AgentCommand(object):
         def single_fn(index, cluster, timeout, direct, **kwargs):
             cmd_class.validate_args(**kwargs)
             request = request_pb(**kwargs)
+            # pylint: disable=W0212
             reply =  cmd_class._send_rpc_single(cluster,
                                                 timeout,
                                                 direct,
@@ -128,7 +125,6 @@ class AgentCommand(object):
         cls._registered_execs.remove((cluster, indices, execid, ctx))
         if len(cls._registered_execs) == 0:
             os.write(cls._stop_sig_w, "1")
-            inst = cls._intr_th_instance
         cls._lock.release()
 
     @classmethod
@@ -139,7 +135,7 @@ class AgentCommand(object):
                 rdr, _, _ = select.select([stop_sig_r, intr_r], [], [])
             except select.error  as e:
                 logging.info("Ignoring interrupt in select")
-                if e[0] == 4:
+                if e.args[0] == 4:
                     continue
                 else:
                     logging.info("Abandonning interrupt monitoring due to error")
@@ -220,7 +216,7 @@ class AgentCommand(object):
                         return
 
                 except select.error  as e:
-                    if e[0] == errno.EBADF:
+                    if e.args[0] == errno.EBADF:
                         data = None
                     else:
                         raise

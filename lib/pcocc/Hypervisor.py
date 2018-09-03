@@ -190,7 +190,8 @@ class HostAgent(object):
         tag = self._alloc_tag()
 
         ret_iter = self.send_stream_message(name, init_msg,
-                                            agent_pb2.AgentMessage.StreamRequest, tag, req_ctx)
+                                            agent_pb2.AgentMessage.StreamRequest,
+                                            tag, req_ctx)
         first_reply = next(ret_iter)
 
         if isinstance(first_reply, agent_pb2.GenericError):
@@ -227,7 +228,9 @@ class HostAgent(object):
         tag = self._alloc_tag()
 
         try:
-            return next(self.send_stream_message(name, args, agent_pb2.AgentMessage.Request, tag, request_context))
+            return next(self.send_stream_message(name, args,
+                                                 agent_pb2.AgentMessage.Request,
+                                                 tag, request_context))
         except StopIteration:
             # FIXME: Allow empty results for locally sent requests
             if request_context is None:
@@ -248,8 +251,8 @@ class HostAgent(object):
         stream of results
 
         """
-        logging.info("Host agent: sending message {} "
-                     "to VM {} agent".format(name, self.rank))
+        logging.info("Host agent: sending message %s "
+                     "to VM %d agent", name, self.rank)
 
         retq = Queue.Queue()
 
@@ -314,15 +317,16 @@ class HostAgent(object):
         """
         Run the callback for a given VM agent answer or async notification
         """
-        logging.debug("Host agent: received {} from the VM agent".format(command_data))
+        logging.debug("Host agent: received %s from the VM agent", str(command_data))
         try:
             cmd = agent_pb2.AgentMessage()
             cmd.ParseFromString(base64.b64decode(command_data))
-            logging.debug("Host agent: decoded protobuf to:\n{}".format(cmd))
+            logging.debug("Host agent: decoded protobuf to:\n%s", str(cmd))
         except Exception as e:
             # TODO: We shoudl implement a better recovery strategy
             # from leftover garbage in the serial port
-            logging.error("Host agent: cannot decode protobuf from VM agent: {}".format(e))
+            logging.error("Host agent: cannot decode protobuf from VM agent: %s",
+                          str(e))
             return
 
         if cmd.kind in (agent_pb2.AgentMessage.Reply,
@@ -345,10 +349,12 @@ class HostAgent(object):
             else:
                 # This can happen for some requests where we dont care
                 # about the result or that were cancelled
-                logging.debug("Host agent: got answer for {} with tag {} "
-                              "which has no callback registered".format(cmd.name, cmd.tag))
+                logging.debug("Host agent: got answer for %s with tag %d "
+                              "which has no callback registered", cmd.name,
+                              cmd.tag)
         else:
-            logging.error("Host agent: received unsupported message kind from VM agent: {}".format(cmd.kind))
+            logging.error("Host agent: received unsupported message kind "
+                          "from VM agent: %s", cmd.kind)
 
     def _killer_thread(self):
         """Waits for a stop_threads event and signal the client thread to stop blocking"""
@@ -360,11 +366,13 @@ class HostAgent(object):
         """Read data from the VM agent answers over the dedicated serial port
         and run the registered callbacks
         """
-        logging.info("Host agent: listening to VM {} agent over serial port".format(self.rank))
+        logging.info("Host agent: listening to VM %d agent over serial port",
+                     self.rank)
         while True:
             sdata = self._read_a_command()
             if sdata == None:
-                logging.info("Host agent: disconnected from VM {} serial port".format(self.rank))
+                logging.info("Host agent: disconnected from VM %d "
+                             "serial port", self.rank)
                 break
 
             if len(sdata.replace("\n","")) == 0:
@@ -1113,10 +1121,12 @@ username={3}@pcocc
                 subprocess.check_call(['genisoimage',
                                        '-output', iso_file, '-volid', 'cidata', '-joliet',
                                        '-rock', user_data_file,
-                                       meta_data_file], stdout=devnull, stderr=devnull)
+                                       meta_data_file],
+                                      stdout=devnull, stderr=devnull)
 
 
-            cmdline += [ '-drive', 'id=cdrom0,if=none,format=raw,readonly=on,file={0}'.format(iso_file)]
+            cmdline += [ '-drive', 'id=cdrom0,if=none,format=raw,'
+                         'readonly=on,file={0}'.format(iso_file)]
             cmdline += [ '-device', 'virtio-scsi-pci,id=scsi0']
             cmdline += [ '-device', 'scsi-cd,bus=scsi0.0,drive=cdrom0']
 

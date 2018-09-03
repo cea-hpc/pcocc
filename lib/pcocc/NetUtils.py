@@ -508,6 +508,7 @@ class NetPort(TrackableObject):
 
     @classmethod
     def range_find_free(cls, tracker, min_port, max_port):
+        # pylint: disable=W0212
         alloc = sorted([ port._number for
                          port, _ in tracker.list_objs(cls.__name__)  if
                          port._number >= min_port ])

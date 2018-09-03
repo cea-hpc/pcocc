@@ -35,9 +35,7 @@ import threading
 import pwd
 import logging
 import pcocc
-import uuid
 import random
-import Queue
 import stat
 
 from pcocc.Tbon import UserCA
@@ -51,13 +49,13 @@ from pcocc.Agent import AgentCommand
 from pcocc.Templates import TEMPLATE_IMAGE_TYPE
 from pcocc import agent_pb2
 
-from ClusterShell.NodeSet import NodeSet,RangeSet,RangeSetParseError
+from ClusterShell.NodeSet import RangeSet, RangeSetParseError
 
 helperdir = '/etc/pcocc/helpers'
 
 def handle_error(err):
     """ Print exception with stack trace if in debug mode """
-
+    # pylint: disable=E0704
     click.secho(str(err), fg='red', err=True)
     if Config().debug:
         raise
@@ -626,7 +624,7 @@ def pcocc_ckpt(jobid, jobname, force, ckpt_dir):
         # Try to freeze
         click.secho('Preparing checkpoint')
         ret = AgentCommand.freeze(cluster, CLIRangeSet("all", cluster), timeout=5)
-        for k, e in ret.iterate():
+        for _, _ in ret.iterate():
             pass
 
         cluster.checkpoint(dest_dir)
@@ -1227,7 +1225,7 @@ def per_cluster_cli(allows_user):
         def wrapper(*args, **kwargs):
             if allows_user:
                 load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc',
-                            user=kwargs["user"])
+                            batchuser=kwargs["user"])
             else:
                 load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc')
 
@@ -1243,7 +1241,7 @@ def per_cluster_cli(allows_user):
 def writefile(cluster, indices, source, destination):
     try:
         with open(source) as f:
-             source_data= f.read()
+            source_data = f.read()
         perms = os.stat(source)[stat.ST_MODE]
     except IOError as err:
         raise PcoccError("unable to read source file for copy: {}".format(err))
@@ -1423,8 +1421,6 @@ def pcocc_attach(jobid, jobname, indices, exec_id, cluster):
 @per_cluster_cli(False)
 def pcocc_writefile(jobid, jobname, indices, source, dest, cluster):
     rangeset = CLIRangeSet(indices, cluster)
-    start_time = time.time()
-
     writefile(cluster, rangeset, source, dest)
 
 @cli.command(name='freeze',
@@ -1449,7 +1445,7 @@ def pcocc_freeze(jobid, jobname, indices, cluster):
             len(rangeset), time.time() - start_time),
                     fg='green', err=True)
 
-    sys.exit(-int(bool(ret._errors)))
+    sys.exit(-int(bool(ret.errors)))
 
 
 @cli.command(name='listexec',
@@ -1463,7 +1459,6 @@ def pcocc_freeze(jobid, jobname, indices, cluster):
 @per_cluster_cli(False)
 def pcocc_listexec(jobid, jobname, indices, cluster):
     rangeset = CLIRangeSet(indices, cluster)
-    start_time = time.time()
 
     ret = AgentCommand.listexec(cluster, rangeset)
     ret.iterate_all()
@@ -1491,7 +1486,7 @@ def pcocc_thaw(jobid, jobname, indices, cluster):
             len(rangeset), time.time() - start_time),
                     fg='green', err=True)
 
-    sys.exit(-int(bool(ret._errors)))
+    sys.exit(-int(bool(ret.errors)))
 
 @cli.command(name='ping',
              short_help="Ping the VM agent")
@@ -1516,7 +1511,7 @@ def pcocc_ping(jobid, jobname, indices, cluster):
                     fg='green', err=True)
 
     # Return -1 if there is any error
-    sys.exit(-int(bool(ret._errors)))
+    sys.exit(-int(bool(ret.errors)))
 
 #
 # This is the image interface

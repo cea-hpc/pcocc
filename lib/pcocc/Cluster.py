@@ -18,11 +18,9 @@
 
 import sys
 import yaml
-import json
 import time
 import logging
 import threading
-from Queue import Queue
 
 from . import Hypervisor
 from . import Batch

@@ -1,0 +1,13 @@
+eth_l3:
+  type: ethernet
+  settings:
+    network-layer: "L3"
+    int-network: "10.251.0.0/16"
+    ext-network: "10.250.0.0/16"
+    dev-prefix: "nat"
+    mtu: 1500
+    reverse-nat:
+      vm-port: 22
+      min-host-port: 60222
+      max-host-port: 60322
+    host-if-suffix: "-ib"

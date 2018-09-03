@@ -1,0 +1,3 @@
+test_l3:
+  networks:
+    - eth_l3

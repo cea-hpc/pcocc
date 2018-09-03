@@ -59,8 +59,8 @@ titles = {
 'nc': 'Connect to a VM via  nc',
 'scp': 'Transfer files to a VM via scp',
 'ssh': 'Connect to a VM via ssh',
-'shell': 'Connect to a VM using the pcocc agent',
-'attach': 'Attach to the input/output of running programs',
+'image': 'List and manage VM images',
+'ps': 'List current pcocc jobs',
 'exec': 'Execute commands through the pcocc guest agent',
 'display': 'Display the graphical output of a VM',
 'reset': 'Reset a VM',
@@ -72,6 +72,7 @@ titles = {
 'networks.yaml': 'Networks configuration file',
 'resources.yaml': 'Resource sets configuration file',
 'templates.yaml': 'VM templates definition file',
+'repos.yaml': 'Image repositories configuration file',
 'newvm-tutorial': 'How to import VM images and define VM templates',
 'cloudconfig-tutorial': 'How to configure cloud-init enabled VMs',
 '9pmount-tutorial': 'How to mount host directories in VMs'

@@ -12,11 +12,13 @@ Description
 
 Save the disk of a VM to a new disk image.
 
-By default, only the differences between the current state of the VM disk and the image from which it was instantiated are saved in an incremental file to form a new revision of the image. When a VM is instantiated it uses the latest revision of the image defined in its template. Incremental save files are stored in the image directory and all incremental saves leading to the latest revision have to be kept. A user needs to have write permissions on the image directory to be able to create new revisions. New full and independant images can be saved using the **-d** flag which creates a new image directory with the initial revision of the newly created image.
+By default, only the differences between the current state of the VM disk and the image from which it was instantiated are saved in an incremental file to form a new revision of the image. When a VM is instantiated it uses the latest revision of the image defined in its template. The *-d* option allows to create a new image instead of a new revision of the current image. If the destination is in another repository, a full image is created instead of an incremental image. The *--full* flag allows to force this behaviour in other cases.
 
 .. warning::
     It is recommended to have the *qemu-guest-agent* package installed in the guest (see next section).
 
+.. note::
+   In previous releases, pcocc images were saved in standalone directories. While this style of images is still properly handled by pcocc save, it is now considered deprecated and support will be removed in a future version.
 
 Recommendations
 ***************
@@ -35,11 +37,14 @@ Options
   -J, \-\-jobname TEXT
             Job name of the selected cluster
 
-  -d, \-\-dest DIR
+  -d, \-\-dest URI
             Make a full copy in a new directory
 
   -s, \-\-safe
             Wait indefinitely for the Qemu agent to freeze filesystems
+
+  \-\-full
+            Save a full image even if not necessary
 
   -h, \-\-help
             Show this message and exit.
@@ -58,36 +63,41 @@ If you have write permissions on the image directory used by your VMs, you can c
     Saving image...
     vm0 frozen
     vm0 thawed
-    vm0 disk successfully saved to ./.pcocc/images/centos7-cloud/image-rev1
+    vm0 disk successfully saved to centos7-cloud revision 1
 
-A new file is created in the image directory ::
+A new image revision is created ::
 
-    $ ls ./.pcocc/images/centos7-cloud/image-rev1
-    image  image-rev1
+   $ pcocc image show centos7-cloud
+   [..]
 
-The next VM instantiated with this image will use the new revision. You can undo saves by removing the latest revisions. However removing an intermediate revision will corrupt all subsequent revisions.
+   REVISION    SIZE       CREATION DATE
+   --------    ----       -------- ----
+   0           958  MB    2018-08-03 16:04:12
+   1           44.0 MB    2018-08-03 16:09:54
+
+The next VM instantiated with this image will use the new revision. You can undo saves by removing the latest revisions (see :ref:`pcocc-image(1)<image>`) or specify a specific revision in your template image URI.
 
 Create a new independent images
 ...............................
 
-If you want to create a new full image or do not have write permissions on the image directory use by your VM you can to use the "-d" flag to save to an VM image in a new directory::
+If you want to create a new image or do not have write permissions on the image repository used by your VM you can use the *-d* flag to save to a new VM image::
 
-    $ pcocc save vm0 -d $HOME/my-centos7
+    $ pcocc save vm0 -d user:mycentos7
     Saving image...
     vm0 frozen
     vm0 thawed
     Merging snapshot with backing file to make it standalone...
-    vm0 disk successfully saved to /home/user/my-centos7/image
+    vm0 disk successfully saved to user:mycentos revision 1
 
-You can now create a template inheriting from the original one, but using the new image image, by editing your :file:`templates.yaml` file::
+You can now create a template inheriting from the original one, but using the new image, by editing your :file:`templates.yaml` file::
 
     mycentos:
-        inherits: centos7-cloud
-        image: ~/my-centos7/
+        inherits: centos7
+        image: user:mycentos
 
 See also
 ********
 
-:ref:`pcocc-templates.yaml(5)<templates.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`, :ref:`pcocc-ckpt(1)<ckpt>`, :ref:`pcocc-dump(1)<dump>`
+o:ref:`pcocc-image(1)<image>`, :ref:`pcocc-templates.yaml(5)<templates.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`, :ref:`pcocc-ckpt(1)<ckpt>`, :ref:`pcocc-dump(1)<dump>`
 
 

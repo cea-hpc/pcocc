@@ -42,55 +42,53 @@ In this guide, we use the following images (x86_64):
 
 You may now download these images or those that you want to install. Note that the import process below is the same whether you use cloud-init enabled VMs or regular qcow2 images that you have already configured.
 
-In this guide, we use :file:`$VMDIR` as the base directory holding our VM images. It should be on a shared filesystem accessible from all front-end and compute nodes and ideally on a fast parallel filesystem for best scalability. If you are the system administrator, you may want to provide these base distribution images to all your users by creating system-wide templates. In that case :file:`$VMDIR` (and its content) should be readable by all pcocc end-users but write protected.
+.. note::
+   In this guide, we consider that the highest priority repository is a user specific repository writable by the user as in the default configuration.
 
-We will now create directories in :file:`$VMDIR`, one for each image::
+We can now import these images to our default repository::
 
-    mkdir $VMDIR/ubuntu-server-artful-cloud
-    mkdir $VMDIR/centos7-cloud
+ $ pcocc image import artful-server-cloudimg-amd64.img ubuntu-artful-cloud
+ $ pcocc image import CentOS-7-x86_64-GenericCloud.qcow2 centos7-cloud
 
 .. note::
-    We used the "-cloud" suffix as a convention to identify cloud-init enabled images.
+   We used the "-cloud" suffix as a convention to identify cloud-init enabled images.
 
-Now simply move the images to their respective directories, naming them :file:`image`::
+At this point you should have these two images available in your repository::
 
-    mv artful-server-cloudimg-amd64.img $VMDIR/ubuntu-artful-cloud/image
-    mv CentOS-7-x86_64-GenericCloud.qcow2 $VMDIR/centos7-cloud/image
+ $ pcocc image list
+ NAME                TYPE    REVISION    REPO        OWNER       DATE
+ ----                ----    --------    ----        -----       ----
+ [...]
+ centos7-cloud       vm      0           user        jdoe        2018-08-24 20:46:35
+ ubunt-artful-cloud  vm      0           user        jdoe        2018-08-24 20:45:20
 
-At this point you should have the following file hierarchy::
-
-    $VMDIR/centos7-cloud:
-        image
-
-    $VMDIR/ubuntu-artful-cloud:
-        image
 
 Defining VM templates
 *********************
 
-Now that we have copied the images to our shared filesystem, we can define templates for them within the pcocc :ref:`templates.yaml <templates.yaml>` configuration file. A system administrator can define them as system-wide templates in :file:`/etc/pcocc/templates.yaml` to make them avaialable to all users. Otherwise, define them in :file:`~/.pcocc/templates.yaml`. We first define basic templates which only make the image available. We can then inherit from them to create custom VMs.
+Now that we have copied the images to our repository, we can define templates for them within the pcocc :ref:`templates.yaml <templates.yaml>` configuration file. A system administrator can define them as system-wide templates in :file:`/etc/pcocc/templates.yaml` to make them avaialable to all users. Otherwise, define them in :file:`~/.pcocc/templates.yaml`. We first define basic templates which only make the image available. We can then inherit from them to create custom VMs.
 
 Here is the content of :file:`templates.yaml` for these three VMs (don't forget to replace :file:`$VMDIR` with the actual PATH)::
 
     centos7-cloud:
-        image: "$VMDIR/centos7-cloud"
+        image: "centos7-cloud"
         resource-set: "default"
         description: "Cloud enabled CentOS 7"
 
     ubuntu-artful-cloud:
-        image: "$VMDIR/ubuntu-artful-cloud"
+        image: "ubuntu-artful-cloud"
         resource-set: "default"
         description: "Cloud enabled Ubuntu 17.10"
 
 We selected *default* as the **resource-set** for these VMs. It should reference one of the resource sets defined in the :file:`/etc/resources.yaml` file. Please refer to the :ref:`resources.yaml <resources.yaml>` and :ref:`networks.yaml <networks.yaml>` configuration files for more informations on this option.
 
-Following this step, you should be able to list your new virtual machines::
+Following this step, you should be able to list your new templates::
 
     $ pcocc template list
     NAME                 DESCRIPTION                 RESOURCES    IMAGE
     ----                 -----------                 ---------    -----
-    ubuntu-artful-cloud  Cloud enabled Ubuntu 17.10  default      /shared/vms/ubuntu-artful-cloud
-    centos7-cloud        Cloud enabled CentOS 7      default      /shared/vms/centos7-cloud
+    ubuntu-artful-cloud  Cloud enabled Ubuntu 17.10  default      ubuntu-artful-cloud
+    centos7-cloud        Cloud enabled CentOS 7      default      centos7-cloud
 
 Basic VM configuration
 **********************

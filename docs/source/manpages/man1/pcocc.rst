@@ -37,6 +37,8 @@ pcocc supports the following sub-commands:
       |batch_title|
     :ref:`template<template>`
       |template_title|
+    :ref:`image<template>`
+      |image_title|
 
  * Connect to VMs:
 
@@ -48,8 +50,6 @@ pcocc supports the following sub-commands:
       |scp_title|
     :ref:`ssh<ssh>`
       |ssh_title|
-    :ref:`shell<shell>`
-      |shell_title|
     :ref:`exec<exec>`
       |exec_title|
     :ref:`display<display>`
@@ -67,6 +67,8 @@ pcocc supports the following sub-commands:
       |monitor-cmd_title|
     :ref:`save<save>`
       |save_title|
+    :ref:`ps<ps>`
+      |ps_title|
 
 Tutorials
 ---------

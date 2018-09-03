@@ -20,4 +20,5 @@ See the following related manual pages:
     manpages/man5/batch.yaml
     manpages/man5/networks.yaml
     manpages/man5/resources.yaml
+    manpages/man5/repos.yaml
     manpages/man5/templates.yaml

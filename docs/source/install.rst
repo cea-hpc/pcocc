@@ -153,6 +153,7 @@ The :file:`/etc/pcocc/resources.yaml` configuration file defines sets of resourc
 
 The :file:`/etc/pcocc/templates.yaml` configuration file contains globally defined templates which are available to all users. It does not need to be modified initially. See :ref:`pcocc-templates.yaml(5)<templates.yaml>` for more information about this file.
 
+The :file:`/etc/pcocc/repos.yaml` configuration file defines the repositories where pcocc images will be located. By default, a single repository, named *user*, located in each user home directory is defined. You may want to change this directory to another path / filesystem better suited to hosting VM image files depending on your site characteristics. You may also want to add another *global* repository located in a path only writable by administrators to provide common images to users.
 
 Validate the installation
 *************************

@@ -7,18 +7,21 @@ Template configuration file
 Description
 ***********
 
-:file:`templates.yaml` is a YAML formatted file defining VM templates that can be instantiated with pcocc. This configuration can be read from several locations. System-wide definitions are read from :file:`/etc/pcocc/templates.yaml` while user-specific templates are read from :file:`$HOME/.pcocc/templates.yaml` or from the directory referenced in the environment variable **PCOCC_USER_CONF_DIR** if it is set. A user has access to both his personal templates and the system-wide templates.
+:file:`templates.yaml` is a YAML formatted file defining VM templates that can be instantiated with pcocc. This configuration can be read from several locations. System-wide definitions are read from :file:`/etc/pcocc/templates.yaml` while user-specific templates are read from :file:`$HOME/.pcocc/templates.yaml` and from any file matching :file:`$HOME/.pcocc/templates.d/*.yaml`. A user has access to both his personal templates and the system-wide templates.
+
+.. note::
+   The location of user configuration files, by default :file:`$HOME/.pcocc` can be changed to another directory by setting the  **PCOCC_USER_CONF_DIR** environment variable.
 
 Syntax
 ******
 
-The :file:`templates.yaml` file contains a key/value mapping. Each key represents a template whose parameters are defined in the associated value. The only mandatory parameter is **resource-set**. It can however be inherited from a parent template.
+The :file:`templates.yaml` file contains a key/value mapping. Each key represents a template whose parameters are defined in the associated value. If the system configuration doesn't define a default **resource-set** it is a mandatory parameter. It can however be inherited from a parent template. All other parameters are optional.
 
 Template parameters
 -------------------
 
 **image**
- Path to a directory containing a boot disk image. VMs instantiated from this template will boot from an ephemeral private copy of this image. This location must be available on both front-end and compute nodes. See :ref:`pcocc-newvm-tutorial(7)<newvm>` for importing existing images and :ref:`pcocc-save(1)<save>` for creating new images or revisions from running VMs.
+ URI of a boot disk image in a pcocc repository. VMs instantiated from this template will boot from an ephemeral private copy of this image. See :ref:`pcocc-image(1)<image>` and :ref:`pcocc-newvm-tutorial(7)<newvm>` for importing existing images and :ref:`pcocc-save(1)<save>` for creating new images or revisions from running VMs. In previous pcocc releases, images were stored in standalone directories. While still operational, this image format is considered as deprecated and support for these images will removed in a future version.
 **resource-set**
  Resources to provide to VMs instantiated from this template. This must reference a resource set defined in :ref:`resources.yaml<resources.yaml>`.
 **inherits**
@@ -130,4 +133,4 @@ This is a sample template definition. Please note that indentation is significan
 See also
 ********
 
-:ref:`pcocc-template(1)<template>`, :ref:`pcocc-batch(1)<batch>`, :ref:`pcocc-alloc(1)<alloc>`, :ref:`pcocc-save(1)<save>`, :ref:`pcocc-resources.yaml(5)<resources.yaml>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`
+:ref:`pcocc-template(1)<template>`, :ref:`pcocc-image(1)<image>`, :ref:`pcocc-batch(1)<batch>`, :ref:`pcocc-alloc(1)<alloc>`, :ref:`pcocc-save(1)<save>`, :ref:`pcocc-resources.yaml(5)<resources.yaml>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`

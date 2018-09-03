@@ -414,15 +414,11 @@ def vm_name_to_index(name):
               is_flag=True)
 @click.argument('vm', nargs=1, default='vm0')
 def pcocc_save(jobid, jobname, dest, vm, safe, full):
-    """Save the disk of a VM to a new disk image
+    """Save the disk of a VM
 
     By default the output file only contains the differences between
     the current state of the disk and the template from which the VM
-    was instantiated. Therefore, all incremental saves leading to an
-    image have to be preserved.
-
-    To save the disk to a new independant image file specify a new
-    path with --dest.
+    was instantiated.
 
     \b
     Example usage:
@@ -470,7 +466,7 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
         else:
             freeze_opt = Hypervisor.VM_FREEZE_OPT.TRY
 
-
+        click.echo("Saving image...")
         vm.save(save_path, full, freeze_opt)
 
         if vm.image_type == TEMPLATE_IMAGE_TYPE.REPO:
@@ -1351,7 +1347,7 @@ def multiprocess_attach(cluster, indices, exec_id, exec_errors = None):
         return exit_code
 
 @cli.command(name='run',
-             short_help="Run a command on the VMs",
+             short_help="Execute commands in VMs",
              context_settings=dict(ignore_unknown_options=True,
                                    allow_interspersed_args=False))
 @click.option('-j', '--jobid', type=int,
@@ -1561,6 +1557,16 @@ def pcocc_image_repo_list():
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 def pcocc_image_import(kind, fmt, source, dest):
+    """Import the source image file to an image in the destination repository.
+
+    Images in repositories are specified with URIs of the form
+    [REPO:]IMAGE[@REVISION].
+
+    The destination image name must not already be used in the destination
+    repository and the revision is ignored since the import operation creates
+    the first revision of a new image.
+    """
+
     if kind not in ["vm"]:
         raise PcoccError("Unsupported image kind {0}")
 
@@ -1574,6 +1580,14 @@ def pcocc_image_import(kind, fmt, source, dest):
              short_help="Delete an image from a repository")
 @click.argument('image', nargs=1, type=str)
 def pcocc_image_delete(image):
+    """Delete an image from a repository
+
+    Images in repositories are specified with URIs of the form
+    [REPO:]IMAGE[@REVISION]
+
+    If a revision is specified, only the specified revision is deleted,
+    otherwise all revisions of the image are deleted.
+    """
     try:
         load_config(None, None, "")
         Config().images.delete_image(image)
@@ -1587,6 +1601,12 @@ def pcocc_image_delete(image):
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 def pcocc_image_export(fmt, source, dest):
+    """Export the source image from a repository to the destination file.
+
+    Images in repositories are specified with URIs of the form
+    [REPO:]IMAGE[@REVISION]
+    """
+
     try:
         load_config(None, None, "")
         Config().images.export_image(source, dest, fmt)
@@ -1598,6 +1618,16 @@ def pcocc_image_export(fmt, source, dest):
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 def pcocc_image_copy(source, dest):
+    """Copy an image from a repository to another image in a
+    repository.
+
+    Images in repositories are specified with URIs of the form
+    [REPO:]IMAGE[@REVISION]
+
+    The destination image name must not already be used in the destination
+    repository and the destination revision is ignored since a copy operation
+    creates the first revision of a new image.
+    """
     try:
         load_config(None, None, "")
         click.secho("Copying image ...")
@@ -1608,11 +1638,16 @@ def pcocc_image_copy(source, dest):
 
 @image.command(name='show',
              short_help="Show details for an image")
-@click.argument('uri', nargs=1, type=str)
-def pcocc_image_show(uri):
+@click.argument('image', nargs=1, type=str)
+def pcocc_image_show(image):
+    """Show details for an image
+
+    Images in repositories are specified with URIs of the form
+    [REPO:]IMAGE[@REVISION]
+    """
     try:
         load_config(None, None, "")
-        meta, _ = Config().images.get_image(uri)
+        meta, _ = Config().images.get_image(image)
         ts = time.localtime(meta["timestamp"])
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
 
@@ -1621,13 +1656,14 @@ def pcocc_image_show(uri):
         print("%5s %24s" % ("Name:", meta["name"]))
         print("%s %24s" % ("Type:", "Virtual Machine (qcow2)"))
         print("------------------------------")
-        print("%5s %24s" % ("URI: ", meta["repo"] + ":" + meta["name"]))
+        print("%5s %24s" % ("URI: ", meta["repo"] + ":" +
+                            meta["name"] + "@" + str(meta["revision"])))
         print("------------------------------")
         print("%7s %22s" % ("Owner: ", meta["owner"]))
         print("%7s %21s" % ("Date:   ", str_time))
         print("------------------------------")
 
-        revisions = Config().images.image_revisions(uri)
+        revisions = Config().images.image_revisions(image)
         print("")
         tbl = TextTable("%rev %size %date")
         tbl.header_labels = {'rev': 'Revision',
@@ -1635,7 +1671,7 @@ def pcocc_image_show(uri):
                              'date': 'Creation Date'}
 
         for rev in revisions:
-            meta, data = Config().images.get_image(uri, rev)
+            meta, data = Config().images.get_image(image, rev)
             ts = time.localtime(meta["timestamp"])
             str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
 
@@ -1664,11 +1700,17 @@ def print_image_list(images):
     print tbl
 
 @image.command(name='list',
-             short_help="Find images in repositories")
+             short_help="List images in repositories")
 @click.option('-R', '--repo', type=str,
               help='Restrict image list to a repository')
 @click.argument('regex', nargs=1, type=str, default="")
 def pcocc_image_list(regex, repo):
+    """List images in configured repositories.
+
+    If REGEX is provided, only images whose name match the provided regular
+    expression are shown.
+    """
+
     try:
         config = load_config(None, None, "")
         val_list = config.images.find(regex, repo)
@@ -1693,11 +1735,12 @@ def formatted_file_size(path):
 
 @cli.command(name='ps',
              short_help='List current pcocc jobs')
-@click.option('-a', '--all', is_flag=True, default=False,
-              help='List jobs for users')
+@click.option('-a', '--all', 'allusers',
+              is_flag=True, default=False,
+              help='List jobs for all users')
 @click.option('-u', '--user', default = "",
               help='List jobs of the specified user')
-def pcocc_ps(user, all):
+def pcocc_ps(user, allusers):
     """List current pcocc jobs
     """
     try:
@@ -1706,7 +1749,7 @@ def pcocc_ps(user, all):
         if not user:
             user = pwd.getpwuid(os.getuid()).pw_name
 
-        if all:
+        if allusers:
             # all superses --user
             user = None
 

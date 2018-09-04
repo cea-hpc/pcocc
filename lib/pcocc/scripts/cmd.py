@@ -1091,7 +1091,7 @@ def pcocc_internal_run(restart_ckpt, user_data):
 @click.option('-s', '--script', is_flag=True,
               help='Cmd is a shell script to be copied to /tmp and executed in place')
 @click.argument('cmd', nargs=-1, required=False, type=click.UNPROCESSED)
-def pcocc_exec(index, jobid, jobname, user, script, mirror_env, cmd):
+def pcocc_exec(index, jobid, jobname, user, script, cmd):
     """Execute commands through the guest agent
 
        For this to work, a pcocc agent must be started in the

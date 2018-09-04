@@ -1166,7 +1166,7 @@ def pcocc_tpl_list():
     try:
         config = load_config()
         for t in 'user', 'system':
-            click.secho("{} repositories:".format(t.capitalize()),
+            click.secho("{} templates:".format(t.capitalize()),
                         fg='blue', bold=True)
 
             for name, tpl in sorted(config.tpls.iteritems()):
@@ -1686,15 +1686,16 @@ def pcocc_image_show(image):
 
 def print_image_list(images):
     tbl = TextTable("%name %type %revision %repo %owner %date")
-
-    for img in images.itervalues():
+    for img in sorted(images.itervalues(), key=lambda i:i[i.keys()[0]]["name"]):
         rev = max(img.keys())
         ts = time.localtime(img[rev]["timestamp"])
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
+        repo = img[rev]["repo"]
+
         tbl.append({'name'     : img[rev]["name"],
                     'type'     : img[rev]["kind"],
                     'revision' : str(rev),
-                    'repo'     : img[rev]["repo"],
+                    'repo'     : repo,
                     'owner'    : img[rev]["owner"],
                     "date"     : str_time})
 
@@ -1714,9 +1715,19 @@ def pcocc_image_list(regex, repo):
 
     try:
         config = load_config(None, None, "")
-        val_list = config.images.find(regex, repo)
+        if repo:
+            repo_list = [repo]
+        else:
+            repo_list = [r.name for r in config.images.list_repos()]
 
-        print_image_list(val_list)
+        for repo in repo_list:
+            img_list = config.images.find(regex, repo)
+            if img_list:
+                click.secho("{} images:".format(repo.capitalize()),
+                            fg='blue', bold=True)
+                print_image_list(img_list)
+                print
+
     except PcoccError as err:
 
         handle_error(err)

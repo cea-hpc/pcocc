@@ -1346,7 +1346,12 @@ def multiprocess_attach(cluster, indices, exec_id, exec_errors = None):
     else:
         return exit_code
 
-@cli.command(name='run',
+@cli.group(hidden=True)
+def agent():
+    """ Manage VMs through the pcocc agent """
+    pass
+
+@agent.command(name='run',
              short_help="Execute commands in VMs",
              context_settings=dict(ignore_unknown_options=True,
                                    allow_interspersed_args=False))
@@ -1387,8 +1392,8 @@ def pcocc_run(jobid, jobname, user, indices, script, mirror_env, cmd, cluster):
 
     sys.exit(exit_code)
 
-@cli.command(name='attach',
-             short_help="Attach to an exec",
+@agent.command(name='attach',
+             short_help="Attach to a running command",
              context_settings=dict(ignore_unknown_options=True,
                                    allow_interspersed_args=False))
 @click.option('-j', '--jobid', type=int,
@@ -1405,7 +1410,7 @@ def pcocc_attach(jobid, jobname, indices, exec_id, cluster):
     sys.exit(exit_code)
 
 
-@cli.command(name='writefile', short_help="Copy a file in the VMs")
+@agent.command(name='writefile', short_help="Copy a file in VMs")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -1419,8 +1424,8 @@ def pcocc_writefile(jobid, jobname, indices, source, dest, cluster):
     rangeset = CLIRangeSet(indices, cluster)
     writefile(cluster, rangeset, source, dest)
 
-@cli.command(name='freeze',
-             short_help="Ping the VM agent")
+@agent.command(name='freeze',
+             short_help="Freeze the VM agents")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -1444,8 +1449,8 @@ def pcocc_freeze(jobid, jobname, indices, cluster):
     sys.exit(-int(bool(ret.errors)))
 
 
-@cli.command(name='listexec',
-             short_help="Ping the VM agent")
+@agent.command(name='listexec',
+             short_help="List running commands")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -1460,8 +1465,8 @@ def pcocc_listexec(jobid, jobname, indices, cluster):
     ret.iterate_all()
     click.echo(ret)
 
-@cli.command(name='thaw',
-             short_help="Ping the VM agent")
+@agent.command(name='thaw',
+             short_help="Thaw the VM agents")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -1484,8 +1489,8 @@ def pcocc_thaw(jobid, jobname, indices, cluster):
 
     sys.exit(-int(bool(ret.errors)))
 
-@cli.command(name='ping',
-             short_help="Ping the VM agent")
+@agent.command(name='ping',
+             short_help="Ping the VM agents")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -1509,15 +1514,10 @@ def pcocc_ping(jobid, jobname, indices, cluster):
     # Return -1 if there is any error
     sys.exit(-int(bool(ret.errors)))
 
-#
-# This is the image interface
-#
-
 @cli.group()
 def image():
-    """ List and manage VM images """
+    """ List and manage images """
     pass
-
 
 @image.group(name="repo")
 def img_repo():

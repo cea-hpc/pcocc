@@ -17,6 +17,7 @@ All the subcommands of *pcocc image* operate on images stored in pcocc repositor
 
 Images in repositories are uniquely identified by a name and revision number. In all pcocc commands and configuration files, images in repositories are specified with the following URI syntax: [REPO:]IMAGE[@REVISION]. If REPO is omitted the command will look in all defined repositories by order of priority until it finds a matching image. If REVISION is omitted, the highest revision of the image is selected.
 
+Images are made of a stack of layers with each layer containing the differences from the previous layers. Layers can be shared between images in a repository which allows to reduce the storage footprint and speeds up operations by avoiding unnecessary data movement.
 
 Sub-Commands
 ************

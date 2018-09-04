@@ -409,7 +409,7 @@ def vm_name_to_index(name):
               help='Wait indefinitely for the Qemu agent to freeze filesystems',
               is_flag=True)
 @click.option('--full',
-              help='Save a full image even if not necessary',
+              help='Save a full image in a standalone layer',
               default=False,
               is_flag=True)
 @click.argument('vm', nargs=1, default='vm0')

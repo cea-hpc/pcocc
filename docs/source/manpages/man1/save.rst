@@ -12,7 +12,7 @@ Description
 
 Save the disk of a VM to a new disk image.
 
-By default, only the differences between the current state of the VM disk and the image from which it was instantiated are saved in an incremental file to form a new revision of the image. When a VM is instantiated it uses the latest revision of the image defined in its template. The *-d* option allows to create a new image instead of a new revision of the current image. If the destination is in another repository, a full image is created instead of an incremental image. The *--full* flag allows to force this behaviour in other cases.
+By default, only the differences between the current state of the VM disk and the image from which it was instantiated are saved in an incremental file to form a new revision of the image. When a VM is instantiated it uses the latest revision of the image defined in its template. The *-d* option allows to create a new image instead of a new revision of the current image. The *--full* flag allows to make the new image or revision from a standalone layer containing the whole image instead of a succession of incremental layers. Making a full image can be useful for performance reasons once the number of layers gets too large.
 
 .. warning::
     It is recommended to have the *qemu-guest-agent* package installed in the guest (see next section).

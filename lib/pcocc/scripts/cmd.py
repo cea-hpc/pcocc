@@ -1658,6 +1658,7 @@ def pcocc_image_show(image):
         print("------------------------------")
         print("%5s %24s" % ("URI: ", meta["repo"] + ":" +
                             meta["name"] + "@" + str(meta["revision"])))
+        print("%s %22s" % ("Layers:", str(len(meta["data_blobs"]))))
         print("------------------------------")
         print("%7s %22s" % ("Owner: ", meta["owner"]))
         print("%7s %21s" % ("Date:   ", str_time))
@@ -1763,8 +1764,8 @@ def pcocc_ps(user, allusers):
                         'nodes': str(j["node_count"]),
                         'name': j["jobname"],
                         'duration': j["exectime"],
-                    'timelimit': j["timelimit"]
-            })
+                        'timelimit': j["timelimit"]
+                    })
 
         print tbl
 

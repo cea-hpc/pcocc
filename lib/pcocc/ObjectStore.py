@@ -407,7 +407,10 @@ class ObjectStore(object):
 
         for r in revisions:
             h = self._hash_meta(name, r)
-            target = self.get_obj_path('meta', h)
+            try:
+                target = self.get_obj_path('meta', h, check_exists=True)
+            except:
+                raise ObjectNotFound(name, self._name, r)
             os.unlink(target)
 
     def _validate_repo_config(self):

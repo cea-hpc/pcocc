@@ -765,6 +765,13 @@ def gen_alloc_script_opt(alloc_script):
     else:
         return []
 
+
+def gen_user_data_opt(user_data):
+    if user_data:
+        return ['--user-data', user_data]
+    else:
+        return []
+
 def gen_ckpt_opt(restart_ckpt):
     if restart_ckpt:
         return ['-r', restart_ckpt]
@@ -788,10 +795,12 @@ def get_license_opts(cluster):
               help='Launch a batch script in the first vm')
 @click.option('-E', '--host-script', type=click.File('r'),
               help='Launch a batch script on the first host')
+@click.option('--user-data', type=click.Path(exists=True),
+              help='Override the user-data property of the templates')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
 @docstring(batch_alloc_doc+batch_doc)
-def pcocc_batch(restart_ckpt, batch_script, host_script, batch_options,
+def pcocc_batch(restart_ckpt, batch_script, host_script, user_data, batch_options,
                 cluster_definition):
 
     try:
@@ -801,6 +810,7 @@ def pcocc_batch(restart_ckpt, batch_script, host_script, batch_options,
         cluster = Cluster(cluster_definition)
         batch_options=list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
+        user_data_opt = gen_user_data_opt(user_data)
 
         (wrpfile, wrpname) = tempfile.mkstemp()
         wrpfile = os.fdopen(wrpfile, 'w')
@@ -845,12 +855,12 @@ chmod u+x "$TEMP_HOST_SCRIPT"
 
         wrpfile.write(
 """
-PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s &
+PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s &
 wait
 rm "$TEMP_BATCH_SCRIPT" 2>/dev/null
 rm "$TEMP_HOST_SCRIPT" 2>/dev/null
 """ % (' '.join(build_verbose_opt()), ' '.join(launcher_opt),
-       ' '.join(ckpt_opt), cluster_definition))
+       ' '.join(ckpt_opt), ' '.join(user_data_opt), cluster_definition))
 
         wrpfile.close()
         ret = config.batch.batch(cluster,
@@ -878,10 +888,12 @@ def build_verbose_opt():
               metavar='DIR')
 @click.option('-E', '--alloc-script', metavar='SCRIPT',
               help='Execute a script on the allocation node')
+@click.option('--user-data', type=click.Path(exists=True),
+              help='Override the user-data property of the templates')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
 @docstring(batch_alloc_doc+alloc_doc)
-def pcocc_alloc(restart_ckpt, alloc_script, batch_options, cluster_definition):
+def pcocc_alloc(restart_ckpt, alloc_script, user_data, batch_options, cluster_definition):
     try:
         config = load_config(process_type = ProcessType.OTHER)
 
@@ -890,14 +902,13 @@ def pcocc_alloc(restart_ckpt, alloc_script, batch_options, cluster_definition):
         batch_options=list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
         alloc_opt = gen_alloc_script_opt(alloc_script)
-
+        user_data_opt = gen_user_data_opt(user_data)
         ret = config.batch.alloc(cluster,
                                  batch_options + get_license_opts(cluster) +
                                  ['-n', '%d' % (len(cluster.vms))],
                                   ['pcocc'] + build_verbose_opt() +
-                                 [ 'internal', 'launcher',
-                                  cluster_definition] + alloc_opt +
-                                  ckpt_opt)
+                                 [ 'internal', 'launcher'] + alloc_opt + user_data_opt +
+                                 ckpt_opt + [cluster_definition])
 
         sys.exit(ret)
 
@@ -915,8 +926,10 @@ def pcocc_alloc(restart_ckpt, alloc_script, batch_options, cluster_definition):
               help='Run a script in the first VM and exit')
 @click.option('-E', '--alloc-script',
               help='Run a script on the allocation node and exit')
+@click.option('--user-data', type=click.Path(exists=True),
+              help='Override the user-data property of the templates')
 @click.argument('cluster-definition', nargs=1)
-def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition):
+def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_definition):
     config = load_config(process_type=ProcessType.LAUNCHER)
     batch = config.batch
 
@@ -945,7 +958,7 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, cluster_definition)
                        ['-Q', '-X', '--resv-port'],
                        ['pcocc'] +
                        build_verbose_opt() +
-                       [ 'internal', 'run'] +
+                       [ 'internal', 'run'] + gen_user_data_opt(user_data) +
                        ckpt_opt)
     try:
         cluster.wait_host_config()
@@ -1043,7 +1056,9 @@ def clean_exit(sig, frame):
              short_help="For internal use")
 @click.option('-r', '--restart-ckpt',
               help='Restart cluster from the specified checkpoint')
-def pcocc_internal_run(restart_ckpt):
+@click.option('--user-data', type=click.Path(exists=True),
+              help='Override the user-data property of the templates')
+def pcocc_internal_run(restart_ckpt, user_data):
     signal.signal(signal.SIGINT, clean_exit)
     signal.signal(signal.SIGTERM, clean_exit)
 
@@ -1054,9 +1069,9 @@ def pcocc_internal_run(restart_ckpt):
         cluster.load_node_resources()
 
         if restart_ckpt:
-            cluster.run(restart_ckpt)
+            cluster.run(ckpt_dir=restart_ckpt)
         else:
-            cluster.run()
+            cluster.run(user_data=user_data)
 
     except PcoccError as err:
         handle_error(err)

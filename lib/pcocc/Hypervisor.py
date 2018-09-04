@@ -739,7 +739,7 @@ username={3}@pcocc
                 '-device', 'virtserialport,chardev=spicechannel0,name=com.redhat.spice.0',
                 '-chardev', 'spicevmc,id=spicechannel0,name=vdagent']
 
-    def run(self, vm, ckpt_dir=None):
+    def run(self, vm, ckpt_dir=None, user_data=None):
         batch = Config().batch
 
         self._set_vm_state('topology',
@@ -1113,13 +1113,16 @@ username={3}@pcocc
 
             f.close()
 
-            if isinstance(vm.user_data, str):
-                shutil.copyfile(Config().resolve_path(vm.user_data, vm),
+            if user_data is None:
+                user_data = vm.user_data
+
+            if isinstance(user_data, str):
+                shutil.copyfile(Config().resolve_path(user_data, vm),
                                 user_data_file)
-            elif isinstance(vm.user_data, dict):
+            elif isinstance(user_data, dict):
                 with open(user_data_file, 'w') as f:
                     f.write("#cloud-config\n")
-                    yaml.safe_dump(vm.user_data, f)
+                    yaml.safe_dump(user_data, f)
             else:
                 shutil.copyfile('/dev/null', user_data_file)
 

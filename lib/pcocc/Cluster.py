@@ -136,8 +136,8 @@ class VM(object):
 
         return self._agent_client
 
-    def run(self, ckpt_dir=None):
-        Config().hyp.run(self, ckpt_dir)
+    def run(self, ckpt_dir=None, user_data=None):
+        Config().hyp.run(self, ckpt_dir, user_data)
 
     def exec_cmd(self, cmd, user):
         return Config().hyp.exec_cmd(self, cmd, user)
@@ -363,8 +363,8 @@ class Cluster(object):
 
         return license_list
 
-    def run(self, ckpt_dir=None):
-        self.vms[Config().batch.task_rank].run(ckpt_dir)
+    def run(self, ckpt_dir=None, user_data=None):
+        self.vms[Config().batch.task_rank].run(ckpt_dir, user_data)
 
     def exec_cmd(self, vmid_list, cmd, user):
         #TODO: This should be launched in parallel ala clush

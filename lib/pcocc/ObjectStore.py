@@ -205,7 +205,7 @@ class HierarchObjectStore(object):
 
     def get_revisions(self, name, repo=None):
         if repo:
-            return self.get_revisions(repo).get_revisions(name)
+            return self.get_repo(repo).get_revisions(name)
 
         for r in self._repos.itervalues():
             obj_store = r['store']

@@ -88,7 +88,7 @@ class ImageMgr(object):
 
     def image_revisions(self, uri):
         image_name, repo_name, _ = self.parse_image_uri(uri)
-        return self.object_store.get_repo(repo_name).get_revisions(image_name)
+        return self.object_store.get_revisions(image_name, repo_name)
 
     def delete_image(self, uri):
         name, repo, revision = self.parse_image_uri(uri)
@@ -181,8 +181,7 @@ class ImageMgr(object):
         return dst_store.put_meta(dst_name, 0, kind, [h], {})
 
     def export_image(self, src_uri, dst, dst_fmt):
-        _, src_repo, src_revision = self.parse_image_uri(src_uri)
-        meta, _ = self.get_image(src_uri, src_revision)
+        meta, _ = self.get_image(src_uri)
         kind = meta['kind']
         dst_path, dst_fmt = self._guess_format(dst, kind, dst_fmt)
         if os.path.exists(dst_path):
@@ -191,18 +190,17 @@ class ImageMgr(object):
         self._check_supported_format(kind, dst_fmt)
 
         if kind == "vm":
-            src_store = self.object_store.get_repo(src_repo)
+            src_store = self.object_store.get_repo(meta["repo"])
             convert(src_store.get_obj_path('data', meta['data_blobs'][0]),
                     dst_path, "qcow2", dst_fmt)
 
     def copy_image(self, src_uri, dst_uri):
-        _, src_repo, src_revision = self.parse_image_uri(src_uri)
         dst_name, dst_repo, _ = self.parse_image_uri(dst_uri)
-        src_meta, _ = self.get_image(src_uri, src_revision)
+        src_meta, _ = self.get_image(src_uri)
 
         self.check_overwrite(dst_uri)
 
-        src_store = self.object_store.get_repo(src_repo)
+        src_store = self.object_store.get_repo(src_meta["repo"])
         dst_store = self.object_store.get_repo(dst_repo)
 
         for b in src_meta['data_blobs']:

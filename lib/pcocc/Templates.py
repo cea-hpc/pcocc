@@ -94,9 +94,10 @@ class TemplateConfig(dict):
             if name in self:
                 raise InvalidConfigurationError(
                     "template name '{}' is "
-                    "already in use (defined in {} and {})".format(name,
-                                                                   self[name].source,
-                                                                   filename))
+                    "already in use (defined in {} and {})".format(
+                        name,
+                        self[name].source,
+                        filename))
 
             for setting in tpl_attr:
                 if not setting in template_settings:
@@ -110,6 +111,16 @@ class TemplateConfig(dict):
         for tpl in self.itervalues():
             if not tpl.placeholder:
                 tpl.validate()
+
+    def populate_image_templates(self, images):
+        for i in images.itervalues():
+            rev = max(i.keys())
+            name = i[rev]["name"]
+            if not name in self:
+                self[name] = Template(name,
+                                      {'image': i[rev]["repo"] + ":" + name },
+                                      None,
+                                      None)
 
     def resource_template(self, tpl):
         return '___'+tpl

@@ -115,6 +115,7 @@ class Config(object):
             self.load_repos(user_repos_path, 'user')
         self.load_repos(os.path.join(conf_dir, 'repos.yaml'), 'global')
 
+        self.tpls.populate_image_templates(self.images.find())
 
     def load_vnets(self, network_conf_file):
         self.vnets.load(network_conf_file)

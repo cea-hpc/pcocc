@@ -1574,6 +1574,8 @@ def pcocc_image_repo_list():
 def pcocc_image_import(kind, fmt, source, dest):
     """Import the source image file to an image in the destination repository.
 
+    The only supported image KIND is "vm"
+
     Images in repositories are specified with URIs of the form
     [REPO:]IMAGE[@REVISION].
 

@@ -301,6 +301,12 @@ class ObjectStore(object):
         os.close(fd)
         return path
 
+    def _unlink_and_cleanup_dir(self, path):
+        os.unlink(path)
+        dirname = os.path.dirname(path)
+        if not os.listdir(dirname):
+            os.rmdir(dirname)
+
     def put_data_blob(self, file_path, known_hash=None):
         if not os.path.isfile(file_path):
             raise PcoccError("{0} is not a regular file".format(file_path))
@@ -414,7 +420,7 @@ class ObjectStore(object):
                 target = self.get_obj_path('meta', h, check_exists=True)
             except:
                 raise ObjectNotFound(name, self._name, r)
-            os.unlink(target)
+            self._unlink_and_cleanup_dir(target)
 
     def _validate_repo_config(self):
         try:

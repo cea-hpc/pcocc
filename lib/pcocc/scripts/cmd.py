@@ -1564,6 +1564,19 @@ def pcocc_image_repo_list():
     except PcoccError as err:
         handle_error(err)
 
+
+@img_repo.command(name='gc',
+             short_help="Cleanup unnecessary data in a repository")
+@click.argument('repo', nargs=1, type=str)
+def pcocc_image_repo_gc(repo):
+    try:
+        config = load_config(None, None, "")
+
+        config.images.garbage_collect(repo)
+    except PcoccError as err:
+        handle_error(err)
+
+
 @image.command(name='import',
              short_help="Import an image to a repository")
 @click.option('-t', '--fmt', type=str,

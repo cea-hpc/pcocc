@@ -43,6 +43,9 @@ Sub-Commands
    repo list
                 List configured repositories
 
+   repo gc [REPO]
+                Cleanup unnecessary data from a repository. This command should be run to free space used by data no longer used by any image.
+
 Import and export file formats
 ******************************
 pcocc repositories currently only manage VM images so the only valid value for KIND is *vm*. The following VM image file formats are supported: *raw*, *qcow2*, *qed*, *vdi*, *vpc*, *vmdk*. By default, pcocc will try to guess the file format from the image file itself or from its extension. The file format of the imported / exported file can be forced with the -t option.

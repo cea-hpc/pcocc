@@ -58,6 +58,9 @@ class ImageMgr(object):
 
         return image_name, repo, revision
 
+    def garbage_collect(self, repo):
+        self.object_store.get_repo(repo).garbage_collect()
+
     def find(self, regex=None, repo=None):
         meta = self.object_store.load_meta(repo)
 

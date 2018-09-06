@@ -307,6 +307,28 @@ class ObjectStore(object):
         if not os.listdir(dirname):
             os.rmdir(dirname)
 
+    def garbage_collect(self):
+        meta = self.load_meta()
+        in_use = set()
+        for revs in meta.itervalues():
+            for m in revs.itervalues():
+                for o in m["data_blobs"]:
+                    in_use.add(o)
+
+        obj_list = glob.glob(os.path.join(
+                self._data_path, '*/*'))
+
+        for o in obj_list:
+            if os.path.basename(o) not in in_use:
+                logging.info("deleting unsed data %s", o)
+                self._unlink_and_cleanup_dir(o)
+
+        # Cleanup any leftover tmp file
+        tmp_list =  glob.glob(os.path.join(self._tmp_path, '*'))
+        for t in tmp_list:
+            logging.info("deleting leftover tmp file %s", t)
+            os.unlink(t)
+
     def put_data_blob(self, file_path, known_hash=None):
         if not os.path.isfile(file_path):
             raise PcoccError("{0} is not a regular file".format(file_path))

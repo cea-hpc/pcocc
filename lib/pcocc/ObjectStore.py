@@ -319,11 +319,14 @@ class ObjectStore(object):
 
         move = self._check_path_in_tmp(file_path)
         if move:
-            shutil.move(file_path, target)
+            to_move = file_path
         else:
             tmp = self.tmp_file()
             shutil.copyfile(file_path, tmp)
-            shutil.move(tmp, target)
+            to_move = tmp
+
+        os.chmod(to_move, 0o444)
+        shutil.move(to_move, target)
 
         return h
 

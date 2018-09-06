@@ -17,7 +17,8 @@ To learn how to interact with image repositories, please refer to the :ref:`pcoc
 Syntax
 ******
 
-:file:`/etc/pcocc/repos.yaml` contains a key/value mapping. At the top-level a key named *repos* is defined. The associated value is a list of repositories. Each repository is defined by a key/value mapping containing two keys: *path* the path to a directory holding the repository and *name* the name associated with the repository. The repositories must appear in the list by order of priority: the first repository in the list is the first considered when looking up an image. Repositories defined in the user configuration file are considered before those defined in the system configuration file.
+:file:`/etc/pcocc/repos.yaml` contains a key/value mapping. At the top-level a key named *repos* is defined. The associated value is a list of repositories. Each repository is defined by a key/value mapping containing two keys: *path* the path to a directory holding the repository and *name* the name associated with the repository. The *path* must point to either an initialized repository or to a non-existing directory which will be automatically created and initialized to an empty repository on first use.
+The repositories must appear in the list by order of priority: the first repository in the list is the first considered when looking up an image. Repositories defined in the user configuration file are considered before those defined in the system configuration file.
 
 
 Sample configuration file

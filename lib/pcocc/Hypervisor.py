@@ -50,6 +50,7 @@ from .Config import Config
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import stop_threads, systemd_notify
 from .Templates import DRIVE_IMAGE_TYPE
+from pcocc.VMCerts import VMCerts
 
 lock = threading.Lock()
 
@@ -1092,7 +1093,6 @@ class Qemu(object):
         self.host_agent = None
         self.state_ready = 0
 
-
     def _do_lock_image(self, drive, key):
         batch = Config().batch
 
@@ -1407,8 +1407,18 @@ username={3}@pcocc
                                               vm.persistent_drives[drive]['cache'])
             block_idx += 1
 
+        if vm.kernel:
+            cmdline += ['-kernel',
+                        vm.kernel]
+            # If not set manually set the serial port
+            # and boot device
+            if not '-append' in vm.custom_args:
+                cmdline += ['-append', 'console=ttyS0 root=/dev/vda1']
+
+
         if not '-boot' in vm.custom_args:
-            cmdline += ['-boot', 'order=cd']
+            if not vm.kernel:
+                cmdline += ['-boot', 'order=cd']
 
         # Memory
         # FIXME: Reserve 15% if total_memory for qemu
@@ -1490,6 +1500,18 @@ username={3}@pcocc
 
             cmdline += ['-device',
                         'vfio-pci,host=%s' % (vfio_name)]
+
+        #
+        # We now deploy per VM certificates
+        #
+        certs = VMCerts(vm.rank)
+
+        # Install certs for this VM
+        certs.deploy_server_cert()
+
+        if not 'pcocc_vm_certs' in vm.mount_points:
+            vm.mount_points['pcocc_vm_certs'] = {'path': certs.server_cert_dir,
+                                                 'readonly':True}
 
         # Mount points
         for mount in vm.mount_points:

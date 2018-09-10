@@ -9,17 +9,25 @@ import select
 import os
 import sys
 import errno
+import fcntl
+import struct
+import termios
+import random
 
 from abc import ABCMeta
 
 import agent_pb2
 
-from ClusterShell.NodeSet import NodeSet
+from Tbon import mt_chain
+from ClusterShell.NodeSet import NodeSet, RangeSet
 from ClusterShell.MsgTree import MsgTree
 from google.protobuf.json_format import MessageToJson
 from .Misc import ThreadPool
-from .Error import AgentCommandError
+from .Error import AgentCommandError, PcoccError
 from .Misc import fake_signalfd
+from .scripts import click
+
+DEFAULT_AGENT_TIMEOUT=60
 
 
 class AgentCommandClass(ABCMeta):
@@ -129,7 +137,7 @@ class AgentCommand(object):
 
     @staticmethod
     def _mt_run_func(name, cmd_class, cluster, timeout, direct, rng, target, *args, **kwargs):
-        pool = ThreadPool(256)
+        pool = ThreadPool(16)
 
         for i in range(0, len(rng)):
             pool.add_task(target, rng[i], cluster, timeout, direct, *args, **kwargs)
@@ -206,6 +214,7 @@ class AgentCommand(object):
                                                             "attach",
                                                             "stdin",
                                                             encap_iterin())
+
         def del_intr_handler():
             cls.del_intr_handler(cluster, indices, execid, ctx)
 
@@ -223,7 +232,10 @@ class AgentCommand(object):
                                    canceller)
 
     @classmethod
-    def attach_stdin(cls, cluster, indices, execid, stdin=None):
+    def attach_stdin(cls, cluster, indices, exec_id_list, stdin=None):
+        if not isinstance(exec_id_list, list):
+            exec_id_list = [exec_id_list]
+
         if stdin is None:
             stdin=os.dup(sys.stdin.fileno())
 
@@ -234,7 +246,24 @@ class AgentCommand(object):
             except OSError:
                 pass
 
-        def iterin():
+        # Attach a signal on sigwinch to send resize messages
+        def sigwinch_handler(sig, frame):
+            s = struct.pack('HHHH', 0, 0, 0, 0)
+            t = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, s)
+            ns = struct.unpack('HHHH', t)
+            for execid in exec_id_list:
+                cls.resize(cluster, indices,
+                            exec_id=execid,
+                            row=int(ns[0]),
+                            col=int(ns[1]))
+
+        if os.isatty(sys.stdout.fileno()):
+            # We do it here as we must be in main thread
+            signal.signal(signal.SIGWINCH, sigwinch_handler)
+            # Call the handler once to send current size
+            sigwinch_handler(0,None)
+
+        def iterin(execid):
             while True:
                 try:
                     rdr, _, _ = select.select([stdin], [], [], 5)
@@ -271,8 +300,23 @@ class AgentCommand(object):
                     logging.debug("Input stream terminated")
                     return
 
-        return cls.attach(cluster, indices, execid, iterin(), close_stdin)
+        rets = []
+        for execid in exec_id_list:
+            rets.append(cls.attach(cluster, indices, execid, iterin(execid), close_stdin))
 
+        if len(rets) == 1:
+            return rets[0]
+        else:
+            # Here we wrap the sub Result in a fake larger result
+            def canceller():
+                for e in rets:
+                    e.cancel()
+
+            return ParallelAgentResult("attach",
+                                mt_chain([x.result_iter for x in rets]),
+                                indices,
+                                cls.attach_string,
+                                canceller)
 
     @classmethod
     def attach_string(cls, msg):
@@ -284,6 +328,256 @@ class AgentCommand(object):
             return msg.data
         elif isinstance(msg, agent_pb2.ExitStatus):
             return "exit {}".format(msg.status)
+
+    @classmethod
+    def exec_output(cls,
+                    cluster,
+                    rangeset,
+                    cmd,
+                    timeout=DEFAULT_AGENT_TIMEOUT,
+                    expect_success=True):
+        ret = cls.execoutput(cluster,
+                             rangeset,
+                             DEFAULT_AGENT_TIMEOUT,
+                             filename=cmd[0],
+                             args=cmd[1:],
+                             exectimeout=timeout)
+        result = [None] * len(rangeset)
+
+        for k, v in ret.iterate(yield_results=True):
+            if isinstance(v, agent_pb2.ExecOutputResult):
+                result[int(k)] = v
+
+        if expect_success:
+            ret.raise_errors()
+
+        return result
+
+    @classmethod
+    def parallel_execve(cls,
+                        cluster,
+                        indices,
+                        cmd,
+                        env,
+                        user,
+                        cpus,
+                        display_errors=True,
+                        timeout=DEFAULT_AGENT_TIMEOUT,
+                        use_pty=False,
+                        exec_id=None,
+                        cwd=""):
+        # Launch tasks on rangeset
+        if not exec_id:
+            exec_id = random.randint(0, 2**63-1)
+        logging.debug(cmd)
+
+        ret = cls.execve(cluster,
+                         indices,
+                         timeout,
+                         filename=cmd[0],
+                         exec_id=exec_id,
+                         args=cmd[1:],
+                         env=env,
+                         username=user,
+                         pty=use_pty,
+                         cpus=cpus,
+                         cwd=cwd)
+
+        # Check if some VMs had errors during launch
+        for index, err in ret.iterate():
+            if isinstance(err, PcoccError):
+                if display_errors:
+                    click.secho("vm{}: {}".format(index, err),
+                                fg='red',
+                                err=True)
+            else:
+                raise err
+
+        return ret, exec_id
+
+    @staticmethod
+    def filter_vms(indices, result):
+        return indices.difference(RangeSet(result.errors.keys()))
+
+    @staticmethod
+    def collect_output_bg(result_iterator,
+                          display_results,
+                          display_errors,
+                          ignore_output=False):
+        def collector_th():
+            exit_status = 0
+            try:
+                for key, msg in result_iterator.iterate(yield_results=display_results,
+                                                        keep_results=(not display_results)):
+                    if isinstance(msg, agent_pb2.IOMessage):
+                        if ignore_output:
+                            continue
+                        if msg.kind == agent_pb2.IOMessage.stdout:
+                            sys.stdout.write(msg.data)
+                            sys.stdout.flush()
+                        else:
+                            sys.stderr.write(msg.data)
+                            sys.stderr.flush()
+                    elif isinstance(msg, agent_pb2.ExitStatus):
+                        logging.info("Received Exit status")
+                        if msg.status != 0 and display_errors:
+                            click.secho("vm{}:".format(key) +
+                                        "exited with"
+                                        " exit code {}".format(msg.status),
+                                        fg='red',
+                                        err=True)
+                        if msg.status > exit_status:
+                            exit_status = msg.status
+                    elif isinstance(msg, agent_pb2.DetachResult):
+                        logging.info("Agent asked us to detach")
+                    else:
+                        # We ignore other message types for now
+                        logging.debug("Ignoring message of type %s from %d",
+                                      type(msg),
+                                      key)
+
+                logging.debug("Last message received from output stream: "
+                              "signalling main thread")
+            except Exception as err:
+                if display_errors:
+                    click.secho(str(err), fg='red', err=True)
+                if not exit_status:
+                    exit_status = -1
+
+            # Make sure the RPC is terminated in case we exited early due
+            # to some error
+            result_iterator.cancel()
+            result_iterator.exit_status = exit_status
+
+        output_th = threading.Thread(None, collector_th, None)
+        output_th.start()
+        return output_th
+
+    @classmethod
+    def multiprocess_attach(cls,
+                            cluster,
+                            indices,
+                            exec_id,
+                            exec_errors=None,
+                            ignore_output=False,
+                            display_errors=True):
+        # Launch streaming "attach" RPC
+        attach_ret = cls.attach_stdin(cluster, indices, exec_id)
+        # Collect in background thread
+        output_th = cls.collect_output_bg(attach_ret,
+                                          display_results=True,
+                                          display_errors=display_errors,
+                                          ignore_output=ignore_output)
+        # Wait for collection output (timeout to not block signals)
+        output_th.join(2**32-1)
+        logging.info("Output thread joined\n")
+        exit_code = attach_ret.exit_status
+
+        if exec_errors and not exit_code:
+            return -1
+
+        return exit_code
+
+    @classmethod
+    def multiprocess_call(cls,
+                          cluster,
+                          indices,
+                          cmd,
+                          env,
+                          user,
+                          cpus,
+                          timeout=DEFAULT_AGENT_TIMEOUT,
+                          use_pty=False,
+                          ignore_output=False,
+                          display_errors=True,
+                          cwd=""):
+        # Launch tasks on rangeset
+        exec_ret, exec_id = cls.parallel_execve(cluster,
+                                                indices,
+                                                cmd,
+                                                env,
+                                                user,
+                                                cpus,
+                                                display_errors=display_errors,
+                                                timeout=timeout,
+                                                use_pty=use_pty,
+                                                cwd=cwd)
+
+        # Continue only on VMs on which the exec succeeded
+        good_indices = cls.filter_vms(indices, exec_ret)
+        if not good_indices:
+            return -1
+
+        return cls.multiprocess_attach(cluster,
+                                       good_indices,
+                                       exec_id,
+                                       exec_ret.errors,
+                                       ignore_output=ignore_output,
+                                       display_errors=display_errors)
+
+
+class WritableVMRootfs(object):
+
+    def __init__(self, cluster, rangeset):
+        self.rangeset = rangeset
+        self.cluster = cluster
+        # Now check if / is writable as root
+        self.did_remount = False
+        self.writable = self._check_root_writable()
+
+    def _check_root_writable(self):
+        ret = AgentCommand.writefile(self.cluster,
+                                     self.rangeset,
+                                     DEFAULT_AGENT_TIMEOUT,
+                                     path="/.pcocctest",
+                                     data="test",
+                                     append=True,
+                                     perms=0o0755)
+
+        for _, _ in ret.iterate(yield_results=False):
+            pass
+
+        if ret.errors:
+            return False
+
+        # If we are here we created the test file now delete it
+        ret = AgentCommand.remove(self.cluster,
+                                  self.rangeset,
+                                  DEFAULT_AGENT_TIMEOUT,
+                                  path="/.pcocctest")
+
+        for _, _ in ret.iterate(yield_results=False):
+            pass
+
+        return True
+
+    def _set_root_mode(self, mode="rw"):
+        cmd = ["mount", "-o", "remount," + mode, "/"]
+        try:
+            AgentCommand.exec_output(self.cluster,
+                                     self.rangeset,
+                                     cmd)
+        except AgentCommandError:
+            raise PcoccError("Failed to remount roots in read/write")
+
+
+    def __enter__(self):
+        if not self.writable:
+            logging.info("Remounting VM rootfs in read-write")
+            self._set_root_mode("rw")
+            self.writable = self._check_root_writable()
+            if not self.writable:
+                raise PcoccError("Failed to remount roots in read-write")
+            self.did_remount = True
+
+    def __exit__(self, typ, value, traceback):
+        if self.did_remount:
+            logging.info("Remounting VM rootfs in read-only")
+            self._set_root_mode("ro")
+            self.writable = self._check_root_writable()
+            if self.writable:
+                raise PcoccError("Failed to remount roots in read-only")
+            self.did_remount = False
 
 
 class Hello(AgentCommand):
@@ -338,6 +632,11 @@ class Symlink(AgentCommand):
     _name = "symlink"
     _request_pb = agent_pb2.SymlinkMessage
     _reply_pb = agent_pb2.SymlinkResult
+
+class Readlink(AgentCommand):
+    _name = "readlink"
+    _request_pb = agent_pb2.ReadlinkMessage
+    _reply_pb = agent_pb2.ReadlinkResult
 
 class Remove(AgentCommand):
     _name = "remove"
@@ -427,6 +726,40 @@ class SaveDriveCmd(AgentCommand):
     _reply_pb = agent_pb2.SaveDriveResult
 
 
+class UserAdd(AgentCommand):
+    _name = "useradd"
+    _request_pb = agent_pb2.UserAddMessage
+    _reply_pb = agent_pb2.UserAddResult
+
+class Mount(AgentCommand):
+    _name = "mount"
+    _request_pb = agent_pb2.MountMessage
+    _reply_pb = agent_pb2.MountResult
+
+class UserInfo(AgentCommand):
+    _name = "userinfo"
+    _request_pb = agent_pb2.UserInfoMessage
+    _reply_pb = agent_pb2.UserInfoResult
+
+class Resize(AgentCommand):
+    _name = "resize"
+    _request_pb = agent_pb2.ResizeMessage
+    _reply_pb = agent_pb2.ResizeResult
+
+class Corecount(AgentCommand):
+    _name = "corecount"
+    _request_pb = agent_pb2.CoreCountMessage
+    _reply_pb = agent_pb2.CoreCountResult
+
+class ExecOutput(AgentCommand):
+    _name = "execoutput"
+    _request_pb = agent_pb2.ExecOutputMessage
+    _reply_pb = agent_pb2.ExecOutputResult
+
+class Getenv(AgentCommand):
+    _name = "getenv"
+    _request_pb = agent_pb2.GetEnvMessage
+    _reply_pb = agent_pb2.GetEnvResult
 
 class ParallelAgentResult(object):
     """
@@ -440,6 +773,10 @@ class ParallelAgentResult(object):
         self._res_tree = MsgTree()
         self._canceller = canceller
         self._cmd = cmd
+
+    @property
+    def result_iter(self):
+        return self._result_iter
 
     def cancel(self):
         self._canceller()

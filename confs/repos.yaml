@@ -7,3 +7,9 @@ repos:
     path: "%{homedir}/.pcocc/images"
 # - name: system
 #   path: "/var/pcocc/images"
+#
+# This defines where extracted containers images
+# should be stored
+#
+cache:
+    path: "%{homedir}/.pcocc/cache"

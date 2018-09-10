@@ -1,0 +1,546 @@
+.\" Man page generated from reStructuredText.
+.
+.TH "PCOCC-RUN" "1" "Aug 01, 2019" "0.5.1" "pcocc"
+.SH NAME
+pcocc-run \- How to run commands and containers using pcocc
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.SH SYNOPSIS
+.sp
+pcocc run [OPTIONS] [CMD]...
+.SH DECRIPTION
+.sp
+Run commands in various configurations supported by pcocc. This includes:
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+Running locally (singleton mode)
+.IP \(bu 2
+Running inside a slurm allocation
+.IP \(bu 2
+Running inside a container
+.IP \(bu 2
+Running in a virtual machine
+.IP \(bu 2
+Running inside a container running in a virtual machine (POD)
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+In the rest of this documentation we will first present common options before
+moving on to specificities linked with some configurations such as containers.
+Eventually, we will recall how parameters and current environment affects "where"
+the command is launched according to the previously listed configurations.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+Configurations involving a VM suppose that you correctly configured
+the pcocc agent inside your image.
+.UNINDENT
+.UNINDENT
+.SH CONFIGURATION MATRIX
+.sp
+The \fIpcocc run\fP command is versatile the following table presents the resulting
+configuration in function of both flags and current environment.
+.sp
+The following flags play a role:
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-s, \-\-singleton
+Run without batch manager or VM support
+.TP
+.B \-I, \-\-image TEXT
+Container image to launch
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.TS
+center;
+|l|l|l|l|.
+_
+T{
+Singleton
+T}	T{
+Image
+T}	T{
+No allocation
+T}	T{
+Inside a pcocc allocation
+T}
+_
+T{
+N
+T}	T{
+N
+T}	T{
+Allocate with Slurm
+T}	T{
+Run inside the VM
+T}
+_
+T{
+Y
+T}	T{
+N
+T}	T{
+Run locally
+T}	T{
+Run locally
+T}
+_
+T{
+N
+T}	T{
+Y
+T}	T{
+Container on Slurm
+T}	T{
+Container inside VM
+T}
+_
+T{
+Y
+T}	T{
+Y
+T}	T{
+Run container locally
+T}	T{
+Run container locally
+T}
+_
+.TE
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+When running over Slurm ressources and inside VMs, the \fIresource set\fP flags are considered
+(see below) when running as a singleton, only a single process is started per invocation.
+.UNINDENT
+.UNINDENT
+.SH OPTIONS
+.SS Common Options
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-h, \-\-help
+Show this message and exit.
+.TP
+.B \-t, \-\-tty
+Wether to launch in a TTY (forces n=1)
+.TP
+.B \-s, \-\-singleton
+Run without batch manager or VM support
+.TP
+.B \-I, \-\-image TEXT
+Container image to launch
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS Pcocc Allocation Options
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-j, \-\-jobid [INTEGER]
+Jobid of the selected cluster when reffering to a pcocc allocation
+.TP
+.B \-J, \-\-jobname [TEXT]
+Job name of the selected cluster
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+These parameters can be used to define the target allocation (pcocc alloc)
+.UNINDENT
+.UNINDENT
+.SS Resource Set
+.sp
+Supported options to define ressources on which to run are the following:
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-N, \-\-node INTEGER
+Number of nodes to launch on
+.TP
+.B \-n, \-\-process INTEGER
+Number of process to launch
+.TP
+.B \-c, \-\-core INTEGER
+Number of core(s) per process
+.TP
+.B \-p, \-\-partition TEXT
+Partition on which to run (only when allocating)
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+These parameters are not meaningful in singleton mode.
+.UNINDENT
+.UNINDENT
+.SS Environment Control
+.sp
+By default commands run with \fIpcocc run\fP do not propagate the local environment it is therefore possible to manually specify what is to be propagated using the following flags.
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-m, \-\-mirror\-env
+Propagate local environment variables (default False)
+.TP
+.B \-e, \-\-env [TEXT]
+Environment variables passed to the target program (see syntax below)
+.TP
+.B \-P, \-\-path\-prefix [TEXT]
+Prepend variables in $PATH fashion (see syntax below)
+.TP
+.B \-S, \-\-path\-suffix [TEXT]
+Append variables in $PATH fashion (see syntax below)
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+The following syntax is supported for environment variables:
+.TS
+center;
+|l|l|.
+_
+T{
+Syntax
+T}	T{
+Description
+T}
+_
+T{
+VAR=VALUE
+T}	T{
+Set variable \(aqVAR\(aq to value \(aqVALUE\(aq
+T}
+_
+T{
+VAR
+T}	T{
+Set variable \(aqVAR\(aq to current env value
+T}
+_
+T{
+re(REGEXPR)
+T}	T{
+Propagate all variables matching REGEXPR regular expression
+\fBonly\fP valid for environment variable and not path manipulation
+T}
+_
+.TE
+.sp
+To better illustrate supported syntax, consider the following environment between a container and the host system:
+.TS
+center;
+|l|l|l|.
+_
+T{
+Variable
+T}	T{
+Host System
+T}	T{
+Container
+T}
+_
+T{
+PATH
+T}	T{
+/usr/hostpath/
+T}	T{
+/sbin
+T}
+_
+T{
+PREFIX
+T}	T{
+host_prefix
+T}	T{
+container_prefix
+T}
+_
+.TE
+.sp
+We can now illustrate the effect of the previous flags as follows, presenting the resulting PATH variable in function of the passed flags.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+In the following table we consider each flag independently, it is of course
+possible to combine multiple flags in practice.
+.UNINDENT
+.UNINDENT
+.TS
+center;
+|l|l|l|.
+_
+T{
+Flag
+T}	T{
+PATH in target environment
+T}	T{
+PREFIX in target environment
+T}
+_
+T{
+\-m
+T}	T{
+/usr/hostpath/
+T}	T{
+host_prefix
+T}
+_
+T{
+\-e PATH=/sbin
+T}	T{
+/sbin
+T}	T{
+container_prefix
+T}
+_
+T{
+\-e PATH
+T}	T{
+/usr/hostpath/
+T}	T{
+container_prefix
+T}
+_
+T{
+\-P PATH
+T}	T{
+/usr/hostpath/:/sbin
+T}	T{
+container_prefix
+T}
+_
+T{
+\-S PATH
+T}	T{
+/sbin:/usr/hostpath/
+T}	T{
+container_prefix
+T}
+_
+T{
+\-P PATH=/foobar
+T}	T{
+/foobar:/sbin
+T}	T{
+container_prefix
+T}
+_
+T{
+\-S PATH=/foobar
+T}	T{
+/sbin:/foobar
+T}	T{
+container_prefix
+T}
+_
+T{
+\-e PREFIX
+T}	T{
+/sbin
+T}	T{
+host_prefix
+T}
+_
+T{
+\-e re(P.*)
+T}	T{
+/usr/hostpath/
+T}	T{
+host_prefix
+T}
+_
+T{
+\-P PREFIX=/test
+T}	T{
+/sbin
+T}	T{
+/test:container_prefix
+T}
+_
+T{
+\-P PREFIX
+T}	T{
+/sbin
+T}	T{
+host_prefix:container_prefix
+T}
+_
+T{
+\-S PREFIX
+T}	T{
+/sbin
+T}	T{
+container_prefix:host_prefix
+T}
+_
+.TE
+.SS Process Configuration
+.sp
+These parameters affect how the target process is run.
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-u, \-\-user [TEXT]
+Username to run the command
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+\fBWARNING:\fP
+.INDENT 0.0
+.INDENT 3.5
+Running as another user is only possible inside virtual machines.
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-S, \-\-script [TEXT]
+Script to run (substitutes the command)
+.TP
+.B \-w, \-\-cwd [TEXT]
+Work directory for the target executable, If not set
+host PWD is propagated. If the container defines a
+workdir different than "/" this value supersedes the
+transparent propagation. In order to use the
+container default you can specify "\-"
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS Container Related Options
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The following options are only meaningful for containers i.e. for commands
+involving the \fI\-\-image\fP flag.
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B \-v, \-\-mount [TEXT]
+Mount a directory in target env (vm or cont) format
+src=/XX,dest=/XX,type=XX,opt=A,B=X,C or src:dest
+.TP
+.B \-M, \-\-module [TEXT]
+Define a list of module configuration to inject in
+the container/VM (can be comma separated list)
+.TP
+.B \-E, \-\-entry\-point [TEXT]
+Changes container entry point (in docker semantics)
+.TP
+.B \-nm, \-\-no\-mounts
+Do not mount inside the container
+.TP
+.B \-nu, \-\-no\-user
+Do not inject the user inside the container
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+For example, to bind mount \fIa.out\fP as \fI/test\fP in the container:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+\-v ./a.out:/test
+\-v src=./a.out,dest=/test
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH EXAMPLES
+.SS Execute a command
+.sp
+Run a container on the local node using a TTY and default command:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc run \-s \-\-image centos \-t
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Run a container on the local node using a TTY and \(aq/bin/sh\(aq:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc run \-s \-\-image centos \-t /bin/sh
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Allocate ressources to run 24 instances of the container on the \fIcompute\fP partition:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc run \-p compute \-n 24 \-\-image centos
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH SEE ALSO
+.sp
+pcocc\-ssh(1), pcocc\-scp(1), pcocc\-exec(1), pcocc\-nc(1)
+.SH AUTHOR
+François Diakhaté
+.SH COPYRIGHT
+2017
+.\" Generated by docutils manpage writer.
+.

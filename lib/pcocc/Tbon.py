@@ -48,11 +48,15 @@ def createKeyPair(key_type, bits):
     pkey.generate_key(key_type, bits)
     return pkey
 
-def createCertRequest(pkey, digest="md5", **name):
+def getAltnameExtension(altnames):
+    return [crypto.X509Extension("subjectAltName", True, ", ".join(altnames))]
+
+def createCertRequest(pkey, digest="md5", altname=None, **name):
     """
     Create a certificate request.
     Arguments: pkey   - The key to associate with the request
                digest - Digestion method to use for signing, default is md5
+               altname - fields to add to the subjectAltName cert field
                **name - The name of the subject of the request, possible
                         arguments are:
                           C     - Country name
@@ -70,14 +74,24 @@ def createCertRequest(pkey, digest="md5", **name):
     for (key,value) in name.items():
         setattr(subj, key, value)
 
+    if altname:
+        req.add_extensions(
+            getAltnameExtension(altname)
+        )
+
     req.set_pubkey(pkey)
     req.sign(pkey, digest)
     return req
 
-def createCertificate(req, (issuerCert, issuerKey), serial, (notBefore, notAfter), digest="sha1"):
+def createCertificate(req,
+                      (issuerCert, issuerKey),
+                      serial,
+                      (notBefore, notAfter),
+                      digest="sha1",
+                      altname=None):
     """
     Generate a certificate given a certificate request.
-    Arguments: req        - Certificate reqeust to use
+    Arguments: req        - Certificate request to use
                issuerCert - The certificate of the issuer
                issuerKey  - The private key of the issuer
                serial     - Serial number for the certificate
@@ -86,6 +100,7 @@ def createCertificate(req, (issuerCert, issuerKey), serial, (notBefore, notAfter
                notAfter   - Timestamp (relative to now) when the certificate
                             stops being valid
                digest     - Digest method to use for signing, default is sha1
+               altname    - fields to add to the subjectAltName cert field
     Returns:   The signed certificate in an X509 object
     """
     cert = crypto.X509()
@@ -94,6 +109,11 @@ def createCertificate(req, (issuerCert, issuerKey), serial, (notBefore, notAfter
     cert.gmtime_adj_notAfter(notAfter)
     cert.set_issuer(issuerCert.get_subject())
     cert.set_subject(req.get_subject())
+    # NOTE ideally we should get the infos from the CERT
+    # but older versions of pyOpenSSL do not have the
+    # get_extensions call on the x509cert object
+    if altname:
+        cert.add_extensions(getAltnameExtension(altname))
     cert.set_pubkey(req.get_pubkey())
     cert.sign(issuerKey, digest)
     return cert
@@ -164,14 +184,18 @@ class UserCA(Cert):
         logging.debug("Done generating CA cert")
         return cls(ca_key_data, ca_cert_data)
 
-    def gen_cert(self, cn, key_size=2048, days=9999):
+    def gen_cert(self, cn, key_size=2048, days=9999, altname=None):
         logging.debug("Generating cert for " + cn)
         cacert = crypto.load_certificate(crypto.FILETYPE_PEM, self.cert)
         cakey = crypto.load_privatekey(crypto.FILETYPE_PEM, self.key)
 
         pkey = createKeyPair(crypto.TYPE_RSA, key_size)
-        req = createCertRequest(pkey, CN=cn)
-        cert = createCertificate(req, (cacert, cakey), 1, (0, 60*60*24*days))
+        req = createCertRequest(pkey, altname=altname, CN=cn)
+        cert = createCertificate(req,
+                                 (cacert, cakey),
+                                 1,
+                                 (0, 60*60*24*days),
+                                 altname=altname)
 
         key_data = crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey)
         cert_data = crypto.dump_certificate(crypto.FILETYPE_PEM, cert)

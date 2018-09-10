@@ -186,6 +186,10 @@ class VM(object):
 
     @property
     def mount_points(self):
+        if self._template.mount_points == []:
+            #Handle the empty case to make sure
+            #this is always a dict
+            self._template.mount_points = {}
         return self._template.mount_points
 
     @property
@@ -239,6 +243,10 @@ class VM(object):
     @property
     def qemu_bin(self):
         return self._template.qemu_bin
+
+    @property
+    def kernel(self):
+        return self._template.kernel
 
     @property
     def custom_args(self):

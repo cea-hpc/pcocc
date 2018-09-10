@@ -27,6 +27,7 @@ import socket
 import datetime
 import jsonschema
 import yaml
+import atexit
 
 from Queue import Queue
 from threading import Thread
@@ -34,6 +35,51 @@ from threading import Thread
 from pcocc.Backports import  enum
 from pcocc.Config import Config
 from pcocc.Error import PcoccError
+
+
+class runAtExit(object):
+
+    def __init__(self):
+        self.to_run = []
+        # Register in atexit
+        atexit.register(self.run_exit)
+
+    def run_exit(self):
+        for e in self.to_run:
+            try:
+                # We ignore errors
+                # as we are already exitting
+                e()
+            except:
+                pass
+        self.to_run = []
+
+    def register(self, callback):
+        self.to_run.append(callback)
+
+    def deregister(self, callback):
+        if callback in self.to_run:
+            del self.to_run[self.to_run.index(callback)]
+
+# Instanciate the at_exit singleton
+# to centralize the atexit events
+pcocc_at_exit = runAtExit()
+
+
+def path_join(*args):
+    """A version of path.join which accepts concatenations
+       of paths starting with / as later argument
+
+    Returns:
+        str -- a string corresponding to the concatenated path
+    """
+    paths = list(args)
+
+    def remove_start_sep(path):
+        return path[1:] if path.startswith(os.sep) else path
+
+    paths = [paths[0]] + map(remove_start_sep, paths[1:])
+    return os.path.join(*paths)
 
 stop_threads = threading.Event()
 

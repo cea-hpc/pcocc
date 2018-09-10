@@ -67,6 +67,19 @@ message AgentMessage
    google.protobuf.Any data = 4;
 }
 
+message ExecOutputMessage
+{
+   string filename = 1;
+   repeated string args = 2;
+   int64 exectimeout = 3;
+}
+
+message ExecOutputResult
+{
+   int32 retcode = 1;
+   string output = 3;
+}
+
 message ExecMessage
 {
   int64  exec_id = 1;
@@ -74,6 +87,9 @@ message ExecMessage
   repeated string args = 3;
   repeated string env = 4;
   string username = 5;
+  repeated uint32 cpus = 6;
+  bool pty = 7;
+  string cwd = 8;
 }
 
 message ExecResult
@@ -136,6 +152,18 @@ message IOMessage
 }
 
 message IOResult
+{
+}
+
+message ResizeMessage
+{
+   int64 exec_id = 4;
+   /* Terminal size */
+   int32 row = 5;
+   int32 col = 6;
+}
+
+message ResizeResult
 {
 }
 
@@ -267,6 +295,14 @@ message SymlinkMessage {
 message SymlinkResult {
 }
 
+message ReadlinkMessage {
+    string path = 1;
+}
+
+ message ReadlinkResult {
+    string pointee = 1;
+}
+
 message RemoveMessage {
    string path = 1;
    bool recurse = 2;
@@ -314,6 +350,52 @@ message WriteFileResult {
    int64  written = 1;
 }
 
+message UserAddMessage
+{
+  int64  uid = 1;
+  int64  gid = 2;
+  string user = 3;
+  map<string, int64> groups = 4;
+}
 
+message UserAddResult {
+}
 
+message MountMessage
+{
+  string path = 1;
+  string mountid = 2;
+}
 
+message MountResult {
+}
+
+message UserInfoMessage {
+    string user = 1;
+}
+
+message UserInfoResult
+{
+    string username = 1;
+    string name = 2;
+    string home = 3;
+    uint32 uid = 4;
+    uint32 gid = 5;
+}
+
+message CoreCountMessage {
+}
+
+message CoreCountResult
+{
+    uint32 count = 1;
+}
+
+message GetEnvMessage {
+    string varname = 1;
+}
+
+message GetEnvResult
+{
+    string value =1;
+}

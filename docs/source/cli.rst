@@ -13,6 +13,8 @@ pcocc provides the following commands:
     manpages/man1/dump
     manpages/man1/display
     manpages/man1/exec
+    manpages/man1/run
+    manpages/man1/docker
     manpages/man1/image
     manpages/man1/monitor-cmd
     manpages/man1/nc

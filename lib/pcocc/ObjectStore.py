@@ -32,29 +32,9 @@ import tempfile
 from .Error import InvalidConfigurationError, PcoccError
 from .Config import Config
 from .Backports import OrderedDict
+from .Cache import Cache
 
-repo_config_schema="""
-type: object
-properties:
-  repos:
-    type: array
-    items:
-      type: object
-      properties:
-        name:
-           type: string
-        path:
-           type: string
-      required:
-           - name
-           - path
-      additionalProperties: false
-required:
-  - repos
-additionalProperties: false
-"""
-
-metadata_schema="""
+metadata_schema = """
 type: object
 properties:
   name:
@@ -85,7 +65,7 @@ required:
 additionalProperties: false
 """
 
-repo_config_schema="""
+repo_config_schema = """
 type: object
 properties:
   version:
@@ -95,7 +75,7 @@ required:
 additionalProperties: false
 """
 
-repo_definition_schema="""
+repo_definition_schema = """
 type: object
 properties:
   repos:
@@ -111,10 +91,19 @@ properties:
            - name
            - path
       additionalProperties: false
+  cache:
+    type: object
+    properties:
+        path:
+            type: string
+    required:
+        - path
+    additionalProperties: false
 required:
   - repos
 additionalProperties: false
 """
+
 
 class ObjectNotFound(PcoccError):
     def __init__(self, name,  repo=None, revision=None):
@@ -143,6 +132,18 @@ class ObjectNotFound(PcoccError):
 class HierarchObjectStore(object):
     def __init__(self):
         self._repos = OrderedDict()
+        self._cache = None
+
+    @property
+    def has_cache(self):
+        return (self._cache is not None)
+
+    @property
+    def cache(self):
+        if not self.has_cache:
+            raise InvalidConfigurationError("A cache needs to be configured "
+                                            "in the repos.yaml config file")
+        return self._cache
 
     def load_repos(self, repo_config_file, tag):
         try:
@@ -157,10 +158,17 @@ class HierarchObjectStore(object):
         except jsonschema.exceptions.ValidationError as err:
             raise InvalidConfigurationError(err.message)
 
+        if "cache" in repo_config:
+            if self._cache:
+                raise InvalidConfigurationError("Only a single cache"
+                                                " should be configured"
+                                                " in repo.yaml")
+            self._cache = Cache(repo_config["cache"]["path"])
+
         for repo in repo_config['repos']:
             if repo['name'] in self._repos.keys():
-                raise InvalidConfigurationError('Duplicate repository: {0}'.format(
-                    repo['name']))
+                message = 'Duplicate'' repository: {0}'.format(repo['name'])
+                raise InvalidConfigurationError(message)
 
             repo['tag'] = tag
             repo['store'] = ObjectStore(Config().resolve_path(repo['path']),
@@ -187,10 +195,14 @@ class HierarchObjectStore(object):
             raise InvalidConfigurationError('No repository configured')
 
     def list_repos(self, tag):
-        return [ r['store'] for r in self._repos.itervalues() if not tag or
-                 r['tag'] == tag ]
+        return [r['store']
+                for r in self._repos.itervalues()
+                if not tag or r['tag'] == tag]
 
-    def get_meta(self, name, revision=None, repo=None):
+    def get_meta(self,
+                 name,
+                 revision=None,
+                 repo=None):
         if repo:
             return self.get_repo(repo).get_meta(name, revision)
 
@@ -201,7 +213,6 @@ class HierarchObjectStore(object):
             except ObjectNotFound:
                 pass
 
-        raise ObjectNotFound(name, repo, revision)
 
     def get_revisions(self, name, repo=None):
         if repo:
@@ -227,15 +238,16 @@ class HierarchObjectStore(object):
 
         return glob_meta
 
+
 class ObjectStore(object):
     def __init__(self, path, name):
         self._path = Config().resolve_path(path)
         self._name = name
 
-        self._data_path    = os.path.join(self._path, 'data')
-        self._meta_path    = os.path.join(self._path, 'meta')
-        self._tmp_path     = os.path.join(self._path, '.tmp')
-        self._config_path  = os.path.join(self._path, '.config')
+        self._data_path = os.path.join(self._path, 'data')
+        self._meta_path = os.path.join(self._path, 'meta')
+        self._tmp_path = os.path.join(self._path, '.tmp')
+        self._config_path = os.path.join(self._path, '.config')
 
         self._init_repodir()
 
@@ -271,13 +283,32 @@ class ObjectStore(object):
     def name(self):
         return self._name
 
-    def get_obj_path(self, obj_type, obj_hash, check_exists = False, relative = False):
+    @staticmethod
+    def _parse_hash_algorithm(obj_hash):
+        if ":" in obj_hash:
+            d = obj_hash.split(":")
+            kind = d[0]
+            h = d[1]
+            if kind != "sha256":
+                raise PcoccError("Only sha256 is supported currently")
+            # Hash is supported extract the actual hash
+            obj_hash = h
+        return obj_hash
+
+    def get_obj_path(self,
+                     obj_type,
+                     obj_hash,
+                     check_exists=False,
+                     relative=False):
         if obj_type == 'data':
             base = self._data_path
         elif obj_type == 'meta':
             base = self._meta_path
         else:
             raise PcoccError('Bad object type {0}'.format(obj_type))
+
+        # Check if the hash contains an algorithm descriptor
+        obj_hash = ObjectStore._parse_hash_algorithm(obj_hash)
 
         try:
             os.mkdir(os.path.join(base, obj_hash[:2]))
@@ -301,6 +332,9 @@ class ObjectStore(object):
         os.close(fd)
         return path
 
+    def tmp_dir(self, ext=None):
+        return tempfile.mkdtemp(dir=self._tmp_path)
+
     def _unlink_and_cleanup_dir(self, path):
         os.unlink(path)
         dirname = os.path.dirname(path)
@@ -315,16 +349,19 @@ class ObjectStore(object):
                 for o in m["data_blobs"]:
                     in_use.add(o)
 
+        in_use = map(ObjectStore._parse_hash_algorithm,
+                     in_use)
+
         obj_list = glob.glob(os.path.join(
                 self._data_path, '*/*'))
 
         for o in obj_list:
             if os.path.basename(o) not in in_use:
-                logging.info("deleting unsed data %s", o)
+                logging.info("deleting unused data %s", o)
                 self._unlink_and_cleanup_dir(o)
 
         # Cleanup any leftover tmp file
-        tmp_list =  glob.glob(os.path.join(self._tmp_path, '*'))
+        tmp_list = glob.glob(os.path.join(self._tmp_path, '*'))
         for t in tmp_list:
             logging.info("deleting leftover tmp file %s", t)
             os.unlink(t)
@@ -432,7 +469,7 @@ class ObjectStore(object):
 
     def delete(self, name, revision=None):
         if revision is not None:
-            revisions = [ revision ]
+            revisions = [revision]
         else:
             revisions = self.get_revisions(name)
 
@@ -449,14 +486,13 @@ class ObjectStore(object):
             with open(self._config_path) as f:
                 repo_config = yaml.safe_load(f)
                 jsonschema.validate(repo_config,
-                                        yaml.safe_load(repo_config_schema))
+                                    yaml.safe_load(repo_config_schema))
 
         except (yaml.YAMLError,
                 IOError,
                 jsonschema.exceptions.ValidationError) as err:
-            raise PcoccError(
-                'Bad repository config file {0} : {1}'.format(self._config_path,
-                                                                      err))
+            raise PcoccError('Bad repository config'
+                             ' file {0} : {1}'.format(self._config_path, err))
 
         if repo_config['version'] != 1:
             raise InvalidConfigurationError(
@@ -483,10 +519,9 @@ class ObjectStore(object):
             os.mkdir(self._tmp_path)
             with open(self._config_path, 'w') as f:
                 yaml.safe_dump({'version': 1}, f)
-
         except OSError as e:
-            raise PcoccError('Unable to create repository directory {0}: {1}: '.format(
-                    self._path, str(e)))
+            raise PcoccError('Unable to create repository directory '
+                             '{0}: {1}: '.format(self._path, str(e)))
 
     def _validate_name(self, name):
         if re.search(r"[^a-zA-Z0-9_\.-]+", name):

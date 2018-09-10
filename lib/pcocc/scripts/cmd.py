@@ -36,8 +36,7 @@ import threading
 import pwd
 import logging
 import pcocc
-import random
-import stat
+import json
 
 from pcocc.Tbon import UserCA
 from pcocc.scripts import click
@@ -45,15 +44,19 @@ from pcocc import PcoccError, Config, Cluster, Hypervisor
 from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from pcocc.scripts.Shine.TextTable import TextTable
-from pcocc.Agent import AgentCommand
+from pcocc.Agent import AgentCommand, DEFAULT_AGENT_TIMEOUT
 from pcocc.Templates import DRIVE_IMAGE_TYPE
-from pcocc import agent_pb2
+from pcocc.Image import ImageType
+import pcocc.Container
+import pcocc.Run as Run
+from pcocc.Docker import PcoccDocker
 
-from ClusterShell.NodeSet import NodeSet, RangeSet, RangeSetParseError, NodeSetParseError
+from ClusterShell.NodeSet import NodeSet, RangeSet
+from ClusterShell.NodeSet import RangeSetParseError, NodeSetParseError
 
 
 helperdir = '/etc/pcocc/helpers'
-DEFAULT_AGENT_TIMEOUT=60
+
 
 def handle_error(err):
     """ Print exception with stack trace if in debug mode """
@@ -63,10 +66,10 @@ def handle_error(err):
         raise
     sys.exit(-1)
 
+
 def cleanup(spr, terminal_settings):
     """ Called at exit to restore terminal settings """
-    termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW,
-                      terminal_settings)
+    restore_terminal(terminal_settings)
     try:
         spr.kill()
     except OSError as err:
@@ -76,19 +79,22 @@ def cleanup(spr, terminal_settings):
         else:
             raise
 
+
 def ascii(text):
     return text.encode('ascii', 'ignore')
+
 
 def docstring(docstr, sep="\n"):
     """ Decorator: Append to a function's docstring.
     """
     def _decorator(func):
-        if func.__doc__ == None:
+        if func.__doc__ is None:
             func.__doc__ = docstr
         else:
             func.__doc__ = sep.join([func.__doc__, docstr])
         return func
     return _decorator
+
 
 def load_config(batchid=None, batchname=None, batchuser=None,
                 default_batchname=None,
@@ -104,9 +110,10 @@ def load_config(batchid=None, batchname=None, batchuser=None,
     config.load_user()
     return config
 
+
 def load_batch_cluster():
     definition = Config().batch.read_key('cluster/user', 'definition',
-                                               blocking=True)
+                                         blocking=True)
     return Cluster(definition)
 
 
@@ -118,10 +125,14 @@ def per_cluster_cli(allows_user):
     def decorator(func):
         def wrapper(*args, **kwargs):
             if allows_user:
-                load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc',
+                load_config(kwargs["jobid"],
+                            kwargs["jobname"],
+                            default_batchname='pcocc',
                             batchuser=kwargs["user"])
             else:
-                load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc')
+                load_config(kwargs["jobid"],
+                            kwargs["jobname"],
+                            default_batchname='pcocc')
 
             kwargs["cluster"] = load_batch_cluster()
             try:
@@ -131,10 +142,12 @@ def per_cluster_cli(allows_user):
         return wrapper
     return decorator
 
+
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
 @click.option('-v', '--verbose', count=True)
 def cli(verbose):
     Config().verbose = verbose
+
 
 def display_manpage(page):
     try:
@@ -142,7 +155,7 @@ def display_manpage(page):
             p = subprocess.Popen(['man', page])
         else:
             p = subprocess.Popen(['man', 'pcocc-' + page])
-    except:
+    except (subprocess.CalledProcessError, OSError):
         raise click.UsageError("No such help topic '" + page + "'\n"
                                "       use 'pcocc help' to list topics")
 
@@ -150,23 +163,29 @@ def display_manpage(page):
     p.communicate()
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-@cli.command(name='help', short_help='Display man pages for a given subcommand')
+
+@cli.command(name='help', short_help='Display man pages'
+                                     ' for a given subcommand')
 @click.argument('command', default='pcocc')
 def pcocc_help(command):
     display_manpage(command)
+
 
 @cli.group(hidden=True)
 def internal():
     """ For internal use """
     pass
 
+
 @cli.group()
 def template():
     """ List and manage templates """
     pass
 
-DEFAULT_SSH_OPTS = [ '-o', 'UserKnownHostsFile=/dev/null', '-o',
-                     'LogLevel=ERROR', '-o', 'StrictHostKeyChecking=no' ]
+
+DEFAULT_SSH_OPTS = ['-o', 'UserKnownHostsFile=/dev/null', '-o',
+                    'LogLevel=ERROR', '-o', 'StrictHostKeyChecking=no']
+
 
 def find_vm_rnat_port(cluster, index, port=22):
     cluster.wait_host_config()
@@ -178,6 +197,7 @@ def find_vm_rnat_port(cluster, index, port=22):
             port))
         sys.exit(-1)
 
+
 def find_vm_ssh_opt(opts, regex, s_opts, v_opts, first_arg_only=True):
     """Parse ssh/scp arguments to find the remote vm hostname"""
     skip = False
@@ -188,8 +208,8 @@ def find_vm_ssh_opt(opts, regex, s_opts, v_opts, first_arg_only=True):
             continue
         if re.match(r'-[{0}]+$'.format(s_opts), opt):
             continue
-        if opt in [ "-"+o for o in v_opts]:
-            skip=True
+        if opt in ["-" + o for o in v_opts]:
+            skip = True
             continue
         match = re.search(regex, opt)
         if match:
@@ -208,12 +228,14 @@ def find_vm_ssh_opt(opts, regex, s_opts, v_opts, first_arg_only=True):
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
-@click.option('-p', '--print_opts', is_flag=True, help='Print remote-viewer options')
+@click.option('-p', '--print_opts', is_flag=True,
+              help='Print remote-viewer options')
 @click.argument('vm', nargs=1, default='vm0')
 def pcocc_display(jobid, jobname, print_opts, vm):
     """Display the graphical output of a VM
 
-    This requires the VM to have a remote display method defined in it's template.
+    This requires the VM to have a remote display method
+    defined in it's template.
 
     \b
     Example usage:
@@ -274,21 +296,22 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts, port):
 
         ssh_opts = list(ssh_opts)
         arg_index, match = find_vm_ssh_opt(ssh_opts, r'(^|@)vm(\d+)',
-                                          '1246AaCfgKkMNnqsTtVvXxYy',
-                                          'bcDeFiLlmOopRSw')
+                                           '1246AaCfgKkMNnqsTtVvXxYy',
+                                           'bcDeFiLlmOopRSw')
 
         vm_index = int(match.group(2))
         remote_host = cluster.vms[vm_index].get_host()
         ssh_port = find_vm_rnat_port(cluster, vm_index, port=port)
         ssh_opts[arg_index] = ssh_opts[arg_index].replace("vm%d"%vm_index,
                                                           remote_host)
-        s_ctl = subprocess.Popen(['ssh', '-p', '%s'%(ssh_port)] +
+        s_ctl = subprocess.Popen(['ssh', '-p', '%s' % (ssh_port)] +
                                  DEFAULT_SSH_OPTS + ssh_opts)
         ret = s_ctl.wait()
         sys.exit(ret)
 
     except PcoccError as err:
         handle_error(err)
+
 
 @cli.command(name='scp',
              context_settings=dict(ignore_unknown_options=True,
@@ -320,20 +343,21 @@ def pcocc_scp(jobid, jobname, user, scp_opts):
 
         scp_opts = list(scp_opts)
         arg_index, match = find_vm_ssh_opt(scp_opts, r'(^|@)vm(\d+):',
-                                          '12346BCpqrv', 'cfiloPS', False)
+                                           '12346BCpqrv', 'cfiloPS', False)
 
         vm_index = int(match.group(2))
         remote_host = cluster.vms[vm_index].get_host()
-        scp_opts[arg_index] = scp_opts[arg_index].replace("vm%d:"%vm_index,
-                                                          remote_host+':')
+        scp_opts[arg_index] = scp_opts[arg_index].replace("vm%d:" % vm_index,
+                                                          remote_host + ':')
         ssh_port = find_vm_rnat_port(cluster, vm_index)
         s_ctl = subprocess.Popen(
-            ['scp', '-P', ssh_port] +  DEFAULT_SSH_OPTS + scp_opts)
+            ['scp', '-P', ssh_port] + DEFAULT_SSH_OPTS + scp_opts)
         ret = s_ctl.wait()
         sys.exit(ret)
 
     except PcoccError as err:
         handle_error(err)
+
 
 @cli.command(name='nc',
              context_settings=dict(ignore_unknown_options=True),
@@ -367,7 +391,7 @@ def pcocc_nc(jobid, jobname, user, nc_opts):
             host_opts = [nc_opts[-1]]
             vm_index = int(re.match(rgxp, host_opts[-1]).group(1))
             vm_port = 31337
-            last_opt = max(0, len(nc_opts) -1)
+            last_opt = max(0, len(nc_opts) - 1)
         elif len(nc_opts) > 1 and re.match(rgxp, nc_opts[-2]):
             vm_index = int(re.match(rgxp, nc_opts[-2]).group(1))
             try:
@@ -375,7 +399,7 @@ def pcocc_nc(jobid, jobname, user, nc_opts):
             except ValueError:
                 raise click.UsageError(
                     'Invalid port number {0}.'.format(nc_opts[-1]))
-            last_opt = max(0, len(nc_opts) -2)
+            last_opt = max(0, len(nc_opts) - 2)
         else:
             raise click.UsageError("Unable to parse vm name")
 
@@ -384,12 +408,13 @@ def pcocc_nc(jobid, jobname, user, nc_opts):
         nc_port = find_vm_rnat_port(cluster, vm_index, vm_port)
         s_ctl = subprocess.Popen(['nc'] +
                                  nc_opts[0:last_opt] +
-                                 [ remote_host, nc_port ])
+                                 [remote_host, nc_port])
         ret = s_ctl.wait()
         sys.exit(ret)
 
     except PcoccError as err:
         handle_error(err)
+
 
 def validate_save_dir(dest_dir, force):
     try:
@@ -412,7 +437,8 @@ def validate_save_dir(dest_dir, force):
         else:
             os.mkdir(dest_dir)
     except OSError as err:
-        raise click.UsageError('invalid destination directory: ' + err.strerror)
+        raise click.UsageError('invalid destination'
+                               ' directory: ' + err.strerror)
 
     return dest_dir
 
@@ -437,6 +463,7 @@ def vm_name_to_index(name):
 
     return int(match.group(1))
 
+
 @cli.command(name='save',
              short_help='Save the disk of a VM')
 @click.option('-j', '--jobid', type=int,
@@ -446,7 +473,8 @@ def vm_name_to_index(name):
 @click.option('-d', '--dest',
               help='Create a new image instead of a new revision')
 @click.option('-s', '--safe',
-              help='Wait indefinitely for the Qemu agent to freeze filesystems',
+              help='Wait indefinitely for the Qemu'
+                   ' agent to freeze filesystems',
               is_flag=True)
 @click.option('--full',
               help='Save a full image in a standalone layer',
@@ -466,11 +494,10 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
 
     """
     try:
-        config  = load_config(jobid, jobname, default_batchname='pcocc')
+        config = load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
-        index   = vm_name_to_index(vm)
+        index = vm_name_to_index(vm)
         vm = cluster.vms[index]
-
 
         drives = vm.block_drives
         if not drives:
@@ -503,7 +530,6 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
             # Store in the current image
             dest = drive['image']
 
-
         if not dest:
             raise PcoccError('No default target image to save VM main drive. '
                              'Please use specify one with --dest')
@@ -515,7 +541,7 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
                 save_path = os.path.join(dest, 'image')
             else:
                 save_path = os.path.join(vm.image_dir,
-                                         'image-rev%d'%(vm.revision + 1))
+                                         'image-rev%d' % (vm.revision + 1))
 
         if safe:
             freeze_opt = Hypervisor.VM_FREEZE_OPT.YES
@@ -537,20 +563,24 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
                          False,
                          'Updating repository...')
 
-
         ret.raise_errors()
 
         if drive['type'] == DRIVE_IMAGE_TYPE.REPO:
             if not full:
                 if new_dest:
-                    # For incremental save into a new image, start by copying the previous
-                    # image to the new one so that we can add the new layer on top later
+                    # For incremental save into a new image,
+                    # start by copying the previous
+                    # image to the new one so that we can add
+                    # the new layer on top later
                     config.images.copy_image(drive['image'], dest)
 
                 new_image = config.images.add_revision_layer(dest, save_path)
             else:
-                new_image = config.images.add_revision_full("vm", dest, save_path)
-            click.secho('vm{0} disk succesfully saved to {1} revision {2}'.format(
+                new_image = config.images.add_revision_full(ImageType.vm,
+                                                            dest,
+                                                            save_path)
+            click.secho('vm{0} disk succesfully'
+                        ' saved to {1} revision {2}'.format(
                             index,
                             dest,
                             new_image['revision']
@@ -560,7 +590,7 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
             click.secho('vm{0} disk succesfully saved to {1}'.format(
                 index,
                 save_path),
-                        fg='green')
+                fg='green')
 
     except PcoccError as err:
         handle_error(err)
@@ -594,14 +624,13 @@ def pcocc_reset(jobid, jobname,  vms, cluster):
         if not ret.errors:
             click.secho("{} VMs reset in {:.2f}s".format(
                 len(index), time.time() - start_time),
-                        fg='green', err=True)
+                fg='green', err=True)
 
         # Return -1 if there is any error
         sys.exit(-int(bool(ret.errors)))
 
     except PcoccError as err:
         handle_error(err)
-
 
 
 @cli.command(name='monitor-cmd',
@@ -666,7 +695,7 @@ def pcocc_dump(jobid, jobname,  vm, dumpfile, cluster):
         ret = AgentCommand.dump(cluster, index, path=dumpfile)
 
         last = 0
-        with click.progressbar(length = 100, label = 'Dumping memory') as bar:
+        with click.progressbar(length=100, label='Dumping memory') as bar:
             for k, r in ret.iterate(yield_results=True, yield_errors=True):
                 if isinstance(r, Exception):
                     click.echo('\nvm{0}: {1}'.format(k, r), err=True)
@@ -681,7 +710,7 @@ def pcocc_dump(jobid, jobname,  vm, dumpfile, cluster):
 
         click.secho("{} VMs dumped in {:.2f}s".format(
             len(index), time.time() - start_time),
-                    fg='green', err=True)
+            fg='green', err=True)
 
     except PcoccError as err:
         handle_error(err)
@@ -720,9 +749,10 @@ def pcocc_ckpt(jobid, jobname, force, ckpt_dir):
 
         # Try to freeze
         click.secho('Preparing checkpoint...')
-        ret = AgentCommand.freeze(cluster, CLIRangeSet("all", cluster), timeout=5)
+        ret = AgentCommand.freeze(cluster,
+                                  CLIRangeSet("all", cluster),
+                                  timeout=5)
         ret.iterate_all()
-
 
         save_drive_list = []
         for vm in cluster.vms:
@@ -748,38 +778,51 @@ def pcocc_ckpt(jobid, jobname, force, ckpt_dir):
         ret.raise_errors()
 
         click.secho('Cluster state succesfully checkpointed '
-                    'to %s'%(dest_dir), fg='green')
+                    'to %s' % (dest_dir), fg='green')
 
     except PcoccError as err:
         handle_error(err)
 
 
+def make_raw_terminal(self_stdin):
+    # Raw terminal
+    old = termios.tcgetattr(self_stdin)
+    new = list(old)
+    new[3] = new[3] & ~termios.ECHO & ~termios.ISIG & ~termios.ICANON
+    termios.tcsetattr(self_stdin, termios.TCSANOW,
+                      new)
+    return old
+
+
+def restore_terminal(old):
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW,
+                      old)
+
+
 def ckpt_memory(cluster, vm_indices, path, use_suffix, final_message):
     ret = AgentCommand.checkpoint(cluster,
-                                 RangeSet(vm_indices),
-                                 path=path,
-                                 vm_suffix_path=use_suffix)
+                                  RangeSet(vm_indices),
+                                  path=path,
+                                  vm_suffix_path=use_suffix)
 
     running_count = len(vm_indices)
 
     vm_tx = [0] * len(cluster.vms)
     vm_tot = [0] * len(cluster.vms)
 
-
     show_eta = False
     show_percent = False
     item_show_func = (lambda x: ('({:.2f}MB / {:.2f}MB)'.format(
-                float(x[0]) / 1024 / 1024,
-                float(x[1]) / 1024 / 1024 )) if x
-                      else '')
+        float(x[0]) / 1024 / 1024,
+        float(x[1]) / 1024 / 1024)) if x
+        else '')
 
-    with click.progressbar(length = 1000000,
-                           label = 'Stopping VMs',
-                           show_eta = show_eta,
-                           show_percent = show_percent,
-                           bar_template = '%(label)s %(info)s',
-                           item_show_func = item_show_func,
-                           ) as bar:
+    with click.progressbar(length=1000000,
+                           label='Stopping VMs',
+                           show_eta=show_eta,
+                           show_percent=show_percent,
+                           bar_template='%(label)s %(info)s',
+                           item_show_func=item_show_func) as bar:
 
         for k, r in ret.iterate(yield_results=True, yield_errors=True):
             if isinstance(r, Exception):
@@ -808,30 +851,31 @@ def ckpt_memory(cluster, vm_indices, path, use_suffix, final_message):
 
     return ret
 
+
 def save_drive(cluster, vm_indices, drives, paths, save_mode, freeze_mode,
                use_suffix, stop_vm, final_message):
 
     ret = AgentCommand.save(cluster,
                             RangeSet(vm_indices),
-                            drives = drives,
-                            paths  = paths,
-                            mode   = save_mode,
-                            freeze = freeze_mode,
-                            vm_suffix_path = use_suffix)
+                            drives=drives,
+                            paths=paths,
+                            mode=save_mode,
+                            freeze=freeze_mode,
+                            vm_suffix_path=use_suffix)
 
     if save_mode == Hypervisor.DRIVE_SAVE_MODE.FULL and len(vm_indices) == 1:
         show_eta = True
         show_percent = True
         item_show_func = (lambda x: ('({:.2f}MB / {:.2f}MB)'.format(
-                    float(x[0]) / 1024 / 1024,
-                    float(x[1]) / 1024 / 1024) ) if x
-                          else '')
+            float(x[0]) / 1024 / 1024,
+            float(x[1]) / 1024 / 1024)) if x
+            else '')
     else:
         show_eta = False
         show_percent = False
         item_show_func = (lambda x: ('({:.2f}MB)'.format(
-                    float(x[0]) / 1024 / 1024)) if x
-                          else '')
+            float(x[0]) / 1024 / 1024)) if x
+            else '')
 
     running_count = len(vm_indices)
     vm_tx = [0] * len(cluster.vms)
@@ -848,13 +892,12 @@ def save_drive(cluster, vm_indices, drives, paths, save_mode, freeze_mode,
     else:
         stop_count = 0
 
-    with click.progressbar(length = 1000000,
-                           label = initial_message,
-                           show_eta = show_eta,
-                           show_percent = show_percent,
-                           bar_template = '%(label)s %(info)s',
-                           item_show_func = item_show_func,
-                           ) as bar:
+    with click.progressbar(length=1000000,
+                           label=initial_message,
+                           show_eta=show_eta,
+                           show_percent=show_percent,
+                           bar_template='%(label)s %(info)s',
+                           item_show_func=item_show_func) as bar:
 
         for k, r in ret.iterate(yield_results=True, yield_errors=True):
             if isinstance(r, Exception):
@@ -863,7 +906,8 @@ def save_drive(cluster, vm_indices, drives, paths, save_mode, freeze_mode,
 
             if r.status == 'freeze-failed':
                 click.secho('\nvm{0}: failed to freeze filesystems, '
-                            'data could be corrupted if filesystems are in use'.format(k),
+                            'data could be corrupted if filesystems'
+                            ' are in use'.format(k),
                             fg='red',
                             err=True)
                 freeze_count = freeze_count - 1
@@ -911,6 +955,7 @@ def save_drive(cluster, vm_indices, drives, paths, save_mode, freeze_mode,
 
     return ret
 
+
 @cli.command(name='console',
              short_help='Connect to a VM console')
 @click.option('-j', '--jobid', type=int,
@@ -956,17 +1001,12 @@ def pcocc_console(jobid, jobname, log, vm):
                 raise
             sys.exit(0)
 
-
         socket_path = config.batch.get_vm_state_path(vm.rank,
                                                      'pcocc_console_socket')
         self_stdin = sys.stdin.fileno()
 
         # Raw terminal
-        old = termios.tcgetattr(self_stdin)
-        new = list(old)
-        new[3] = new[3] & ~termios.ECHO & ~termios.ISIG & ~termios.ICANON
-        termios.tcsetattr(self_stdin, termios.TCSANOW,
-                          new)
+        old = Run.make_raw_terminal(self_stdin)
 
         s_ctl = subprocess.Popen(
             shlex.split('ssh %s nc -U %s ' % (remote_host, socket_path)),
@@ -988,7 +1028,8 @@ def pcocc_console(jobid, jobname, log, vm):
             if sys.stdin in rdy[0]:
                 buf = os.read(self_stdin, 1024)
                 if struct.unpack('b', buf[0:1])[0] == 3:
-                    if (datetime.datetime.now() - last_int).total_seconds() > 2:
+                    if (datetime.datetime.now() -
+                            last_int).total_seconds() > 2:
                         last_int = datetime.datetime.now()
                         int_count = 1
                     else:
@@ -1001,8 +1042,7 @@ def pcocc_console(jobid, jobname, log, vm):
                 s_ctl.stdin.write(buf)
 
         # Restore terminal now to let user interrupt the wait if needed
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW,
-                          old)
+        Run.restore_terminal(old)
         s_ctl.terminate()
         s_ctl.wait()
 
@@ -1010,7 +1050,7 @@ def pcocc_console(jobid, jobname, log, vm):
         handle_error(err)
 
 
-batch_alloc_doc=""" Instantiate or restore a virtual cluster.
+batch_alloc_doc = """ Instantiate or restore a virtual cluster.
 A cluster definition is expressed as a list of templates and
 counts e.g.: tpl1:6,tpl2:2 will instantiate a cluster with 6
 VMs from template tpl1 and 2 VMs from template tpl2
@@ -1019,7 +1059,7 @@ Batch options will be passed on to the underlying
 batch manager.
 """
 
-alloc_doc="""
+alloc_doc = """
 In interactive mode (pcocc alloc), a shell is launched which allows to
 easily interact with the created cluster as all pcocc commands
 launched from the shell will implicitely target this cluster. The
@@ -1031,11 +1071,12 @@ Example usage:
        pcocc alloc -c 4 --qos=test tpl1:6,tpl2:2
 """
 
-batch_doc="""
+batch_doc = """
 \b
 Example usage:
        pcocc batch -c 4 --qos=test tpl1:6,tpl2:2
 """
+
 
 def gen_alloc_script_opt(alloc_script):
     if alloc_script:
@@ -1050,11 +1091,13 @@ def gen_user_data_opt(user_data):
     else:
         return []
 
+
 def gen_ckpt_opt(restart_ckpt):
     if restart_ckpt:
         return ['-r', restart_ckpt]
     else:
         return []
+
 
 def get_license_opts(cluster):
     license_list = cluster.get_license_list()
@@ -1062,6 +1105,7 @@ def get_license_opts(cluster):
         return ['-L', ','.join(license_list)]
     else:
         return []
+
 
 @cli.command(name='batch',
              context_settings=dict(ignore_unknown_options=True),
@@ -1077,17 +1121,42 @@ def get_license_opts(cluster):
               help='Override the user-data property of the templates')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
-@docstring(batch_alloc_doc+batch_doc)
-def pcocc_batch(restart_ckpt, batch_script, host_script, user_data, batch_options,
+@docstring(batch_alloc_doc + batch_doc)
+def pcocc_batch(restart_ckpt,
+                batch_script,
+                host_script,
+                user_data,
+                batch_options,
                 cluster_definition):
+    # Hook to enable calling from other functions
+    return _pcocc_batch(restart_ckpt,
+                        batch_script,
+                        host_script,
+                        user_data,
+                        batch_options,
+                        cluster_definition)
 
+
+def _pcocc_batch(restart_ckpt,
+                 batch_script,
+                 host_script,
+                 user_data,
+                 batch_options,
+                 cluster_definition,
+                 docker=False,
+                 mirror_user=False,
+                 config=None):
     try:
-        config = load_config(process_type=ProcessType.OTHER)
+        # pcocc docker alloc may load the config beforehand
+        if config is None:
+            config = load_config(process_type=ProcessType.OTHER)
 
         cluster_definition = ascii(cluster_definition)
         cluster = Cluster(cluster_definition)
-        batch_options=list(batch_options)
+        batch_options = list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
+        docker_opt = ["-d"] if docker else []
+        mirror_opt = ["-m"] if mirror_user else []
         user_data_opt = gen_user_data_opt(user_data)
 
         (wrpfile, wrpname) = tempfile.mkstemp()
@@ -1098,62 +1167,63 @@ def pcocc_batch(restart_ckpt, batch_script, host_script, user_data, batch_option
         else:
             launcher_opt = ['-w']
 
-        wrpfile.write(
-"""#!/bin/bash
+        wrpfile.write("""
+#!/bin/bash
 #SBATCH -o pcocc_%j.out
 #SBATCH -e pcocc_%j.err
 """)
         if batch_script:
             launcher_opt += ['-s', '"$TEMP_BATCH_SCRIPT"']
-            wrpfile.write(
-"""
+            wrpfile.write("""
 TEMP_BATCH_SCRIPT="/tmp/pcocc.batch.$$"
 cat <<"PCOCC_BATCH_SCRIPT_EOF" >> "${TEMP_BATCH_SCRIPT}"
 """)
             wrpfile.write(batch_script.read())
-            wrpfile.write(
-"""
+            wrpfile.write("""
 PCOCC_BATCH_SCRIPT_EOF
 chmod u+x "$TEMP_BATCH_SCRIPT"
 """)
 
         if host_script:
             launcher_opt += ['-E', '"$TEMP_HOST_SCRIPT"']
-            wrpfile.write(
-"""
+            wrpfile.write("""
 TEMP_HOST_SCRIPT="/tmp/pcocc.host.$$"
 cat <<"PCOCC_HOST_SCRIPT_EOF" >> "${TEMP_HOST_SCRIPT}"
 """)
             wrpfile.write(host_script.read())
-            wrpfile.write(
-"""
+            wrpfile.write("""
 PCOCC_HOST_SCRIPT_EOF
 chmod u+x "$TEMP_HOST_SCRIPT"
 """)
 
-        wrpfile.write(
-"""
-PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s &
+        wrpfile.write("""
+PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s %s %s &
 wait
 rm "$TEMP_BATCH_SCRIPT" 2>/dev/null
 rm "$TEMP_HOST_SCRIPT" 2>/dev/null
-""" % (' '.join(build_verbose_opt()), ' '.join(launcher_opt),
-       ' '.join(ckpt_opt), ' '.join(user_data_opt), cluster_definition))
+""" % (' '.join(build_verbose_opt()),
+            ' '.join(launcher_opt),
+            ' '.join(ckpt_opt),
+            ' '.join(docker_opt),
+            ' '.join(mirror_opt),
+            ' '.join(user_data_opt),
+            cluster_definition))
 
         wrpfile.close()
         ret = config.batch.batch(cluster,
                                  batch_options +
                                  get_license_opts(cluster) +
                                  ['-n', '%d' % (len(cluster.vms))],
-                                  wrpname)
+                                 wrpname)
         sys.exit(ret)
 
     except PcoccError as err:
         handle_error(err)
 
+
 def build_verbose_opt():
     if Config().verbose > 0:
-        return [ '-' + 'v' * Config().verbose ]
+        return ['-' + 'v' * Config().verbose]
     else:
         return []
 
@@ -1170,22 +1240,50 @@ def build_verbose_opt():
               help='Override the user-data property of the templates')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
-@docstring(batch_alloc_doc+alloc_doc)
-def pcocc_alloc(restart_ckpt, alloc_script, user_data, batch_options, cluster_definition):
-    try:
-        config = load_config(process_type = ProcessType.OTHER)
+@docstring(batch_alloc_doc + alloc_doc)
+def pcocc_alloc(restart_ckpt,
+                alloc_script,
+                user_data,
+                batch_options,
+                cluster_definition):
+    # Hook to enable calling from other functions
+    return _pcocc_alloc(restart_ckpt,
+                        alloc_script,
+                        user_data,
+                        batch_options,
+                        cluster_definition)
 
-        cluster_definition=ascii(cluster_definition)
+
+def _pcocc_alloc(restart_ckpt,
+                 alloc_script,
+                 user_data,
+                 batch_options,
+                 cluster_definition,
+                 docker=False,
+                 mirror_user=False,
+                 config=None):
+    try:
+        # In 'pcocc docker alloc' you need the config prior to the allocation
+        # in this case if the config is loaded a second time pcocc raises
+        # a duplicate template error. Overloading the config is then a way
+        # to circumvent this problem
+        if config is None:
+            config = load_config(process_type=ProcessType.OTHER)
+
+        cluster_definition = ascii(cluster_definition)
         cluster = Cluster(cluster_definition)
-        batch_options=list(batch_options)
+        batch_options = list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
+        docker_opt = ["-d"] if docker else []
+        mirror_opt = ["-m"] if mirror_user else []
         alloc_opt = gen_alloc_script_opt(alloc_script)
         user_data_opt = gen_user_data_opt(user_data)
         ret = config.batch.alloc(cluster,
                                  batch_options + get_license_opts(cluster) +
                                  ['-n', '%d' % (len(cluster.vms))],
-                                  ['pcocc'] + build_verbose_opt() +
-                                 [ 'internal', 'launcher'] + alloc_opt + user_data_opt +
+                                 ['pcocc'] + build_verbose_opt() +
+                                 ['internal', 'launcher'] + docker_opt +
+                                 mirror_opt + alloc_opt + user_data_opt +
                                  ckpt_opt + [cluster_definition])
 
     except PcoccError as err:
@@ -1194,10 +1292,9 @@ def pcocc_alloc(restart_ckpt, alloc_script, user_data, batch_options, cluster_de
     logging.debug("All done")
     sys.exit(ret)
 
-
 @internal.command(name='launcher',
-             context_settings=dict(ignore_unknown_options=True),
-             short_help="For internal use")
+                  context_settings=dict(ignore_unknown_options=True),
+                  short_help="For internal use")
 @click.option('-r', '--restart-ckpt',
               help='Restart cluster from the specified checkpoint')
 @click.option('-w', '--wait', is_flag=True,
@@ -1208,8 +1305,19 @@ def pcocc_alloc(restart_ckpt, alloc_script, user_data, batch_options, cluster_de
               help='Run a script on the allocation node and exit')
 @click.option('--user-data', type=click.Path(exists=True),
               help='Override the user-data property of the templates')
+@click.option('-d', '--docker', is_flag=True,
+              help='Instruct to setup the docker daemon environment')
+@click.option('-m', '--mirror-user', is_flag=True,
+              help='Mirror user in allocated VMs')
 @click.argument('cluster-definition', nargs=1)
-def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_definition):
+def pcocc_launcher(restart_ckpt,
+                   wait,
+                   script,
+                   alloc_script,
+                   user_data,
+                   docker,
+                   mirror_user,
+                   cluster_definition):
     config = load_config(process_type=ProcessType.LAUNCHER)
     batch = config.batch
 
@@ -1226,9 +1334,9 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_
     batch.populate_env()
 
     if restart_ckpt:
-        ckpt_opt=['-r', restart_ckpt]
+        ckpt_opt = ['-r', restart_ckpt]
     else:
-        ckpt_opt=[]
+        ckpt_opt = []
 
     # TODO: provide a way for the user to plugin his own pre-run scripts here
     os.mkdir(os.path.join(batch.cluster_state_dir, 'slurm'))
@@ -1243,7 +1351,7 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_
                        ['-Q', '-X', '--resv-port'],
                        ['pcocc'] +
                        build_verbose_opt() +
-                       [ 'internal', 'run'] + gen_user_data_opt(user_data) +
+                       ['internal', 'run'] + gen_user_data_opt(user_data) +
                        ckpt_opt)
     try:
         cluster.wait_host_config()
@@ -1256,16 +1364,38 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_
 
     logging.debug("Hypervisors are running")
 
-
     batch.write_key("cluster/user", "definition", cluster_definition)
 
     batch.write_key("cluster/user", "ca_cert", UserCA.new().dump_yaml())
 
+    if docker:
+        print("Waiting for docker VM to start ...")
+        # We do the setup here to avoid any race when launching
+        # a docker shell agains a docker alloc
+        docker = PcoccDocker()
+        docker.apply_mounts(cluster, CLIRangeSet("all", cluster))
+        # Now wait for Docker to start
+        docker.wait_for_docker_start(cluster,
+                                     CLIRangeSet("all", cluster),
+                                     timeout=DEFAULT_AGENT_TIMEOUT)
+
+    if mirror_user:
+        runner = Run.VirtualMachine(cluster)
+        # We only insert the user and groups
+        runner.mirror(adduser=True,
+                      mounthome=False,
+                      rootfs=False)
+
     term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
 
-    monitor_list = [ s_pjob.pid ]
+    monitor_list = [s_pjob.pid]
 
-    if script:
+    if docker:
+        docker_path = Config().containers.config.docker_path
+        s_exec = docker.shell(cluster,
+                              docker_path,
+                              script=alloc_script)
+    elif script:
         if restart_ckpt:
             s_exec = subprocess.Popen(["pcocc", "exec"])
         else:
@@ -1277,7 +1407,8 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_
         s_exec = subprocess.Popen(shlex.split(alloc_script))
     else:
         shell_env = os.environ
-        shell_env['PROMPT_COMMAND']='echo -n "(pcocc/%d) "' % (batch.batchid)
+        shell_env['PROMPT_COMMAND'] = 'echo -n "(pcocc/%d) "' % (batch.batchid)
+        shell_env['PCOCC_INSIDE_ALLOC'] = "1"
         shell = os.getenv('SHELL', default='bash')
         s_exec = subprocess.Popen(shell, env=shell_env)
 
@@ -1333,7 +1464,7 @@ def wait_timeout(s_proc):
         pass
 
 @internal.command(name='pkeyd',
-             short_help="For internal use")
+                  short_help="For internal use")
 def pcocc_pkeyd():
     try:
         config = load_config(process_type=ProcessType.OTHER)
@@ -1352,7 +1483,7 @@ def clean_exit(sig, frame):
     sys.exit(0)
 
 @internal.command(name='run',
-             short_help="For internal use")
+                  short_help="For internal use")
 @click.option('-r', '--restart-ckpt',
               help='Restart cluster from the specified checkpoint')
 @click.option('--user-data', type=click.Path(exists=True),
@@ -1375,6 +1506,7 @@ def pcocc_internal_run(restart_ckpt, user_data):
     except PcoccError as err:
         handle_error(err)
 
+
 @cli.command(name='exec',
              short_help="Execute commands through the guest agent",
              context_settings=dict(ignore_unknown_options=True,
@@ -1388,7 +1520,8 @@ def pcocc_internal_run(restart_ckpt, user_data):
 @click.option('-u', '--user',
               help='User id to use to execute the command')
 @click.option('-s', '--script', is_flag=True,
-              help='Cmd is a shell script to be copied to /tmp and executed in place')
+              help='Cmd is a shell script to be copied'
+                   ' to /tmp and executed in place')
 @click.argument('cmd', nargs=-1, required=False, type=click.UNPROCESSED)
 def pcocc_exec(index, jobid, jobname, user, script, cmd):
     """Execute commands through the guest agent
@@ -1409,7 +1542,7 @@ def pcocc_exec(index, jobid, jobname, user, script, cmd):
         if script:
             basename = os.path.basename(cmd[0])
             cluster.vms[index].put_file(cmd[0],
-                                    '/tmp/%s' % basename)
+                                        '/tmp/%s' % basename)
             cmd = ['bash', '/tmp/%s' % basename]
 
         ret = cluster.exec_cmd([index], cmd, user)
@@ -1419,8 +1552,11 @@ def pcocc_exec(index, jobid, jobname, user, script, cmd):
         handle_error(err)
 
 @internal.command(name='setup',
-             short_help="For internal use")
-@click.argument('action', type=click.Choice(['init', 'cleanup', 'create', 'delete']))
+                  short_help="For internal use")
+@click.argument('action', type=click.Choice(['init',
+                                             'cleanup',
+                                             'create',
+                                             'delete']))
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster (only valid for deletion)')
 @click.option('--nolock', is_flag=True,
@@ -1462,12 +1598,11 @@ def pcocc_setup(action, jobid, nolock, force):
                           resource_only=True)
         cluster.free_node_resources()
 
-
     if not nolock:
         config.release_node()
 
 @template.command(name='list',
-             short_help="List all templates")
+                  short_help="List all templates")
 def pcocc_tpl_list():
     tbl = TextTable("%name %desc %res %image")
 
@@ -1488,7 +1623,7 @@ def pcocc_tpl_list():
                     tbl.append({'name': name,
                                 'image': tpl.image,
                                 'res': tpl.rset.name,
-                    'desc': tpl.description})
+                                'desc': tpl.description})
             print tbl
             print
             tbl.purge()
@@ -1498,7 +1633,7 @@ def pcocc_tpl_list():
 
 
 @template.command(name='show',
-             short_help="Show details for a template")
+                  short_help="Show details for a template")
 @click.argument('template', nargs=1)
 def pcocc_tpl_show(template):
     try:
@@ -1514,11 +1649,13 @@ def pcocc_tpl_show(template):
     except PcoccError as err:
         handle_error(err)
 
+
 class CLIRangeSet(RangeSet):
     def __init__(self, indices=None, cluster=None):
         try:
             if indices == "all":
-                super(CLIRangeSet, self).__init__("0-{}".format(cluster.vm_count() - 1))
+                super(CLIRangeSet, self).__init__(
+                    "0-{}".format(cluster.vm_count() - 1))
             elif indices is not None:
                 super(CLIRangeSet, self).__init__(ascii(indices))
             else:
@@ -1527,128 +1664,54 @@ class CLIRangeSet(RangeSet):
             raise PcoccError(str(e))
 
 
-def writefile(cluster, indices, source, destination, timeout=DEFAULT_AGENT_TIMEOUT):
-    try:
-        with open(source) as f:
-            source_data = f.read()
-        perms = os.stat(source)[stat.ST_MODE]
-    except IOError as err:
-        raise PcoccError("unable to read source file for copy: {}".format(err))
+def per_cluster_cli(allows_user, allow_no_alloc=False):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            if (allow_no_alloc and
+                    # Are we in an alloc shell
+                    # (set in poccc internal launcher) ?
+                    not os.getenv("PCOCC_INSIDE_ALLOC") and
+                    # Is a jobid passed in arg ?
+                    not kwargs["jobid"] and
+                    # Is a jobname passed in arg ?
+                    not kwargs["jobname"]):
+                load_config(None, None, process_type=ProcessType.OTHER)
+                kwargs["cluster"] = None
+                return func(*args, **kwargs)
+            elif allows_user:
+                load_config(kwargs["jobid"],
+                            kwargs["jobname"],
+                            default_batchname='pcocc',
+                            batchuser=kwargs["user"])
+            else:
+                load_config(kwargs["jobid"],
+                            kwargs["jobname"],
+                            default_batchname='pcocc')
 
-    start_time = time.time()
-    ret = AgentCommand.writefile(cluster, indices,
-                                 path=destination, data=source_data,
-                                 perms=perms, append=False, timeout=timeout)
-    for k, e in ret.iterate():
-        click.secho("vm{}: {}".format(k, e), fg='red', err=True)
+            try:
+                kwargs["cluster"] = load_batch_cluster()
+                return func(*args, **kwargs)
+            except PcoccError as err:
+                handle_error(err)
 
-    click.secho("{} VMs answered in {:.2f}s".format(
-        len(indices), time.time() - start_time),
-                fg='green', err=True)
+        return wrapper
+    return decorator
 
-    ret.raise_errors()
 
 def display_vmagent_error(index, err):
     click.secho("vm{}: {}".format(index, err), fg='red', err=True)
 
-def parallel_execve(cluster, indices, cmd, env, user, display_errors=True,
-                    timeout=DEFAULT_AGENT_TIMEOUT):
-    # Launch tasks on rangeset
-    exec_id = random.randint(0, 2**63-1)
-    ret = AgentCommand.execve(cluster, RangeSet(indices), filename=cmd[0],
-                              exec_id=exec_id, args=cmd[1:],
-                              env=env, username=user, timeout=timeout)
-
-    # Check if some VMs had errors during launch
-    for index, err in ret.iterate():
-        if isinstance(err, PcoccError):
-            if display_errors:
-                display_vmagent_error(index, err)
-        else:
-            raise err
-
-    return ret, exec_id
-
-def filter_vms(indices, result):
-    return indices.difference(RangeSet(result.errors.keys()))
-
-def collect_output_bg(result_iterator, display_results,
-                      display_errors):
-    def collector_th():
-        exit_status = 0
-        try:
-            for key, msg in result_iterator.iterate(yield_results=display_results,
-                                                    keep_results=(not display_results)):
-                if isinstance(msg, agent_pb2.IOMessage):
-                    if msg.kind == agent_pb2.IOMessage.stdout:
-                        sys.stdout.write(msg.data)
-                    else:
-                        sys.stderr.write(msg.data)
-                elif isinstance(msg, agent_pb2.ExitStatus):
-                    logging.info("Received Exit status")
-                    if msg.status != 0 and display_errors:
-                        display_vmagent_error(key, "exited with exit code {}".format(msg.status))
-                    if msg.status > exit_status:
-                        exit_status = msg.status
-                elif isinstance(msg, agent_pb2.DetachResult):
-                    logging.info("Agent asked us to detach")
-                else:
-                    # We ignore other message types for now
-                    logging.debug("Ignoring message of type %s from %d", type(msg), key)
-
-            logging.debug("Last message received from output stream: "
-                          "signalling main thread")
-        except Exception as err:
-            if display_errors:
-                click.secho(str(err), fg='red', err=True)
-            if not exit_status:
-                exit_status = -1
-
-        #Make sure the RPC is terminated in case we exited early due
-        #to some error
-        result_iterator.cancel()
-        result_iterator.exit_status = exit_status
-
-    output_th = threading.Thread(None, collector_th, None)
-    output_th.start()
-    return output_th
-
-def multiprocess_call(cluster, indices, cmd, env, user, timeout=DEFAULT_AGENT_TIMEOUT):
-    # Launch tasks on rangeset
-    exec_ret, exec_id = parallel_execve(cluster, indices, cmd, env, user, timeout=timeout)
-
-    # Continue only on VMs on which the exec succeeded
-    good_indices = filter_vms(indices, exec_ret)
-    if not good_indices:
-        return -1
-
-    return multiprocess_attach(cluster, good_indices, exec_id, exec_ret.errors)
-
-def multiprocess_attach(cluster, indices, exec_id, exec_errors = None):
-    # Launch streaming "attach" RPC
-    attach_ret = AgentCommand.attach_stdin(cluster, indices, exec_id)
-    # Collect in background thread
-    output_th = collect_output_bg(attach_ret, display_results=True,
-                                display_errors=True)
-    # Wait for collection output (use a pseudo infinite timeout to not block signals)
-    output_th.join(2**32-1)
-    logging.info("Output thread joined\n")
-    exit_code = attach_ret.exit_status
-
-    if  exec_errors and not exit_code:
-        return -1
-    else:
-        return exit_code
 
 @cli.group(hidden=True)
 def agent():
     """ Manage VMs through the pcocc agent """
     pass
 
+
 @agent.command(name='run',
-             short_help="Execute commands in VMs",
-             context_settings=dict(ignore_unknown_options=True,
-                                   allow_interspersed_args=False))
+               short_help="Execute commands in VMs",
+               context_settings=dict(ignore_unknown_options=True,
+                                     allow_interspersed_args=False))
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -1656,54 +1719,80 @@ def agent():
 @click.option('-u', '--user',
               help='User name to use to execute the command')
 @click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on which the command should be executed')
+              help='Rangeset of VM indices on which'
+                   ' the command should be executed')
 @click.option('-s', '--script', is_flag=True,
-              help='Cmd is a shell script to be copied to /tmp and executed in place')
+              help='Cmd is a shell script to be copied'
+                   ' to /tmp and executed in place')
 @click.option('-m', '--mirror-env', is_flag=True,
               help='Propagate local environment variables')
 @click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
               help='Maximum time to wait for an answer from each VM')
+@click.option('--pty',  is_flag=True, default=False,
+              help='Run the command in a PTY')
 @click.argument('cmd', nargs=-1, required=True, type=click.UNPROCESSED)
 @per_cluster_cli(False)
-def pcocc_run(jobid, jobname, user, indices, script, mirror_env, cmd, timeout, cluster):
-    #FIXME: handle pty option once we have agent support
-    vms = CLIRangeSet(indices, cluster)
+def pcocc_run(jobid,
+              jobname,
+              user,
+              indices,
+              script,
+              mirror_env,
+              cmd,
+              timeout,
+              pty,
+              cluster):
+    try:
+        rangeset = CLIRangeSet(indices, cluster)
+        # This is where we pass the launch config
+        runner = Run.VirtualMachine(cluster, rangeset, timeout)
 
-    if not user:
-        user = pwd.getpwuid(os.getuid()).pw_name
+        if not user:
+            user = pwd.getpwuid(os.getuid()).pw_name
 
-    cmd = list(cmd)
-    if script:
-        basename = os.path.basename(cmd[0])
-        dest = os.path.join('/tmp', basename)
-        writefile(cluster, vms, cmd[0], dest, timeout)
-        cmd = ['bash', dest]
+        runner.set_user(user)
 
-    env = []
-    if mirror_env:
-        for e, v in os.environ.iteritems():
-            env.append("{}={}".format(e,v))
+        cmd = list(cmd)
 
-    exit_code = multiprocess_call(cluster, vms, cmd, env, user, timeout)
+        if script:
+            runner.set_script(cmd[0])
+        else:
+            runner.set_argv(cmd)
 
-    sys.exit(exit_code)
+        if mirror_env:
+            for e, v in os.environ.iteritems():
+                runner.set_env_var(e, v)
+
+        if pty:
+            runner.set_pty()
+
+        runner.run()
+    except PcoccError as err:
+        handle_error(err)
+
 
 @agent.command(name='attach',
-             short_help="Attach to a running command",
-             context_settings=dict(ignore_unknown_options=True,
-                                   allow_interspersed_args=False))
+               short_help="Attach to a running command",
+               context_settings=dict(ignore_unknown_options=True,
+                                     allow_interspersed_args=False))
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on which the command should be executed')
+              help='Rangeset of VM indices on which'
+                   ' the command should be executed')
 @click.argument('exec_id', nargs=1, type=int, required=True)
 @per_cluster_cli(False)
 def pcocc_attach(jobid, jobname, indices, exec_id, cluster):
-    vms = CLIRangeSet(indices, cluster)
-    exit_code = multiprocess_attach(cluster, vms, exec_id)
-    sys.exit(exit_code)
+    try:
+        rangeset = CLIRangeSet(indices, cluster)
+        # This is where we pass the launch config
+        runner = Run.VirtualMachine(cluster, rangeset)
+        exit_code = runner.multiprocess_attach(rangeset, exec_id)
+        sys.exit(exit_code)
+    except PcoccError as err:
+        handle_error(err)
 
 
 @agent.command(name='writefile', short_help="Copy a file in VMs")
@@ -1712,24 +1801,31 @@ def pcocc_attach(jobid, jobname, indices, exec_id, cluster):
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on which the command should be executed')
+              help='Rangeset of VM indices on which'
+                   ' the command should be executed')
 @click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
               help='Maximum time to wait for an answer from each VM')
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 @per_cluster_cli(False)
 def pcocc_writefile(jobid, jobname, indices, source, dest, timeout, cluster):
-    rangeset = CLIRangeSet(indices, cluster)
-    writefile(cluster, rangeset, source, dest, timeout)
+    try:
+        rangeset = CLIRangeSet(indices, cluster)
+        runner = Run.VirtualMachine(cluster)
+        runner.writefile(rangeset, source, dest, timeout)
+    except PcoccError as err:
+        handle_error(err)
+
 
 @agent.command(name='freeze',
-             short_help="Freeze the VM agents")
+               short_help="Freeze the VM agents")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on which the command should be executed')
+              help='Rangeset of VM indices on which'
+                   ' the command should be executed')
 @click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
               help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
@@ -1744,19 +1840,20 @@ def pcocc_freeze(jobid, jobname, indices, timeout, cluster):
     if not ret.errors:
         click.secho("{} VMs answered in {:.2f}s".format(
             len(rangeset), time.time() - start_time),
-                    fg='green', err=True)
+            fg='green', err=True)
 
     sys.exit(-int(bool(ret.errors)))
 
 
 @agent.command(name='listexec',
-             short_help="List running commands")
+               short_help="List running commands")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on which the command should be executed')
+              help='Rangeset of VM indices on which'
+                   ' the command should be executed')
 @click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
               help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
@@ -1768,13 +1865,14 @@ def pcocc_listexec(jobid, jobname, indices, timeout, cluster):
     click.echo(ret)
 
 @agent.command(name='thaw',
-             short_help="Thaw the VM agents")
+               short_help="Thaw the VM agents")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on which the command should be executed')
+              help='Rangeset of VM indices on which'
+                   ' the command should be executed')
 @click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
               help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
@@ -1789,18 +1887,19 @@ def pcocc_thaw(jobid, jobname, indices, timeout, cluster):
     if not ret.errors:
         click.secho("{} VMs answered in {:.2f}s".format(
             len(rangeset), time.time() - start_time),
-                    fg='green', err=True)
+            fg='green', err=True)
 
     sys.exit(-int(bool(ret.errors)))
 
 @agent.command(name='ping',
-             short_help="Ping the VM agents")
+               short_help="Ping the VM agents")
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on which the command should be executed')
+              help='Rangeset of VM indices on which'
+                   ' the command should be executed')
 @click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
               help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
@@ -1815,20 +1914,41 @@ def pcocc_ping(jobid, jobname, indices, timeout, cluster):
     if not ret.errors:
         click.secho("{} VMs answered in {:.2f}s".format(
             len(rangeset), time.time() - start_time),
-                    fg='green', err=True)
+            fg='green', err=True)
 
     # Return -1 if there is any error
     sys.exit(-int(bool(ret.errors)))
+
+@cli.command(name='mirror',
+             short_help="Insert user and groups in VM")
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--indices', default="all", type=str,
+              help='Rangeset of VM indices on'
+                   ' which the command should be executed')
+@per_cluster_cli(False)
+def pcocc_mirror(jobid, jobname, indices, cluster):
+    try:
+        rangeset = CLIRangeSet(indices, cluster)
+        runner = Run.VirtualMachine(cluster)
+        runner.mirror(rangeset=rangeset)
+    except PcoccError as err:
+        handle_error(err)
+
 
 @cli.group()
 def image():
     """ List and manage images """
     pass
 
+
 @image.group(name="repo")
 def img_repo():
     """ List and manage image repositories """
     pass
+
 
 def print_repolist(rlist):
     tbl = TextTable("%name %path %writable")
@@ -1845,23 +1965,23 @@ def print_repolist(rlist):
     print tbl
 
 @img_repo.command(name='list',
-             short_help="List pcocc image repositories")
+                  short_help="List pcocc image repositories")
 def pcocc_image_repo_list():
     try:
-        config = load_config(None, None, "")
+        config = load_config(process_type=ProcessType.OTHER)
 
-        l = config.images.list_repos()
-        print_repolist(l)
+        rlist = config.images.list_repos()
+        print_repolist(rlist)
     except PcoccError as err:
         handle_error(err)
 
 
 @img_repo.command(name='gc',
-             short_help="Cleanup unnecessary data in a repository")
+                  short_help="Cleanup unnecessary data in a repository")
 @click.argument('repo', nargs=1, type=str)
 def pcocc_image_repo_gc(repo):
     try:
-        config = load_config(None, None, "")
+        config = load_config(process_type=ProcessType.OTHER)
 
         config.images.garbage_collect(repo)
     except PcoccError as err:
@@ -1869,16 +1989,13 @@ def pcocc_image_repo_gc(repo):
 
 
 @image.command(name='import',
-             short_help="Import an image to a repository")
+               short_help="Import an image to a repository")
 @click.option('-t', '--fmt', type=str,
               help='Force source image format')
-@click.argument('kind', nargs=1, type=str)
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
-def pcocc_image_import(kind, fmt, source, dest):
+def pcocc_image_import(fmt, source, dest):
     """Import the source image file to an image in the destination repository.
-
-    The only supported image KIND is "vm"
 
     Images in repositories are specified with URIs of the form
     [REPO:]IMAGE[@REVISION].
@@ -1888,17 +2005,14 @@ def pcocc_image_import(kind, fmt, source, dest):
     the first revision of a new image.
     """
 
-    if kind not in ["vm"]:
-        raise PcoccError("Unsupported image kind {0}")
-
     try:
-        load_config(None, None, "")
-        Config().images.import_image(kind, source, dest, fmt)
+        load_config(process_type=ProcessType.OTHER)
+        Config().images.import_image(source, dest, fmt)
     except PcoccError as err:
         handle_error(err)
 
 @image.command(name='delete',
-             short_help="Delete an image from a repository")
+               short_help="Delete an image from a repository")
 @click.argument('image', nargs=1, type=str)
 def pcocc_image_delete(image):
     """Delete an image from a repository
@@ -1910,13 +2024,13 @@ def pcocc_image_delete(image):
     otherwise all revisions of the image are deleted.
     """
     try:
-        load_config(None, None, "")
+        load_config(process_type=ProcessType.OTHER)
         Config().images.delete_image(image)
     except PcoccError as err:
         handle_error(err)
 
 @image.command(name='resize',
-             short_help="Resize an image in a repository")
+               short_help="Resize an image in a repository")
 @click.argument('image', nargs=1, type=str)
 @click.argument('new_sz', nargs=1, type=str)
 def pcocc_image_resize(image, new_sz):
@@ -1932,13 +2046,13 @@ def pcocc_image_resize(image, new_sz):
            pcocc image resize myimg 20G
     """
     try:
-        load_config(None, None, "")
+        load_config(process_type=ProcessType.OTHER)
         Config().images.resize_image(image, new_sz)
     except PcoccError as err:
         handle_error(err)
 
 @image.command(name='export',
-             short_help="Export an image from a repository")
+               short_help="Export an image from a repository")
 @click.option('-t', '--fmt', type=str,
               help='Force destination image format')
 @click.argument('source', nargs=1, type=str)
@@ -1951,7 +2065,7 @@ def pcocc_image_export(fmt, source, dest):
     """
 
     try:
-        load_config(None, None, "")
+        load_config(process_type=ProcessType.OTHER)
         Config().images.export_image(source, dest, fmt)
     except PcoccError as err:
         handle_error(err)
@@ -1972,7 +2086,7 @@ def pcocc_image_copy(source, dest):
     creates the first revision of a new image.
     """
     try:
-        load_config(None, None, "")
+        load_config(process_type=ProcessType.OTHER)
         click.secho("Copying image ...")
         Config().images.copy_image(source, dest)
         click.secho("Image successufly copied", fg="green")
@@ -1980,7 +2094,7 @@ def pcocc_image_copy(source, dest):
         handle_error(err)
 
 @image.command(name='show',
-             short_help="Show details for an image")
+               short_help="Show details for an image")
 @click.argument('image', nargs=1, type=str)
 def pcocc_image_show(image):
     """Show details for an image
@@ -1989,7 +2103,7 @@ def pcocc_image_show(image):
     [REPO:]IMAGE[@REVISION]
     """
     try:
-        load_config(None, None, "")
+        load_config(process_type=ProcessType.OTHER)
         meta, _ = Config().images.get_image(image)
         ts = time.localtime(meta["timestamp"])
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
@@ -2011,7 +2125,7 @@ def pcocc_image_show(image):
         print("")
         tbl = TextTable("%rev %size %date")
         tbl.header_labels = {'rev': 'Revision',
-                             'size' : 'Size',
+                             'size': 'Size',
                              'date': 'Creation Date'}
 
         for rev in revisions:
@@ -2027,25 +2141,27 @@ def pcocc_image_show(image):
     except PcoccError as err:
         handle_error(err)
 
+
 def print_image_list(images):
     tbl = TextTable("%name %type %revision %repo %owner %date")
-    for img in sorted(images.itervalues(), key=lambda i:i[i.keys()[0]]["name"]):
+    for img in sorted(images.itervalues(),
+                      key=lambda i: i[i.keys()[0]]["name"]):
         rev = max(img.keys())
         ts = time.localtime(img[rev]["timestamp"])
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
         repo = img[rev]["repo"]
 
-        tbl.append({'name'     : img[rev]["name"],
-                    'type'     : img[rev]["kind"],
-                    'revision' : str(rev),
-                    'repo'     : repo,
-                    'owner'    : img[rev]["owner"],
-                    "date"     : str_time})
+        tbl.append({'name': img[rev]["name"],
+                    'type': img[rev]["kind"],
+                    'revision': str(rev),
+                    'repo': repo,
+                    'owner': img[rev]["owner"],
+                    "date": str_time})
 
     print tbl
 
 @image.command(name='list',
-             short_help="List images in repositories")
+               short_help="List images in repositories")
 @click.option('-R', '--repo', type=str,
               help='Restrict image list to a repository')
 @click.argument('regex', nargs=1, type=str, default="")
@@ -2057,7 +2173,7 @@ def pcocc_image_list(regex, repo):
     """
 
     try:
-        config = load_config(None, None, "")
+        config = load_config(process_type=ProcessType.OTHER)
         if repo:
             repo_list = [repo]
         else:
@@ -2072,7 +2188,129 @@ def pcocc_image_list(regex, repo):
                 print
 
     except PcoccError as err:
+        handle_error(err)
 
+
+@image.group()
+def cache():
+    """ Manage container image cache """
+    pass
+
+
+CACHEABLE_ITEMS = ["cached_squashfs",  "cached_bundle"]
+
+
+@cache.command(name='list',
+               short_help="List images in repositories"
+                          " in increasing order of last use")
+def pcocc_image_cache_list():
+    try:
+        config = load_config(process_type=ProcessType.OTHER)
+
+        metas = config.images.object_store.load_meta()
+
+        all_blobs_key = {}
+
+        for m in metas.values():
+            for rev, val in m.items():
+                name = val["name"]
+                repo = val["repo"]
+
+                for k in CACHEABLE_ITEMS:
+                    key = config.images.cache_key("{}:{}@{}".format(repo,
+                                                                    name,
+                                                                    rev),
+                                                  k)
+                    hashed_key = config.images.object_store.cache.hash_key(key)
+                    all_blobs_key[hashed_key] = {"repo": repo,
+                                                 "name": name,
+                                                 "rev": rev,
+                                                 "type": k}
+
+        all_blobs = config.images.object_store.cache.get_sorted_blob_list()
+
+        tbl = TextTable("%repo %name %revision %type %hash")
+
+        for b in all_blobs:
+            if b.hash in all_blobs_key:
+                elem = all_blobs_key[b.hash]
+                tbl.append({'repo': elem["repo"],
+                            'name': elem["name"],
+                            'revision': str(elem["rev"]),
+                            'type': elem["type"],
+                            'hash': b.hash[:10]})
+        print(tbl)
+        print("\nCache contains %d items"
+              % len(config.images.object_store.cache))
+    except PcoccError as err:
+        handle_error(err)
+
+@cache.command(name='delete',
+               short_help="Delete all cached items for a given image")
+@click.argument('image', nargs=1, type=str)
+def pcocc_image_cache_rm(image):
+    try:
+        config = load_config(process_type=ProcessType.OTHER)
+        # First make sure that the image exists
+        meta, _ = config.images.get_image(image)
+        if not meta:
+            raise PcoccError("Image {} could not".format(image) +
+                             " be found in repositories")
+        # And then proceed to clean it from the cache
+        for k in CACHEABLE_ITEMS:
+            key = config.images.cache_key(image, k)
+            del config.images.object_store.cache[key]
+    except PcoccError as err:
+        handle_error(err)
+
+@cache.command(name='gc',
+               short_help="Clean the cache by removing dangling objects")
+@click.option('-b', '--force-below', type=int, default=None,
+              help='Decimate the cache to store only count elements')
+@click.option('-c', '--force-clear', is_flag=True,
+              help='Remove all elements from the cache')
+def pcocc_image_cache_gc(force_below, force_clear):
+    try:
+        config = load_config(process_type=ProcessType.OTHER)
+
+        if force_clear:
+            config.images.object_store.cache.clear()
+            return
+
+        if force_below:
+            # Use regular decimation
+            config.images.object_store.cache.decimate(count=force_below)
+            return
+
+        # Generate the set of all possible cached objects
+        metas = config.images.object_store.load_meta()
+
+        possible_keys = set()
+
+        for m in metas.values():
+            for rev, val in m.items():
+                name = val["name"]
+                repo = val["repo"]
+                for k in CACHEABLE_ITEMS:
+                    key = config.images.cache_key("{}:{}@{}".format(repo,
+                                                                    name,
+                                                                    rev),
+                                                  k)
+                    possible_keys.add(key)
+
+        # Compute actual blob hash as keys are hashed
+        possible_keys = map(config.images.object_store.cache.hash_key,
+                            possible_keys)
+
+        cache_keys = set(config.images.object_store.cache.keys())
+
+        # Now proceed to delete elements which
+        # are not from known images anymore
+        for e in cache_keys.difference(possible_keys):
+            print("Deleting dangling cache blob {} ...".format(e[:10]))
+            config.images.object_store.cache.delete_hash(e)
+
+    except PcoccError as err:
         handle_error(err)
 
 
@@ -2080,12 +2318,12 @@ def formatted_file_size(path):
     size = os.path.getsize(path)
     if size < 1024:
         return "{0} Bytes".format(size)
-    elif size < 1024*1024:
-        return "{0} KB".format(float(size)//1024.0)
-    elif size < 1024*1024*1024:
-        return "{0} MB".format(float(size)//(1024.0*1024.0))
-    elif size < 1024*1024*1024*1024:
-        return "{0} GB".format(float(size)//(1024.0*1024.0*1024.0))
+    elif size < 1024 * 1024:
+        return "{0} KB".format(float(size) // 1024.0)
+    elif size < 1024 * 1024 * 1024:
+        return "{0} MB".format(float(size) // (1024.0 * 1024.0))
+    elif size < 1024 * 1024 * 1024 * 1024:
+        return "{0} GB".format(float(size) // (1024.0 * 1024.0 * 1024.0))
 
 
 @cli.command(name='ps',
@@ -2093,7 +2331,7 @@ def formatted_file_size(path):
 @click.option('-a', '--all', 'allusers',
               is_flag=True, default=False,
               help='List jobs for all users')
-@click.option('-u', '--user', default = "",
+@click.option('-u', '--user', default="",
               help='List jobs of the specified user')
 def pcocc_ps(user, allusers):
     """List current pcocc jobs
@@ -2110,7 +2348,8 @@ def pcocc_ps(user, allusers):
 
         joblist = config.batch.get_job_details(user)
 
-        tbl = TextTable("%id %name %user %partition %nodes %duration %timelimit")
+        tbl = TextTable("%id %name %user %partition"
+                        " %nodes %duration %timelimit")
         for j in joblist:
             tbl.append({'id': str(j["batchid"]),
                         'user': j["user"],
@@ -2118,10 +2357,483 @@ def pcocc_ps(user, allusers):
                         'nodes': str(j["node_count"]),
                         'name': j["jobname"],
                         'duration': j["exectime"],
-                        'timelimit': j["timelimit"]
-                    })
+                        'timelimit': j["timelimit"]})
 
         print tbl
 
+    except PcoccError as err:
+        handle_error(err)
+
+
+@internal.command(name='runnativecont',
+                  short_help='Run a native container')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname', type=str,
+              help='Job name of the selected cluster')
+@click.argument('args', nargs=-1, type=click.UNPROCESSED)
+@per_cluster_cli(False, allow_no_alloc=True)
+def pcocc_run_internal(jobid,
+                       jobname,
+                       args,
+                       cluster):
+    try:
+        runner = Run.Native()
+
+        if not len(args):
+            raise PcoccError("A configuration object must be passed")
+
+        cont_conf = json.loads(args[0])
+
+        # Force singleton RUN
+        cont_conf["singleton"] = True
+
+        runner = Run.Container(runner,
+                               cont_conf=cont_conf)
+        runner.run()
+    except PcoccError as err:
+        handle_error(err)
+
+
+@cli.command(name='run',
+             context_settings=dict(allow_interspersed_args=False),
+             short_help='Run a program in VM or container')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname', type=str,
+              help='Job name of the selected cluster')
+@click.option('-u', '--user', type=str, default=None,
+              help='Username to run the command')
+@click.option('--script', type=str, default=None,
+              help='Script to run')
+@click.option('-w', '--nodelist', type=str,
+              help='Where to run the command (Nodelist)')
+@click.option('-t', '--tty', is_flag=True, default=False,
+              help='Wether to launch in a TTY (forces n=1)')
+@click.option('-I', '--image', type=str,
+              help='Container image to launch')
+@click.option('-N', '--node', type=int, default=None,
+              help='Number of nodes to launch on')
+@click.option('-n', '--process', type=int,
+              help='Number of process to launch')
+@click.option('-c', '--core', type=int, default=None,
+              help='Number of core(s) per process')
+@click.option('-s', '--singleton', is_flag=True, default=False,
+              help='Run without batch manager support')
+@click.option('-p', '--partition', type=str, default=None,
+              help='Partition on which to run (when allocating)')
+@click.option('-m', '--mirror-env', is_flag=True, default=False,
+              help='Propagate local environment variables (default False)')
+@click.option('--no-defaults', is_flag=True,
+              help='Do not mount inside the container')
+@click.option('--no-user', is_flag=True,
+              help='Do not inject the user inside the container')
+@click.option('-e', '--env', type=str, multiple=True,
+              help=('Environment variables passed to the target program'
+                    ' (syntax A[=B] or re(REGEXPR))'))
+@click.option('-P', '--path-prefix', type=str, multiple=True,
+              help='Prepend variables in $PATH fashion (syntax A[=B])')
+@click.option('-S', '--path-suffix', type=str, multiple=True,
+              help='Append variables in $PATH fashion (syntax A[=B])')
+@click.option('-v', '--mount', type=str, multiple=True,
+              help=('Mount a directory in target env (vm or cont)'
+                    ' format src=/XX,dest=/XX,type=XX,opt=A,B=X,C'
+                    ' or src:dest'))
+@click.option('--cwd', type=str,
+              help=('Work directory for the target executable,'
+                    ' If not set host PWD is propagated.'
+                    ' If the container defines a workdir'
+                    ' different than "/"'
+                    ' this value supersedes the transparent'
+                    ' propagation. In order to use the'
+                    ' container default you can specify "-"'))
+@click.option('-M', '--module', type=str, default=None, multiple=True,
+              help=('Define a list of module configuration to inject'
+                    ' in the container/VM (can be comma separated list)'))
+@click.option('-E', '--entry-point', type=str, default=None,
+              help='Changes container entry point (in docker semantics)')
+@click.argument('cmd', nargs=-1, type=click.UNPROCESSED)
+@per_cluster_cli(False, allow_no_alloc=True)
+def pcocc_run_main(jobid,
+                   jobname,
+                   user,
+                   script,
+                   nodelist,
+                   tty,
+                   image,
+                   node,
+                   process,
+                   core,
+                   singleton,
+                   partition,
+                   mirror_env,
+                   no_defaults,
+                   no_user,
+                   env,
+                   path_prefix,
+                   path_suffix,
+                   mount,
+                   cwd,
+                   module,
+                   cmd,
+                   entry_point,
+                   cluster):
+    try:
+        cmd = list(cmd)
+
+        if len(cmd) == 0 and not image and not script:
+            raise PcoccError("You must specify a command, an image name "
+                             "or a script")
+
+        if node:
+            if process and process < node:
+                raise PcoccError("If you specify {} nodes".format(node) +
+                                 " you need at least " +
+                                 "{} processes not {}".format(node, process))
+            elif not process:
+                # Assume N = P
+                process = node
+
+        if not process:
+            # Assume n=1 if not configured otherwise
+            process = 1
+
+        if tty:
+            if process > 1:
+                raise PcoccError("Cannot run in a TTY on more than 1 process")
+            if not os.isatty(sys.stdout.fileno()):
+                raise PcoccError("Cannot run in a TTY as stdout is not a TTY")
+
+        if cluster:
+            # We are inside a pcocc allocation
+            inside_pcocc_allocation = 1
+        else:
+            # We are outside of a pcocc allocation
+            inside_pcocc_allocation = 0
+
+        runner = None
+
+        if singleton:
+            # No batch run natively
+            runner = Run.Native()
+        elif not inside_pcocc_allocation:
+            # Wrap the command with slurm
+            runner = Run.Slurm()
+        else:
+            # Run inside a PCOCC alloc and VMs
+            runner = Run.VirtualMachine(cluster)
+
+        # Propagate and validate run config to runner
+        runner.set_configuration(process,
+                                 node,
+                                 core,
+                                 nodelist,
+                                 partition)
+
+        if user:
+            runner.set_user(user)
+
+        if module:
+            # First expand the set and potential
+            # comma separated values
+            module_set = set()
+            for e in module:
+                module_set.update(e.split(","))
+
+            for m in module_set:
+                # Set the runtimes
+                # we do it before wrapping for containers
+                # as this information changes the config
+                runner.set_module(m)
+
+        if image:
+            # Wrap the current runner with
+            # the Native container runner
+            # Container OCI env is loaded first
+            # and then the containers.yaml part is applied
+            runner = Run.Container(runner,
+                                   image,
+                                   singleton,
+                                   no_user=no_user,
+                                   no_defaults=no_defaults,
+                                   command=cmd)
+
+            # Entry point is only meaningful for containers
+            if entry_point:
+                # Note that entrypoint is an array
+                runner.set_entrypoint(shlex.split(entry_point))
+
+        if script:
+            runner.set_script(script)
+        else:
+            runner.set_argv(cmd)
+
+        if tty:
+            # Also propagate the TERM variable
+            if "TERM" in os.environ:
+                Run.Env.append(runner, ["TERM"])
+            runner.set_pty()
+
+        if cwd:
+            # Set CWD and inform the runner that it is forced
+            # the reason for this is that some docker image
+            # rely on an internal CWD we therefore want
+            # this docker-image CWD to have a higher priority
+            # than the silent CWD propagation
+            # a value "-" forces the use of the OCI value
+            runner.set_cwd(cwd, forced=True)
+        else:
+            runner.set_cwd(os.getcwd())
+
+        # It is important to set mirror before manipulating
+        # the env variables as it defines if current vars
+        # are reachable in the "Native" and "Slurm" configuration
+        if mirror_env:
+            runner.mirror_env()
+
+        # Pass env modifiers from command-line
+        Run.Env.append(runner, env)
+        Run.Env.path_prefix(runner, path_prefix)
+        Run.Env.path_suffix(runner, path_suffix)
+
+        # Add command-line mountpoints (only meaninful for containers)
+        Run.Mount.add(runner, mount)
+
+        # Run the program
+        runner.run()
+    except subprocess.CalledProcessError as e:
+        # Here we catch the error from the native
+        # exec when running in singleton (runner is not wrapped)
+        click.secho("Could not execute program", fg='red', err=True)
+        sys.exit(e.returncode)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@cli.group()
+def docker():
+    """ Interact with a docker daemon running in a VM """
+    pass
+
+
+def parse_docker_image(docker_image):
+    tag = "latest"
+    if ":" in docker_image:
+        sp = docker_image.split(":")
+        if len(sp) != 2:
+            raise PcoccError("Could not parse"
+                             " revision 'NAME:REV'"
+                             " in '{}'".format(docker_image))
+        tag = sp[1]
+        docker_image = sp[0]
+    return docker_image, tag
+
+
+@docker.command(name='export',
+                short_help='Export a pcocc image to the docker daemon')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=int, default=0,
+              help='Id of the VM to connect to')
+@click.argument('source', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+@per_cluster_cli(False)
+def docker_export(jobid, jobname, cluster, index, source, dest):
+    try:
+        docker = PcoccDocker(index)
+        dest, tag = parse_docker_image(dest)
+        docker.send_image(cluster, index, source, dest, tag)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='import',
+                short_help='Import a pcocc image from the docker daemon')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=int, default=0,
+              help='Id of the VM to connect to')
+@click.argument('source', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+@per_cluster_cli(False)
+def docker_import(jobid, jobname, cluster, index, source, dest):
+    try:
+        docker = PcoccDocker(index)
+        source, tag = parse_docker_image(source)
+        docker.get_image(cluster, index, dest, source, tag=tag)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='edit',
+                short_help='Edit a pcocc image inside docker')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=int, default=0,
+              help='Id of the VM to connect to')
+@click.argument('source', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+@click.argument('command', nargs=-1, type=click.UNPROCESSED)
+@per_cluster_cli(False)
+def docker_edit(jobid, jobname, cluster, index, source, dest, command):
+    try:
+        docker = PcoccDocker(index)
+        command = list(command)
+
+        docker.edit_image(cluster, index, source, dest, command)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='build',
+                short_help='Build a pcocc image inside docker')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=int, default=0,
+              help='Id of the VM to connect to')
+@click.argument('path', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+@per_cluster_cli(False)
+def docker_build(jobid, jobname, cluster, index, path, dest):
+    try:
+        docker = PcoccDocker(index)
+        docker.build_image(cluster, index, dest, path=path)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='alloc',
+                context_settings=dict(ignore_unknown_options=True),
+                short_help='Allocate a docker Pod and start a'
+                           ' docker shell')
+@click.option('-E', '--alloc-script', metavar='SCRIPT',
+              help='Execute a script on the allocation node')
+@click.option('-T', '--docker-timeout', type=int,
+              help='Time in seconds to wait for docker to start in the VM')
+@click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
+def docker_alloc(alloc_script, docker_timeout, batch_options):
+    try:
+        config = load_config(process_type=ProcessType.OTHER)
+        pod = config.containers.config.docker_pod
+
+        batch_options = list(batch_options)
+
+        click.secho("Starting the docker VM ...")
+
+        return _pcocc_alloc(None,
+                            alloc_script,
+                            None,
+                            batch_options,
+                            pod + ":1",
+                            docker=True,
+                            mirror_user=True,
+                            config=config)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='batch',
+                context_settings=dict(ignore_unknown_options=True),
+                short_help="Allocate a docker Pod in batch")
+@click.option('-E', '--host-script', type=click.File('r'),
+              help='Launch a batch script on the first host')
+@click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
+@docstring(batch_alloc_doc + batch_doc)
+def docker_batch(host_script,
+                 batch_options):
+    try:
+        config = load_config(process_type=ProcessType.OTHER)
+        pod = config.containers.config.docker_pod
+        batch_options = list(batch_options)
+        # Hook to enable calling from other functions
+        return _pcocc_batch(None,
+                            None,
+                            host_script,
+                            None,
+                            batch_options,
+                            pod,
+                            docker=True,
+                            mirror_user=True,
+                            config=config)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='mount',
+                short_help='Manually mount a path inside'
+                           ' the docker VM to make it'
+                           ' available as volume for docker containers')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=str, default="all",
+              help='Id of the VM to connect to')
+@click.argument('src-path', nargs=1, type=click.UNPROCESSED)
+@click.argument('dest-path', nargs=1, type=click.UNPROCESSED)
+@per_cluster_cli(False)
+def docker_mount(jobid, jobname, cluster, index, src_path, dest_path):
+    try:
+        rangeset = CLIRangeSet(index, cluster)
+        s = PcoccDocker(index)
+        s.mount(cluster, rangeset, src_path, dest_path)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='shell',
+                short_help='Start a docker shell')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=str, default="0",
+              help='Id of the VM to connect to')
+@click.option('-E', '--script', metavar='SCRIPT',
+              help='Execute a script inside the docker shell')
+@click.option('-T', '--docker-timeout', type=int, default=200,
+              help='Time in seconds to wait for docker to start in the VM')
+@per_cluster_cli(False)
+def docker_shell(jobid, jobname, cluster, index, script, docker_timeout):
+    try:
+        s = PcoccDocker(index)
+        print("Waiting for docker VM to start ...")
+        rangeset = CLIRangeSet("all", cluster)
+        # At this point we wait for the Docker container to start
+        # by watching one of its runtime file which file to watch
+        # is configurable in containers.yaml config.docker_test_path
+        s.wait_for_docker_start(cluster, rangeset, timeout=docker_timeout)
+        docker_path = Config().containers.config.docker_path
+        print("Starting the docker shell ...")
+        shell = s.shell(cluster, docker_path, index, script)
+        sys.exit(shell.wait())
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='env',
+                short_help='Retrieve the docker configuration from pcocc '
+                           ' you can do "eval $(pcocc docker env)" to start'
+                           ' a valid docker shell in pcocc')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=int, default=0,
+              help='Id of the VM to connect to')
+@per_cluster_cli(False)
+def docker_env(jobid, jobname, cluster, index):
+    try:
+        s = PcoccDocker(index)
+        docker_path = Config().containers.config.docker_path
+        s.env(cluster, index, docker_path)
     except PcoccError as err:
         handle_error(err)

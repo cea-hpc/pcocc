@@ -16,6 +16,7 @@ example:
   full-node: true
   disk-cache: 'writeback'
   machine-type: 'q35'
+  kernel: 'aa'
 
 herits:
   inherits: example
@@ -42,3 +43,4 @@ overloads:
   disk-cache:
   machine-type: 'pc'
   bind-vcpus: false
+  kernel: 'bb'

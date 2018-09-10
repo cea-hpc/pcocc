@@ -26,6 +26,7 @@ import pcocc
 from pcocc.Singleton import Singleton
 from os.path import expanduser
 from .NetUtils import Tracker
+from pcocc.Error import InvalidConfigurationError
 
 DEFAULT_CONF_DIR = '/etc/pcocc'
 DEFAULT_RUN_DIR = '/var/run/pcocc'
@@ -67,6 +68,7 @@ class Config(object):
         self.rsets  = pcocc.Resources.ResSetConfig()
         self.tpls   = pcocc.Templates.TemplateConfig()
         self.images = pcocc.Image.ImageMgr()
+        self.containers = pcocc.Container.container_config
 
         # Initalize later depending on what's provided in the config files
         self.batch = None
@@ -84,6 +86,8 @@ class Config(object):
         self.load_vnets(os.path.join(conf_dir, 'networks.yaml'))
         self.load_rsets(os.path.join(conf_dir, 'resources.yaml'))
         self.load_tpls(os.path.join(conf_dir, 'templates.yaml'), 'system')
+        self.load_containers(os.path.join(conf_dir,
+                                          'containers.yaml'))
         self.load_batch(os.path.join(conf_dir, 'batch.yaml'), jobid,
                         jobname, default_jobname, process_type,
                         batchuser)
@@ -113,10 +117,15 @@ class Config(object):
             self.load_repos(user_repos_path, 'user')
         self.load_repos(os.path.join(conf_dir, 'repos.yaml'), 'global')
 
+        self.load_containers(os.path.join(self.user_conf_dir,
+                                          'containers.yaml'))
         self.tpls.populate_image_templates(self.images.find())
 
     def load_vnets(self, network_conf_file):
         self.vnets.load(network_conf_file)
+
+    def load_containers(self, container_conf_file=None):
+        self.containers.load(container_conf_file)
 
     def load_repos(self, repo_conf_file, tag):
         self.images.load_repos(repo_conf_file, tag)
@@ -227,6 +236,8 @@ class Config(object):
 from . import Networks    # pylint: disable=W0611
 from . import Resources   # pylint: disable=W0611
 from . import Templates   # pylint: disable=W0611
+from . import Container    # pylint: disable=W0611
 from . import Batch       # pylint: disable=W0611
 from . import Hypervisor  # pylint: disable=W0611
 from . import Image      # pylint: disable=W0611
+from . import Run      # pylint: disable=W0611

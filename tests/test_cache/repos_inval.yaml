@@ -1,0 +1,9 @@
+# This file defines a list of pcocc image repositories sorted by
+# priority (highest priority first). To define a new repository, add a
+# path to an non-existing directory
+
+repos: []
+
+cache:
+  path : "/tmp/.pcocc_cache"
+  THIS_SHOULD_NOT_BE_HERE: 9

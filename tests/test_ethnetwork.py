@@ -8,6 +8,11 @@ from pcocc.Networks import VNetworkConfig
 from pcocc.Templates import TemplateConfig
 from pcocc.Resources  import ResSetConfig
 
+from distutils import spawn
+
+if spawn.find_executable("ovs-vsctl") is None:
+    pytest.skip("skipping Network test due to lack of Openvswitch",
+                allow_module_level=True)
 
 def sproc_init(*args, **kwargs):
     if args[0][0] == 'iptables' and '-C' in args[0]:

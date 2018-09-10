@@ -50,6 +50,7 @@ template_settings = {'image': (False, None, True),
                      'remote-display': (False, None, True),
                      'description': (False, '', False),
                      'persistent-drives': (False, {}, True),
+                     'kernel': (False,None, True),
                      'placeholder': (False, False, False)}
 
 class TemplateConfig(dict):

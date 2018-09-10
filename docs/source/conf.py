@@ -59,7 +59,7 @@ titles = {
 'nc': 'Connect to a VM via  nc',
 'scp': 'Transfer files to a VM via scp',
 'ssh': 'Connect to a VM via ssh',
-'image': 'List and manage VM images',
+'image': 'List and manage VM and Container images',
 'ps': 'List current pcocc jobs',
 'exec': 'Execute commands through the pcocc guest agent',
 'display': 'Display the graphical output of a VM',
@@ -75,7 +75,10 @@ titles = {
 'repos.yaml': 'Image repositories configuration file',
 'newvm-tutorial': 'How to import VM images and define VM templates',
 'cloudconfig-tutorial': 'How to configure cloud-init enabled VMs',
-'9pmount-tutorial': 'How to mount host directories in VMs'
+'9pmount-tutorial': 'How to mount host directories in VMs',
+'run': 'How to run commands and containers using pcocc',
+'containers.yaml': 'Container Configuration File',
+'docker': 'Run and Build Docker containers using pcocc'
 }
 
 rst_prolog = ''

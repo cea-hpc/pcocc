@@ -74,6 +74,7 @@ qemu-bin          No           /path/to/qemu/bin/qemu-system-x86
 custom-args       No           ['-cdrom', '/path/to/my-iso']
 image-revision    No           N/A
 machine-type      No           q35
+kernel            No           aa
 """),
 ('herits',
 """ATTRIBUTE         INHERITED    VALUE
@@ -93,6 +94,7 @@ disk-cache        Yes          writeback
 image             Yes          example
 image-revision    No           N/A
 machine-type      Yes          q35
+kernel            Yes          aa
 """),
 ])
 def test_template_display(template, expected_output, capsys, datadir, config):

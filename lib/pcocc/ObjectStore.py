@@ -282,7 +282,7 @@ class ObjectStore(object):
         try:
             os.mkdir(os.path.join(base, obj_hash[:2]))
         except OSError as e:
-            if e.errno != errno.EEXIST:
+            if e.errno != errno.EEXIST and e.errno != errno.EACCES:
                 raise e
 
         if check_exists and not os.path.exists(os.path.join(base,

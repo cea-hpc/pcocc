@@ -113,6 +113,10 @@ class TemplateConfig(dict):
                 tpl.validate()
 
     def populate_image_templates(self, images):
+        # Only add auto templates if we have a default resource set
+        if not Config().rsets.default_rset:
+            return
+
         for i in images.itervalues():
             rev = max(i.keys())
             name = i[rev]["name"]

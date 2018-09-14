@@ -52,6 +52,7 @@ from pcocc import agent_pb2
 from ClusterShell.NodeSet import RangeSet, RangeSetParseError
 
 helperdir = '/etc/pcocc/helpers'
+DEFAULT_AGENT_TIMEOUT=60
 
 def handle_error(err):
     """ Print exception with stack trace if in debug mode """
@@ -1249,7 +1250,7 @@ def per_cluster_cli(allows_user):
     return decorator
 
 
-def writefile(cluster, indices, source, destination):
+def writefile(cluster, indices, source, destination, timeout=DEFAULT_AGENT_TIMEOUT):
     try:
         with open(source) as f:
             source_data = f.read()
@@ -1260,7 +1261,7 @@ def writefile(cluster, indices, source, destination):
     start_time = time.time()
     ret = AgentCommand.writefile(cluster, indices,
                                  path=destination, data=source_data,
-                                 perms=perms, append=False)
+                                 perms=perms, append=False, timeout=timeout)
     for k, e in ret.iterate():
         click.secho("vm{}: {}".format(k, e), fg='red', err=True)
 
@@ -1273,12 +1274,13 @@ def writefile(cluster, indices, source, destination):
 def display_vmagent_error(index, err):
     click.secho("vm{}: {}".format(index, err), fg='red', err=True)
 
-def parallel_execve(cluster, indices, cmd, env, user, display_errors=True):
+def parallel_execve(cluster, indices, cmd, env, user, display_errors=True,
+                    timeout=DEFAULT_AGENT_TIMEOUT):
     # Launch tasks on rangeset
     exec_id = random.randint(0, 2**63-1)
     ret = AgentCommand.execve(cluster, indices, filename=cmd[0],
                               exec_id=exec_id, args=cmd[1:],
-                              env=env, username=user)
+                              env=env, username=user, timeout=timeout)
 
     # Check if some VMs had errors during launch
     for index, err in ret.iterate():
@@ -1334,9 +1336,9 @@ def collect_output_bg(result_iterator, display_results,
     output_th.start()
     return output_th
 
-def multiprocess_call(cluster, indices, cmd, env, user):
+def multiprocess_call(cluster, indices, cmd, env, user, timeout=DEFAULT_AGENT_TIMEOUT):
     # Launch tasks on rangeset
-    exec_ret, exec_id = parallel_execve(cluster, indices, cmd, env, user)
+    exec_ret, exec_id = parallel_execve(cluster, indices, cmd, env, user, timeout=timeout)
 
     # Continue only on VMs on which the exec succeeded
     good_indices = filter_vms(indices, exec_ret)
@@ -1382,9 +1384,11 @@ def agent():
               help='Cmd is a shell script to be copied to /tmp and executed in place')
 @click.option('-m', '--mirror-env', is_flag=True,
               help='Propagate local environment variables')
+@click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
+              help='Maximum time to wait for an answer from each VM')
 @click.argument('cmd', nargs=-1, required=True, type=click.UNPROCESSED)
 @per_cluster_cli(False)
-def pcocc_run(jobid, jobname, user, indices, script, mirror_env, cmd, cluster):
+def pcocc_run(jobid, jobname, user, indices, script, mirror_env, cmd, timeout, cluster):
     #FIXME: handle pty option once we have agent support
     vms = CLIRangeSet(indices, cluster)
 
@@ -1395,7 +1399,7 @@ def pcocc_run(jobid, jobname, user, indices, script, mirror_env, cmd, cluster):
     if script:
         basename = os.path.basename(cmd[0])
         dest = os.path.join('/tmp', basename)
-        writefile(cluster, vms, cmd[0], dest)
+        writefile(cluster, vms, cmd[0], dest, timeout)
         cmd = ['bash', dest]
 
     env = []
@@ -1403,7 +1407,7 @@ def pcocc_run(jobid, jobname, user, indices, script, mirror_env, cmd, cluster):
         for e, v in os.environ.iteritems():
             env.append("{}={}".format(e,v))
 
-    exit_code = multiprocess_call(cluster, vms, cmd, env, user)
+    exit_code = multiprocess_call(cluster, vms, cmd, env, user, timeout)
 
     sys.exit(exit_code)
 
@@ -1432,12 +1436,14 @@ def pcocc_attach(jobid, jobname, indices, exec_id, cluster):
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
               help='Rangeset of VM indices on which the command should be executed')
+@click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
+              help='Maximum time to wait for an answer from each VM')
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 @per_cluster_cli(False)
-def pcocc_writefile(jobid, jobname, indices, source, dest, cluster):
+def pcocc_writefile(jobid, jobname, indices, source, dest, timeout, cluster):
     rangeset = CLIRangeSet(indices, cluster)
-    writefile(cluster, rangeset, source, dest)
+    writefile(cluster, rangeset, source, dest, timeout)
 
 @agent.command(name='freeze',
              short_help="Freeze the VM agents")
@@ -1447,8 +1453,10 @@ def pcocc_writefile(jobid, jobname, indices, source, dest, cluster):
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
               help='Rangeset of VM indices on which the command should be executed')
+@click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
+              help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
-def pcocc_freeze(jobid, jobname, indices, cluster):
+def pcocc_freeze(jobid, jobname, indices, timeout, cluster):
     rangeset = CLIRangeSet(indices, cluster)
     start_time = time.time()
 
@@ -1472,11 +1480,13 @@ def pcocc_freeze(jobid, jobname, indices, cluster):
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
               help='Rangeset of VM indices on which the command should be executed')
+@click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
+              help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
-def pcocc_listexec(jobid, jobname, indices, cluster):
+def pcocc_listexec(jobid, jobname, indices, timeout, cluster):
     rangeset = CLIRangeSet(indices, cluster)
 
-    ret = AgentCommand.listexec(cluster, rangeset)
+    ret = AgentCommand.listexec(cluster, rangeset, timeout=timeout)
     ret.iterate_all()
     click.echo(ret)
 
@@ -1488,12 +1498,14 @@ def pcocc_listexec(jobid, jobname, indices, cluster):
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
               help='Rangeset of VM indices on which the command should be executed')
+@click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
+              help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
-def pcocc_thaw(jobid, jobname, indices, cluster):
+def pcocc_thaw(jobid, jobname, indices, timeout, cluster):
     rangeset = CLIRangeSet(indices, cluster)
     start_time = time.time()
 
-    ret = AgentCommand.thaw(cluster, rangeset)
+    ret = AgentCommand.thaw(cluster, rangeset, timeout=timeout)
     for k, e in ret.iterate():
         display_vmagent_error(k, e)
 
@@ -1512,12 +1524,14 @@ def pcocc_thaw(jobid, jobname, indices, cluster):
               help='Job name of the selected cluster')
 @click.option('-i', '--indices', default="all", type=str,
               help='Rangeset of VM indices on which the command should be executed')
+@click.option('-t', '--timeout', default=DEFAULT_AGENT_TIMEOUT, type=int,
+              help='Maximum time to wait for an answer from each VM')
 @per_cluster_cli(False)
-def pcocc_ping(jobid, jobname, indices, cluster):
+def pcocc_ping(jobid, jobname, indices, timeout, cluster):
     rangeset = CLIRangeSet(indices, cluster)
     start_time = time.time()
 
-    ret = AgentCommand.hello(cluster, rangeset)
+    ret = AgentCommand.hello(cluster, rangeset, timeout=timeout)
     for k, e in ret.iterate():
         display_vmagent_error(k, e)
 

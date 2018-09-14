@@ -255,7 +255,7 @@ class ImageMgr(object):
 
         #Check if the format was suffixed
         if not fmt:
-            fmt = self.extract_extension(path)
+            fmt = self.extract_extension(path, kind)
 
         # For VMs we can detect the input file type
         if kind == "vm" and os.path.exists(path):
@@ -310,8 +310,13 @@ class ImageMgr(object):
 
         return data.get("backing-filename", None)
 
-    def extract_extension(self, in_path):
-        return os.path.splitext(in_path)[-1].lower().replace(".", "")
+    def extract_extension(self, in_path, kind):
+        suffix = os.path.splitext(in_path)[-1].lower().replace(".", "")
+        if kind == "vm":
+            if suffix and suffix in known_vm_image_formats:
+                return suffix
+
+        return None
 
     @classmethod
     def rebase(cls, image, backing_file="", unsafe=False):

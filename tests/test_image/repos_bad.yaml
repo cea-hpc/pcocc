@@ -1,0 +1,7 @@
+# This file defines a list of pcocc image repositories sorted by
+# priority (highest priority first). To define a new repository, add a
+# path to an non-existing directory
+
+repos:
+    name: user
+    path: "/tmp/.pcocc_images_user"

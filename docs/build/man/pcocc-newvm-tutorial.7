@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-NEWVM-TUTORIAL" "7" "Sep 18, 2017" "0.4.0" "pcocc"
+.TH "PCOCC-NEWVM-TUTORIAL" "7" "Sep 19, 2018" "0.5.0" "pcocc"
 .SH NAME
 pcocc-newvm-tutorial \- How to import VM images and define VM templates
 .
@@ -79,16 +79,21 @@ CentOS 7: \fI\%https://cloud.centos.org/centos/7/images/CentOS\-7\-x86_64\-Gener
 .sp
 You may now download these images or those that you want to install. Note that the import process below is the same whether you use cloud\-init enabled VMs or regular qcow2 images that you have already configured.
 .sp
-In this guide, we use \fB$VMDIR\fP as the base directory holding our VM images. It should be on a shared filesystem accessible from all front\-end and compute nodes and ideally on a fast parallel filesystem for best scalability. If you are the system administrator, you may want to provide these base distribution images to all your users by creating system\-wide templates. In that case \fB$VMDIR\fP (and its content) should be readable by all pcocc end\-users but write protected.
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+In this guide, we consider that the highest priority repository is a user specific repository writable by the user as in the default configuration.
+.UNINDENT
+.UNINDENT
 .sp
-We will now create directories in \fB$VMDIR\fP, one for each image:
+We can now import these images to our default repository:
 .INDENT 0.0
 .INDENT 3.5
 .sp
 .nf
 .ft C
-mkdir $VMDIR/ubuntu\-server\-artful\-cloud
-mkdir $VMDIR/centos7\-cloud
+$ pcocc image import artful\-server\-cloudimg\-amd64.img ubuntu\-artful\-cloud
+$ pcocc image import CentOS\-7\-x86_64\-GenericCloud.qcow2 centos7\-cloud
 .ft P
 .fi
 .UNINDENT
@@ -101,37 +106,25 @@ We used the "\-cloud" suffix as a convention to identify cloud\-init enabled ima
 .UNINDENT
 .UNINDENT
 .sp
-Now simply move the images to their respective directories, naming them \fBimage\fP:
+At this point you should have these two images available in your repository:
 .INDENT 0.0
 .INDENT 3.5
 .sp
 .nf
 .ft C
-mv artful\-server\-cloudimg\-amd64.img $VMDIR/ubuntu\-artful\-cloud/image
-mv CentOS\-7\-x86_64\-GenericCloud.qcow2 $VMDIR/centos7\-cloud/image
-.ft P
-.fi
-.UNINDENT
-.UNINDENT
-.sp
-At this point you should have the following file hierarchy:
-.INDENT 0.0
-.INDENT 3.5
-.sp
-.nf
-.ft C
-$VMDIR/centos7\-cloud:
-    image
-
-$VMDIR/ubuntu\-artful\-cloud:
-    image
+$ pcocc image list
+NAME                TYPE    REVISION    REPO        OWNER       DATE
+\-\-\-\-                \-\-\-\-    \-\-\-\-\-\-\-\-    \-\-\-\-        \-\-\-\-\-       \-\-\-\-
+[...]
+centos7\-cloud       vm      0           user        jdoe        2018\-08\-24 20:46:35
+ubunt\-artful\-cloud  vm      0           user        jdoe        2018\-08\-24 20:45:20
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .SH DEFINING VM TEMPLATES
 .sp
-Now that we have copied the images to our shared filesystem, we can define templates for them within the pcocc templates.yaml configuration file. A system administrator can define them as system\-wide templates in \fB/etc/pcocc/templates.yaml\fP to make them avaialable to all users. Otherwise, define them in \fB~/.pcocc/templates.yaml\fP\&. We first define basic templates which only make the image available. We can then inherit from them to create custom VMs.
+Now that we have copied the images to our repository, we can define templates for them within the pcocc templates.yaml configuration file. A system administrator can define them as system\-wide templates in \fB/etc/pcocc/templates.yaml\fP to make them avaialable to all users. Otherwise, define them in \fB~/.pcocc/templates.yaml\fP\&. We first define basic templates which only make the image available. We can then inherit from them to create custom VMs.
 .sp
 Here is the content of \fBtemplates.yaml\fP for these three VMs (don\(aqt forget to replace \fB$VMDIR\fP with the actual PATH):
 .INDENT 0.0
@@ -140,12 +133,12 @@ Here is the content of \fBtemplates.yaml\fP for these three VMs (don\(aqt forget
 .nf
 .ft C
 centos7\-cloud:
-    image: "$VMDIR/centos7\-cloud"
+    image: "centos7\-cloud"
     resource\-set: "default"
     description: "Cloud enabled CentOS 7"
 
 ubuntu\-artful\-cloud:
-    image: "$VMDIR/ubuntu\-artful\-cloud"
+    image: "ubuntu\-artful\-cloud"
     resource\-set: "default"
     description: "Cloud enabled Ubuntu 17.10"
 .ft P
@@ -155,7 +148,7 @@ ubuntu\-artful\-cloud:
 .sp
 We selected \fIdefault\fP as the \fBresource\-set\fP for these VMs. It should reference one of the resource sets defined in the \fB/etc/resources.yaml\fP file. Please refer to the resources.yaml and networks.yaml configuration files for more informations on this option.
 .sp
-Following this step, you should be able to list your new virtual machines:
+Following this step, you should be able to list your new templates:
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -164,8 +157,8 @@ Following this step, you should be able to list your new virtual machines:
 $ pcocc template list
 NAME                 DESCRIPTION                 RESOURCES    IMAGE
 \-\-\-\-                 \-\-\-\-\-\-\-\-\-\-\-                 \-\-\-\-\-\-\-\-\-    \-\-\-\-\-
-ubuntu\-artful\-cloud  Cloud enabled Ubuntu 17.10  default      /shared/vms/ubuntu\-artful\-cloud
-centos7\-cloud        Cloud enabled CentOS 7      default      /shared/vms/centos7\-cloud
+ubuntu\-artful\-cloud  Cloud enabled Ubuntu 17.10  default      ubuntu\-artful\-cloud
+centos7\-cloud        Cloud enabled CentOS 7      default      centos7\-cloud
 .ft P
 .fi
 .UNINDENT

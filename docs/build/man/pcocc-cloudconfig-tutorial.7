@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Sep 18, 2017" "0.4.0" "pcocc"
+.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Sep 19, 2018" "0.5.0" "pcocc"
 .SH NAME
 pcocc-cloudconfig-tutorial \- How to configure cloud-init enabled VMs
 .
@@ -61,9 +61,7 @@ mycentos:
 .sp
 Where \fB~/conf\fP is the cloud\-config file which will be passed to cloud\-init at VM boot.
 .sp
-Most cloud\-config directives are only applied at the first VM boot. As a result, if you reboot a VM or if you save it after cloud\-init has run, it will no longer apply the cloud\-config file, even if you change its directives.
-.sp
-This mechanism is based on the value of \fBinstance\-id\fP which defaults to \fIpcocc\-deploy\fP for pcocc VMs. Cloud\-init records the \fBinstance\-id\fP it sees on first boot and will no longer run as long as it stays the same. This means that you can configure a VM a second time by changing its \fBinstance\-id\fP template parameter to something else. If you are pre\-configuring VMs for other users to customize later with cloud\-init, you might want to use a non\-default \fBinstance\-id\fP so that your users don\(aqt have to change it to apply another cloud\-config file.
+Most cloud\-config directives are \fIper\-instance\fP, which means they are applied once per instanciated VM, when it first boots. This mechanism relies on the value of \fBinstance\-id\fP which defaults to a random uuid generated for each instanciated pcocc VM. Alternatively, the \fBinstance\-id\fP can be set to a fixed value in the VM template definition (see pcocc\-templates.yaml(5)). Each time cloud\-init runs, it records the current \fBinstance\-id\fP  in the VM filesysterm and only applies \fIper\-instance\fP directives if it differs from what was previously recorded.
 .SH SETTING UP USER CREDENTIALS
 .sp
 With cloud\-init enabled VMs the first configuration task is often to define user credentials to login to the VM. This can be done with the following syntax:

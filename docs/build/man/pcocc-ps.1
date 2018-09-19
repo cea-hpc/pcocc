@@ -1,8 +1,8 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-RESET" "1" "Sep 19, 2018" "0.5.0" "pcocc"
+.TH "PCOCC-PS" "1" "Sep 19, 2018" "0.5.0" "pcocc"
 .SH NAME
-pcocc-reset \- Reset a VM
+pcocc-ps \- List current pcocc jobs
 .
 .nr rst2man-indent-level 0
 .
@@ -32,49 +32,34 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 ..
 .SH SYNOPSIS
 .sp
-pcocc reset [OPTIONS] [VM]
+pcocc ps [OPTIONS]
 .SH DESCRIPTION
 .sp
-Reset a VM. The effect is similar to the reset button on a physical machine.
-.sp
-\fBNOTE:\fP
-.INDENT 0.0
-.INDENT 3.5
-When you reset a VM, it is not returned to it\(aqs initial state and modifications to its ephemeral disks are kept. Cloud\-init enabled VMs will not replay instantiation\-time configuration directives.
-.UNINDENT
-.UNINDENT
+List currently running pcocc jobs. By default, only the jobs of the current user are listed. This behaviour can be changed with the \fI\-\-all\fP and \fI\-\-user\fP options.
 .SH OPTIONS
 .INDENT 0.0
 .INDENT 3.5
 .INDENT 0.0
 .TP
-.B \-j, \-\-jobid [INTEGER]
-Jobid of the selected cluster
+.B \-u \-\-user [TEXT]
+List jobs of the specified user
 .TP
-.B \-J, \-\-jobname [TEXT]
-Job name of the selected cluster
+.B \-a, \-\-all
+List all pcocc jobs
 .TP
 .B \-h, \-\-help
 Show this message and exit.
 .UNINDENT
 .UNINDENT
 .UNINDENT
-.SH EXAMPLE
+.SH EXAMPLES
 .sp
-To power cycle vm1:
+To list the pcocc jobs of the current user
 .INDENT 0.0
 .INDENT 3.5
-.sp
-.nf
-.ft C
-pcocc reset vm1
-.ft P
-.fi
+pcocc ps
 .UNINDENT
 .UNINDENT
-.SH SEE ALSO
-.sp
-pcocc\-console(1), pcocc\-dump(1)
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-SAVE" "1" "Sep 18, 2017" "0.4.0" "pcocc"
+.TH "PCOCC-SAVE" "1" "Sep 19, 2018" "0.5.0" "pcocc"
 .SH NAME
 pcocc-save \- Save the disk of a VM
 .
@@ -37,12 +37,19 @@ pcocc save [OPTIONS] [VM]
 .sp
 Save the disk of a VM to a new disk image.
 .sp
-By default, only the differences between the current state of the VM disk and the image from which it was instantiated are saved in an incremental file to form a new revision of the image. When a VM is instantiated it uses the latest revision of the image defined in its template. Incremental save files are stored in the image directory and all incremental saves leading to the latest revision have to be kept. A user needs to have write permissions on the image directory to be able to create new revisions. New full and independant images can be saved using the \fB\-d\fP flag which creates a new image directory with the initial revision of the newly created image.
+By default, only the differences between the current state of the VM disk and the image from which it was instantiated are saved in an incremental file to form a new revision of the image. When a VM is instantiated it uses the latest revision of the image defined in its template. The \fI\-d\fP option allows to create a new image instead of a new revision of the current image. The \fI\-\-full\fP flag allows to make the new image or revision from a standalone layer containing the whole image instead of a succession of incremental layers. Making a full image can be useful for performance reasons once the number of layers gets too large.
 .sp
 \fBWARNING:\fP
 .INDENT 0.0
 .INDENT 3.5
 It is recommended to have the \fIqemu\-guest\-agent\fP package installed in the guest (see next section).
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+In previous releases, pcocc images were saved in standalone directories. While this style of images is still properly handled by pcocc save, it is now considered deprecated and support will be removed in a future version.
 .UNINDENT
 .UNINDENT
 .SH RECOMMENDATIONS
@@ -61,11 +68,14 @@ Jobid of the selected cluster
 .B \-J, \-\-jobname TEXT
 Job name of the selected cluster
 .TP
-.B \-d, \-\-dest DIR
+.B \-d, \-\-dest URI
 Make a full copy in a new directory
 .TP
 .B \-s, \-\-safe
 Wait indefinitely for the Qemu agent to freeze filesystems
+.TP
+.B \-\-full
+Save a full image even if not necessary
 .TP
 .B \-h, \-\-help
 Show this message and exit.
@@ -87,61 +97,66 @@ $ pcocc save vm0
 Saving image...
 vm0 frozen
 vm0 thawed
-vm0 disk successfully saved to ./.pcocc/images/centos7\-cloud/image\-rev1
+vm0 disk successfully saved to centos7\-cloud revision 1
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .sp
-A new file is created in the image directory
+A new image revision is created
 .INDENT 0.0
 .INDENT 3.5
 .sp
 .nf
 .ft C
-$ ls ./.pcocc/images/centos7\-cloud/image\-rev1
-image  image\-rev1
+$ pcocc image show centos7\-cloud
+[..]
+
+REVISION    SIZE       CREATION DATE
+\-\-\-\-\-\-\-\-    \-\-\-\-       \-\-\-\-\-\-\-\- \-\-\-\-
+0           958  MB    2018\-08\-03 16:04:12
+1           44.0 MB    2018\-08\-03 16:09:54
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .sp
-The next VM instantiated with this image will use the new revision. You can undo saves by removing the latest revisions. However removing an intermediate revision will corrupt all subsequent revisions.
+The next VM instantiated with this image will use the new revision. You can undo saves by removing the latest revisions (see pcocc\-image(1)) or specify a specific revision in your template image URI.
 .SS Create a new independent images
 .sp
-If you want to create a new full image or do not have write permissions on the image directory use by your VM you can to use the "\-d" flag to save to an VM image in a new directory:
+If you want to create a new image or do not have write permissions on the image repository used by your VM you can use the \fI\-d\fP flag to save to a new VM image:
 .INDENT 0.0
 .INDENT 3.5
 .sp
 .nf
 .ft C
-$ pcocc save vm0 \-d $HOME/my\-centos7
+$ pcocc save vm0 \-d user:mycentos7
 Saving image...
 vm0 frozen
 vm0 thawed
 Merging snapshot with backing file to make it standalone...
-vm0 disk successfully saved to /home/user/my\-centos7/image
+vm0 disk successfully saved to user:mycentos revision 1
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .sp
-You can now create a template inheriting from the original one, but using the new image image, by editing your \fBtemplates.yaml\fP file:
+You can now create a template inheriting from the original one, but using the new image, by editing your \fBtemplates.yaml\fP file:
 .INDENT 0.0
 .INDENT 3.5
 .sp
 .nf
 .ft C
 mycentos:
-    inherits: centos7\-cloud
-    image: ~/my\-centos7/
+    inherits: centos7
+    image: user:mycentos
 .ft P
 .fi
 .UNINDENT
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-templates.yaml(5), pcocc\-newvm\-tutorial(7), pcocc\-ckpt(1), pcocc\-dump(1)
+o:ref:\fIpcocc\-image(1)<image>\fP, pcocc\-templates.yaml(5), pcocc\-newvm\-tutorial(7), pcocc\-ckpt(1), pcocc\-dump(1)
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

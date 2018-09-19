@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-TEMPLATES.YAML" "5" "Sep 18, 2017" "0.4.0" "pcocc"
+.TH "PCOCC-TEMPLATES.YAML" "5" "Sep 19, 2018" "0.5.0" "pcocc"
 .SH NAME
 pcocc-templates.yaml \- VM templates definition file
 .
@@ -32,15 +32,22 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 ..
 .SH DESCRIPTION
 .sp
-\fBtemplates.yaml\fP is a YAML formatted file defining VM templates that can be instantiated with pcocc. This configuration can be read from several locations. System\-wide definitions are read from \fB/etc/pcocc/templates.yaml\fP while user\-specific templates are read from \fB$HOME/.pcocc/templates.yaml\fP or from the directory referenced in the environment variable \fBPCOCC_USER_CONF_DIR\fP if it is set. A user has access to both his personal templates and the system\-wide templates.
+\fBtemplates.yaml\fP is a YAML formatted file defining VM templates that can be instantiated with pcocc. This configuration can be read from several locations. System\-wide definitions are read from \fB/etc/pcocc/templates.yaml\fP while user\-specific templates are read from \fB$HOME/.pcocc/templates.yaml\fP and from any file matching \fB$HOME/.pcocc/templates.d/*.yaml\fP\&. A user has access to both his personal templates and the system\-wide templates.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The location of user configuration files, by default \fB$HOME/.pcocc\fP can be changed to another directory by setting the  \fBPCOCC_USER_CONF_DIR\fP environment variable.
+.UNINDENT
+.UNINDENT
 .SH SYNTAX
 .sp
-The \fBtemplates.yaml\fP file contains a key/value mapping. Each key represents a template whose parameters are defined in the associated value. The only mandatory parameter is \fBresource\-set\fP\&. It can however be inherited from a parent template.
+The \fBtemplates.yaml\fP file contains a key/value mapping. Each key represents a template whose parameters are defined in the associated value. If the system configuration doesn\(aqt define a default \fBresource\-set\fP it is a mandatory parameter. It can however be inherited from a parent template. All other parameters are optional.
 .SS Template parameters
 .INDENT 0.0
 .TP
 \fBimage\fP
-Path to a directory containing a boot disk image. VMs instantiated from this template will boot from an ephemeral private copy of this image. This location must be available on both front\-end and compute nodes. See pcocc\-newvm\-tutorial(7) for importing existing images and pcocc\-save(1) for creating new images or revisions from running VMs.
+URI of a boot disk image in a pcocc repository. VMs instantiated from this template will boot from an ephemeral private copy of this image. See pcocc\-image(1) and pcocc\-newvm\-tutorial(7) for importing existing images and pcocc\-save(1) for creating new images or revisions from running VMs. In previous pcocc releases, images were stored in standalone directories. While still operational, this image format is considered as deprecated and support for these images will removed in a future version.
 .TP
 \fBresource\-set\fP
 Resources to provide to VMs instantiated from this template. This must reference a resource set defined in resources.yaml\&.
@@ -55,7 +62,7 @@ A string describing the VM template. This parameter is not inheritable.
 A cloud\-config file to configure a VM image with cloud\-init (see pcocc\-configvm\-tutorial(7))
 .TP
 \fBinstance\-id\fP
-Instance ID to provide to cloud\-init.
+Instance ID to provide to cloud\-init (defaults to a randomly generated uuid).
 .TP
 \fBmount\-points\fP
 A key/value mapping defining directories to export as 9p mount points (see pcocc\-9pmount\-tutorial(7)). Each key defines a 9p mount tag and the associated value defines the directory to export. The following parameters are supported:
@@ -106,6 +113,9 @@ Path to the Qemu binary to use to run the VMs (defaults to searching for qemu\-s
 .TP
 \fBnic\-model\fP
 Model of Qemu virtual Ethernet network card to provide to VMs (defaults to "virtio\-net").
+.TP
+\fBmachine\-type\fP
+Type of Qemu machine to emulate (defaults to "pc").
 .TP
 \fBdisk\-model\fP
 Model of Qemu virtual drive to provide to VMs. Valid parameters are \fIvirtio\fP (default) or \fIide\fP\&.
@@ -184,7 +194,7 @@ example:
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-template(1), pcocc\-batch(1), pcocc\-alloc(1), pcocc\-save(1), pcocc\-resources.yaml(5), pcocc\-networks.yaml(5), pcocc\-newvm\-tutorial(7)
+pcocc\-template(1), pcocc\-image(1), pcocc\-batch(1), pcocc\-alloc(1), pcocc\-save(1), pcocc\-resources.yaml(5), pcocc\-networks.yaml(5), pcocc\-newvm\-tutorial(7)
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

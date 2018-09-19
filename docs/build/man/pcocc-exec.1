@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-EXEC" "1" "Sep 18, 2017" "0.4.0" "pcocc"
+.TH "PCOCC-EXEC" "1" "Sep 19, 2018" "0.5.0" "pcocc"
 .SH NAME
 pcocc-exec \- Execute commands through the pcocc guest agent
 .
@@ -38,6 +38,14 @@ pcocc exec [OPTIONS] [CMD]...
 Execute commands through the guest agent
 .sp
 For this to work, the pcocc guest agent must be started in the guest. This is mostly available for internal use where we do not want to rely on a network connexion/ssh server.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+It is possible to detach from the output by typing \fIEscape + Enter\fP\&.
+In this case you may end the execution with \fIpcocc command release\fP\&.
+.UNINDENT
+.UNINDENT
 .SH OPTIONS
 .INDENT 0.0
 .INDENT 3.5
@@ -52,11 +60,17 @@ Jobid of the selected cluster
 .B \-J, \-\-jobname [TEXT]
 Job name of the selected cluster
 .TP
+.B \-w, \-\-rng [TEXT]
+Rangeset or vmid on which to run the command
+.TP
+.B \-c, \-\-cores [TEXT]
+Number of cores on which to run the command
+.TP
 .B \-u, \-\-user [TEXT]
 User id to use to execute the command
 .TP
-.B \-s, \-\-script
-Cmd is a shell script to be copied to /tmp and executed in place
+.B \-g, \-\-gid
+Group id to use to execute the command
 .TP
 .B \-h, \-\-help
 Show this message and exit.
@@ -78,6 +92,18 @@ pcocc exec "hostname"
 .UNINDENT
 .UNINDENT
 .sp
+To run the same command on all VMs (the "\-" rangeset means all VM):
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+pcocc exec \-w \- "hostname"
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
 To run a command as root in the third VM of the job named \fIcentos\fP:
 .INDENT 0.0
 .INDENT 3.5
@@ -85,33 +111,6 @@ To run a command as root in the third VM of the job named \fIcentos\fP:
 .nf
 .ft C
 pcocc exec \-J centos \-u root \-i 2 cat /etc/shadow
-.ft P
-.fi
-.UNINDENT
-.UNINDENT
-.SS Send and execute a script
-.sp
-pcocc exec can copy a script to the target machine and execute it. Assuming  \fB\&./script.sh\fP contains
-.INDENT 0.0
-.INDENT 3.5
-.sp
-.nf
-.ft C
-#!/bin/sh
-echo "Hello from $(hostname)"
-.ft P
-.fi
-.UNINDENT
-.UNINDENT
-.sp
-To execute it on the second VM of the default job as the current user:
-.INDENT 0.0
-.INDENT 3.5
-.sp
-.nf
-.ft C
-$ pccoc exec \-i 1 \-s ./script.sh
-Hello from vm1
 .ft P
 .fi
 .UNINDENT

@@ -31,8 +31,8 @@ Sub-Commands
    import [-t fmt] [KIND] [SOURCE] [DEST]
                 Import the source image file to an image in the destination repository. The destination image name must not already be used in the destination repository and the revision is ignored since the import operation creates the first revision of a new image. See below for supported image kinds and file formats.
 
-   export [-t fmt] [KIND] [SOURCE] [DEST]
-                Export the source image file from a repository to the destination file. See below for supported image kinds and file formats.
+   export [-t fmt] [SOURCE] [DEST]
+                Export the source image file from a repository to the destination file.
 
    copy [SOURCE] [DEST]
                 Copy an image from a repository to another image in a repository. The destination image name must not already be used in the destination repository and the destination revision is ignored since a copy operation creates the first revision of a new image.

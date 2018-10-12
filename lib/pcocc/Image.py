@@ -194,7 +194,7 @@ class ImageMgr(object):
 
         if kind == "vm":
             src_store = self.object_store.get_repo(meta["repo"])
-            convert(src_store.get_obj_path('data', meta['data_blobs'][0]),
+            convert(src_store.get_obj_path('data', meta['data_blobs'][-1]),
                     dst_path, "qcow2", dst_fmt)
 
     def copy_image(self, src_uri, dst_uri):

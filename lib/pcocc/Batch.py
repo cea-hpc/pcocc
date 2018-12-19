@@ -236,6 +236,10 @@ class BatchManager(object):
         """Called on each node at the resource deletion step"""
         pass
 
+    @abstractmethod
+    def vm_count(self):
+        """Returns the number of VMs in the cluster"""
+        pass
 
     @property
     def task_rank(self):
@@ -397,13 +401,18 @@ class EtcdManager(BatchManager):
         if not self._in_a_job:
             raise NoJobError()
 
-    def infer_user_and_alloc_id(self, user, batchid):
+    def _is_user_key_type(self, key_type):
+        return key_type.endswith('user')
+
+    def _is_cluster_key_type(self, key_type):
+        return key_type.startswith('cluster')
+
+    def infer_user_and_alloc_id(self, user, batchid, key_type):
         ruser = user
         rid = batchid
-        if ruser is None:
-            self._only_in_a_job()
+        if ruser is None and self._is_user_key_type(key_type):
             ruser = self.batchuser
-        if rid is None:
+        if rid is None and self._is_cluster_key_type(key_type):
             self._only_in_a_job()
             rid = self.batchid
         return ruser, rid
@@ -419,7 +428,7 @@ class EtcdManager(BatchManager):
         expires.
 
         """
-        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid, key_type)
 
         val, index = self.read_key_index(key_type, key, user=user, batchid=batchid)
         if val or not blocking:
@@ -449,7 +458,7 @@ class EtcdManager(BatchManager):
         Returns None if the key doesn't exist.
 
         """
-        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid, key_type)
 
         key_path = self.get_key_path(key_type, key,
                                      user, batchid)
@@ -473,7 +482,7 @@ class EtcdManager(BatchManager):
         lib)
 
         """
-        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid, key_type)
         val, _ = self.read_dir_index(key_type, key)
         return val
 
@@ -486,7 +495,7 @@ class EtcdManager(BatchManager):
         lib) and associated modification index
 
         """
-        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid, key_type)
 
         key_path = self.get_key_path(key_type, key, user, batchid)
         try:
@@ -593,7 +602,7 @@ class EtcdManager(BatchManager):
                        user=None,
                        batchid=None):
         """Wait until a key is updated from the specified index"""
-        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid, key_type)
 
         key_path = self.get_key_path(key_type, key, user, batchid)
 
@@ -638,7 +647,7 @@ class EtcdManager(BatchManager):
         only be written as root.
 
         """
-        user, batchid = self.infer_user_and_alloc_id(user, batchid)
+        user, batchid = self.infer_user_and_alloc_id(user, batchid, key_type)
 
         if key_type == 'global':
             return '/pcocc/global/{0}'.format(key)
@@ -1300,6 +1309,9 @@ class LocalManager(EtcdManager):
             pass
 
         raise AllocationError('Unable to find job with uuid {0}'.format(uuid))
+
+    def vm_count(self):
+        return 1
 
     def init_node(self):
         self._cleanup_orphan_jobs()

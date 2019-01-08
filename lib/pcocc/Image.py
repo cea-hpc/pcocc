@@ -214,6 +214,17 @@ class ImageMgr(object):
                                   src_meta["data_blobs"],
                                   src_meta["custom_meta"])
 
+
+    def resize_image(self, uri, new_size):
+        meta, src_path = self.get_image(uri)
+        repo = self.object_store.get_repo(meta['repo'])
+
+        tmp_path = repo.tmp_file(ext=".qcow2")
+
+        create(tmp_path, new_size, "qcow2", src_path)
+
+        self.add_revision_layer(uri, tmp_path)
+
     def check_overwrite(self, dst_uri):
         dst_name, dst_repo, _ = self.parse_image_uri(dst_uri)
         # Check if we would overwrite or shadow an other image
@@ -353,11 +364,16 @@ def convert(src, dst, src_format, dst_format):
         raise PcoccError("Unable to convert image. "
                          "The qemu-img command failed with: " +e.output)
 
-def create(path, size, fmt):
+def create(path, size, fmt, backing_path=None):
     check_qemu_image_fmt(fmt)
+
+    backing_opt = []
+    if backing_path:
+        backing_opt = ['-b', backing_path]
+
     try:
         subprocess.check_output(
-            ["qemu-img", "create", "-f", fmt, path, size])
+            ["qemu-img", "create", "-f", fmt] + backing_opt + [path, size])
     except subprocess.CalledProcessError, e:
         raise PcoccError("Unable to create image. "
                          "The qemu-img command failed with: " + e.output)

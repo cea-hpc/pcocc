@@ -40,6 +40,9 @@ Sub-Commands
    delete [IMAGE]
                 Delete an image from a repository. If a revision is specified, only the specified revision is deleted, otherwise all revisions of the image are deleted.
 
+   resize [IMAGE] [NEW_SZ]
+                A new image revision is created with the new image size.
+
    repo list
                 List configured repositories
 

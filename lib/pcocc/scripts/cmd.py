@@ -1638,6 +1638,28 @@ def pcocc_image_delete(image):
     except PcoccError as err:
         handle_error(err)
 
+@image.command(name='resize',
+             short_help="Resize an image in a repository")
+@click.argument('image', nargs=1, type=str)
+@click.argument('new_sz', nargs=1, type=str)
+def pcocc_image_resize(image, new_sz):
+    """Resize an image in a repository
+
+    Images in repositories are specified with URIs of the form
+    [REPO:]IMAGE[@REVISION]
+
+    A new image revision is created with the new image size.
+
+    \b
+    Example usage:
+           pcocc image resize myimg 20G
+    """
+    try:
+        load_config(None, None, "")
+        Config().images.resize_image(image, new_sz)
+    except PcoccError as err:
+        handle_error(err)
+
 @image.command(name='export',
              short_help="Export an image from a repository")
 @click.option('-t', '--fmt', type=str,

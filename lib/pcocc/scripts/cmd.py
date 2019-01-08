@@ -41,7 +41,6 @@ import stat
 from pcocc.Tbon import UserCA
 from pcocc.scripts import click
 from pcocc import PcoccError, Config, Cluster, Hypervisor
-from pcocc.Backports import subprocess_check_output
 from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from pcocc.scripts.Shine.TextTable import TextTable
@@ -665,18 +664,16 @@ def pcocc_console(jobid, jobname, log, vm):
             try:
                 # FIXME: reading the whole log at once will not
                 # work for large logs
-                log = subprocess_check_output(
-                    shlex.split(
-                        'ssh {0} cat {1}'.format(
-                            remote_host,
-                            config.batch.get_vm_state_path(
-                                vm.rank,
-                                'qemu_console_log'))))
-                click.echo_via_pager(log)
+                subprocess.check_call(shlex.split(
+                    'ssh -t {0} less {1}'.format(
+                        remote_host,
+                        config.batch.get_vm_state_path(
+                            vm.rank,
+                            'qemu_console_log'))))
             except Exception:
                 click.secho("Unable to read console log",
                             fg='red', err=True)
-
+                raise
             sys.exit(0)
 
 

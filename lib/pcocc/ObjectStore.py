@@ -127,7 +127,7 @@ class ObjectNotFound(PcoccError):
 
     @staticmethod
     def _revision_msg(revision):
-        if revision:
+        if revision is not None:
             return ' revision {0}'.format(revision)
         else:
             return ''
@@ -431,7 +431,7 @@ class ObjectStore(object):
         return ret
 
     def delete(self, name, revision=None):
-        if revision:
+        if revision is not None:
             revisions = [ revision ]
         else:
             revisions = self.get_revisions(name)

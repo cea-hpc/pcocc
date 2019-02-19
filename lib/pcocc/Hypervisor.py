@@ -863,6 +863,7 @@ username={3}@pcocc
         else:
             f.close()
 
+        cmdline += ['-S']
         cmdline += ['-rtc', 'base=utc']
         cmdline += ['-device', 'qxl-vga,id=video0,ram_size=67108864,'
                    'vram_size=67108864,vgamem_mb=16']
@@ -1209,6 +1210,7 @@ username={3}@pcocc
                     ['hwloc-calc' , '--po', '-I', 'PU',
                      'core:%s'%(virt_to_phys_coreid[cpu_id])]  +
                     topology_cache_args).strip()
+                phys_coreid = phys_coreid.split(',')[0]
                 subprocess_check_output(['taskset', '-p', '-c',
                                          phys_coreid, str(cpu_thread_id)])
 
@@ -1223,6 +1225,10 @@ username={3}@pcocc
             mon = RemoteMonitor(vm)
             while mon.query_status() == 'inmigrate':
                 time.sleep(1)
+            mon.cont()
+            mon.close_monitor()
+        else:
+            mon = RemoteMonitor(vm)
             mon.cont()
             mon.close_monitor()
 

@@ -1201,10 +1201,10 @@ class LocalManager(EtcdManager):
         for batchid, job in job_alloc_state['jobs'].iteritems():
             if (job['user'] == user and job['batchname'] == batchname):
                 if host and job['host'] == host:
-                    return batchid
+                    return int(batchid)
                 elif not host:
                     if job['host'] == socket.gethostname().split('.')[0]:
-                        return batchid
+                        return int(batchid)
                     else:
                         batchids.append(int(batchid))
                         hosts.append(job['host'])

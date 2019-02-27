@@ -1161,7 +1161,7 @@ class LocalManager(EtcdManager):
                            '',
                            ttl)
 
-    def list_all_jobs(self, include_expired=False):
+    def list_all_jobs(self, include_expired=False, details=False):
         """List all jobs in the cluster
 
         Returns a list of the batchids of all jobs in the cluster
@@ -1174,7 +1174,7 @@ class LocalManager(EtcdManager):
 
         user_live_batchids = self._list_alive_jobs()
 
-        batchids = []
+        jobs = {}
         for batchid, job in job_alloc_state['jobs'].iteritems():
             batchid = int(batchid)
             if (include_expired or
@@ -1182,12 +1182,39 @@ class LocalManager(EtcdManager):
                 datetime_to_epoch(datetime.datetime.now()) - job['start'] < 5 or
                 batchid in user_live_batchids):
 
-                batchids.append(batchid)
+                jobs[batchid] = job
             else:
-                logging.warning('list_all_jobs: ignoring stale job %s on %s ',
+                logging.warning('list_all_jobs: ignoring stale job %d on %s ',
                     batchid, job['host'])
 
-        return batchids
+        if details:
+            return jobs
+        else:
+            return list(jobs.keys())
+
+    def get_job_details(self, user=None):
+        """Gather details about pcocc jobs
+        """
+        ret = []
+        for batchid, job in self.list_all_jobs(details=True).iteritems():
+            if user and job['user'] != user:
+                continue
+
+            elapsed = datetime_to_epoch(datetime.datetime.now()) - job['start']
+            entry = {'batchid':    str(batchid),
+                     'user':       job['user'],
+                     'exectime':   str(datetime.timedelta(seconds=elapsed)),
+                     'timelimit':  'N/A',
+                     'partition':  'N/A',
+                     'node_count':  job['host'],
+                     'state':      job['host'],
+                     'jobname':    job['batchname']}
+
+
+            ret.append(entry)
+
+        return ret
+
 
     def find_job_by_name(self, user, batchname,
                          host=None):

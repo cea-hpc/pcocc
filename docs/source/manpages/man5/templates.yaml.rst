@@ -63,7 +63,7 @@ Template parameters
 **machine-type**
   Type of Qemu machine to emulate (defaults to "pc").
 **disk-model**
-  Model of Qemu virtual drive to provide to VMs. Valid parameters are *virtio* (default) or *ide*.
+  Model of Qemu virtual drive to provide to VMs. Valid parameters are *virtio* (default), *virtio-scsi* or *ide*.
 **emulator-cores**
   Number of cores to reserve for Qemu threads. These cores are deducted from the cores allocated for each VM (defaults to 0).
 

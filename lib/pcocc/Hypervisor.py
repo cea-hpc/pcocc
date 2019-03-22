@@ -869,19 +869,23 @@ username={3}@pcocc
                    'vram_size=67108864,vgamem_mb=16']
 
         self._set_vm_state('temporary-disk',
-                           'creating disk file',
+                           'configuring block devices',
                            None, vm.rank)
 
-        # Image
-        # Emulate -snapshot with qemu-img so that we
-        # may save the image later if needed
-        snapshot_path = batch.get_vm_state_path(vm.rank, 'image_snapshot')
+        # Use a scsi controller for cdrom and optionnaly
+        # for disk drives
+        cmdline += [ '-device', 'virtio-scsi-pci,id=scsi0']
 
+        block_idx = 0
         if vm.image_type != TEMPLATE_IMAGE_TYPE.NONE:
             if ckpt_dir:
                 image_path = self.checkpoint_img_file(vm, ckpt_dir)
             else:
                 image_path = vm.image_path
+
+            # Emulate -snapshot with qemu-img so that we
+            # may save the image later if needed
+            snapshot_path = batch.get_vm_state_path(vm.rank, 'image_snapshot')
 
             with open(os.devnull, 'w') as devnull:
                 try:
@@ -895,27 +899,12 @@ username={3}@pcocc
 
             atexit.register(os.remove, snapshot_path)
 
-            if vm.disk_model == 'virtio':
-                cmdline += ['-object',
-                            'iothread,id=ioth-bootdisk']
-                cmdline += ['-device',
-                            'virtio-blk-pci,id=ioth-bootdisk,multifunction=on,'
-                            'drive=bootdisk,addr=06.0']
-            elif vm.disk_model == 'ide':
-                cmdline += ['-device', 'ich9-ahci,id=ahci,addr=06.0']
-                cmdline += ['-device', 'ide-hd,'
-                            'drive=bootdisk,bus=ahci.0']
-            else:
-                raise HypervisorError('Unsupported disk model: '
-                                      + str(vm.disk_model))
-
-            cmdline += ['-drive', 'id=bootdisk,'
-                        'file=%s,index=0,if=none,'
-                        'format=qcow2,cache=%s,aio=threads' %
-                        (snapshot_path, vm.disk_cache)]
+            cmdline += qemu_gen_block_cmdline(vm.disk_model, snapshot_path, 'bootdisk',
+                                              block_idx, vm.disk_cache)
+            block_idx += 1
 
         for i, drive in enumerate(vm.persistent_drives):
-            path =  Config().resolve_path(drive, vm)
+            path = Config().resolve_path(drive, vm)
             if vm.persistent_drives[drive]['mmp']:
                 spath = os.path.realpath(path)
                 spath = spath[1:]
@@ -926,19 +915,9 @@ username={3}@pcocc
                                       self._do_lock_image,
                                       vm.persistent_drives[drive])
                 atexit.register(self._unlock_image, spath)
-
-            cmdline += ['-object',
-                        'iothread,id=ioth-datadisk{0}'.format(i)]
-            cmdline += ['-device',
-                        'virtio-blk-pci,id=ioth-datadisk{0},multifunction=on,'
-                        'drive=datadisk{0},addr={1:02d}.{2}'.format(
-                            i, i//3+7, i%3)]
-            cmdline += ['-drive',
-                        'file={0},cache={1},id=datadisk{2},'
-                        'if=none'.format(
-                        path,
-                        vm.persistent_drives[drive]['cache'],
-                        i)]
+            cmdline += qemu_gen_block_cmdline(vm.disk_model, path, 'datadisk'+str(i), block_idx,
+                                              vm.persistent_drives[drive]['cache'])
+            block_idx += 1
 
         if not '-boot' in vm.custom_args:
             cmdline += ['-boot', 'order=cd']
@@ -1134,10 +1113,8 @@ username={3}@pcocc
                                        meta_data_file],
                                       stdout=devnull, stderr=devnull)
 
-
             cmdline += [ '-drive', 'id=cdrom0,if=none,format=raw,'
                          'readonly=on,file={0}'.format(iso_file)]
-            cmdline += [ '-device', 'virtio-scsi-pci,id=scsi0']
             cmdline += [ '-device', 'scsi-cd,bus=scsi0.0,drive=cdrom0']
 
         except (OSError, IOError, subprocess.CalledProcessError) as err:
@@ -1964,3 +1941,60 @@ username={3}@pcocc
                 bar.update(1)
                 if vm_state['state'] == 'running':
                     break
+
+
+def qemu_gen_block_cmdline(model, path, name, index, cache):
+    if model == 'virtio':
+        return qemu_gen_vblk_cmdline(path, name, index, cache)
+    elif model == 'ide':
+        return qemu_gen_ide_cmdline(path, name, index, cache)
+    elif model == 'virtio-scsi':
+        return qemu_gen_scsi_cmdline(path, name, index, cache)
+
+    raise HypervisorError('Unknown block device model: {}'.format(model))
+
+def qemu_gen_ide_cmdline(path, name, index, cache):
+    cmd = []
+    if index == 0:
+        cmd += ['-device', 'ich9-ahci,id=ahci,addr=06.0']
+
+    cmd += ['-device', 'ide-hd,'
+            'drive=bootdisk,bus=ahci.0,unit={0}'.format(index)]
+
+    return cmd + qemu_gen_drive_cmdline(path, name, cache)
+
+def qemu_gen_vblk_cmdline(path, name, index, cache):
+    cmd = qemu_gen_iothread_cmdline(name)
+
+    # Keep adressing scheme used in previous versions
+    # for compatibility
+    if index == 0:
+        dev_addr = 6
+        func = 0
+    else:
+        dev_addr = (index - 1)//3 + 7
+        func = (index - 1) % 3
+
+    cmd += ['-device',
+            'virtio-blk-pci,id=vblk-{0},multifunction=on,'
+            'drive={0},addr={1:02d}.{2}'.format(name, dev_addr, func)]
+
+    return cmd + qemu_gen_drive_cmdline(path, name, cache)
+
+def qemu_gen_scsi_cmdline(path, name, index, cache):
+    cmd = qemu_gen_iothread_cmdline(name)
+
+    cmd += ['-device',
+            'scsi-hd,id=scsi-hd-{0},bus=scsi0.0,scsi-id={1},'
+            'drive={0}'.format(name, index)]
+
+    return cmd + qemu_gen_drive_cmdline(path, name, cache)
+
+def qemu_gen_iothread_cmdline(name):
+    return ['-object',
+           'iothread,id=ioth-{0}'.format(name)]
+
+def qemu_gen_drive_cmdline(path, name, cache):
+    return ['-drive',
+            'file={0},cache={1},id={2},'
+            'if=none'.format(path, cache, name)]

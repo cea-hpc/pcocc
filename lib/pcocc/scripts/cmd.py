@@ -16,6 +16,7 @@
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
+from __future__ import division
 
 import sys
 import subprocess
@@ -48,7 +49,8 @@ from pcocc.Agent import AgentCommand
 from pcocc.Templates import DRIVE_IMAGE_TYPE
 from pcocc import agent_pb2
 
-from ClusterShell.NodeSet import RangeSet, RangeSetParseError
+from ClusterShell.NodeSet import NodeSet, RangeSet, RangeSetParseError, NodeSetParseError
+
 
 helperdir = '/etc/pcocc/helpers'
 DEFAULT_AGENT_TIMEOUT=60
@@ -106,6 +108,28 @@ def load_batch_cluster():
     definition = Config().batch.read_key('cluster/user', 'definition',
                                                blocking=True)
     return Cluster(definition)
+
+
+def per_cluster_cli(allows_user):
+    """Decorator for CLI commands which act on a running cluster The
+       function arguments must contain jobid, jobname and cluster, and
+       optionally user if allows_user is True
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            if allows_user:
+                load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc',
+                            batchuser=kwargs["user"])
+            else:
+                load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc')
+
+            kwargs["cluster"] = load_batch_cluster()
+            try:
+                return func(*args, **kwargs)
+            except PcoccError as err:
+                handle_error(err)
+        return wrapper
+    return decorator
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
 @click.option('-v', '--verbose', count=True)
@@ -390,6 +414,20 @@ def validate_save_dir(dest_dir, force):
 
     return dest_dir
 
+
+def vm_set_to_index(vmset):
+    try:
+        nodeset = NodeSet(vmset)
+    except NodeSetParseError as e:
+        raise PcoccError(str(e))
+
+    res = []
+    for name in nodeset:
+        res.append(vm_name_to_index(name))
+
+    return RangeSet(res)
+
+
 def vm_name_to_index(name):
     match = re.match(r'vm(\d+)$', name)
     if not match:
@@ -482,8 +520,23 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
         else:
             freeze_opt = Hypervisor.VM_FREEZE_OPT.TRY
 
-        click.echo("Saving image...")
-        vm.save(save_path, full, freeze_opt)
+        if full:
+            mode = Hypervisor.DRIVE_SAVE_MODE.FULL
+        else:
+            mode = Hypervisor.DRIVE_SAVE_MODE.TOP
+
+        ret = save_drive(cluster,
+                         [vm.rank],
+                         ['drive0'],
+                         [save_path],
+                         mode,
+                         freeze_opt,
+                         False,
+                         False,
+                         'Updating repository...')
+
+
+        ret.raise_errors()
 
         if drive['type'] == DRIVE_IMAGE_TYPE.REPO:
             if not full:
@@ -516,8 +569,9 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
-@click.argument('vm', nargs=1, default='vm0')
-def pcocc_reset(jobid, jobname,  vm):
+@click.argument('vms', nargs=1, default='vm0')
+@per_cluster_cli(False)
+def pcocc_reset(jobid, jobname,  vms, cluster):
     """Reset a VM
 
     The effect is similar to the reset button on a physical machine.
@@ -528,14 +582,20 @@ def pcocc_reset(jobid, jobname,  vm):
 
     """
     try:
-        load_config(jobid, jobname, default_batchname='pcocc')
-        cluster = load_batch_cluster()
-        index = vm_name_to_index(vm)
-        vm = cluster.vms[index]
+        index = vm_set_to_index(vms)
+        start_time = time.time()
 
-        vm.reset()
+        ret = AgentCommand.reset(cluster, index)
+        for k, e in ret.iterate():
+            display_vmagent_error(k, e)
 
-        click.secho('vm%d has been reset'% (index), fg='green')
+        if not ret.errors:
+            click.secho("{} VMs reset in {:.2f}s".format(
+                len(index), time.time() - start_time),
+                        fg='green', err=True)
+
+        # Return -1 if there is any error
+        sys.exit(-int(bool(ret.errors)))
 
     except PcoccError as err:
         handle_error(err)
@@ -548,9 +608,10 @@ def pcocc_reset(jobid, jobname,  vm):
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
-@click.argument('vm', nargs=1, default='vm0')
+@click.argument('vms', nargs=1, default='vm0')
 @click.argument('cmd', nargs=-1)
-def pcocc_monitor_cmd(jobid, jobname,  vm, cmd):
+@per_cluster_cli(False)
+def pcocc_monitor_cmd(jobid, jobname,  vms, cmd, cluster):
     """Send a command to the monitor
 
     \b
@@ -559,13 +620,16 @@ def pcocc_monitor_cmd(jobid, jobname,  vm, cmd):
 
     """
     try:
-        load_config(jobid, jobname, default_batchname='pcocc')
-        cluster = load_batch_cluster()
-        index = vm_name_to_index(vm)
-        vm = cluster.vms[index]
-        vm.wait_start()
-        res = vm.human_monitor_cmd(' '.join(cmd))
-        print res
+        index = vm_set_to_index(vms)
+
+        ret = AgentCommand.monitor_cmd(cluster, index, cmd=cmd)
+        for k, e in ret.iterate():
+            display_vmagent_error(k, e)
+
+        print ret
+
+        # Return -1 if there is any error
+        sys.exit(-int(bool(ret.errors)))
 
     except PcoccError as err:
         handle_error(err)
@@ -579,7 +643,8 @@ def pcocc_monitor_cmd(jobid, jobname,  vm, cmd):
               help='Job name of the selected cluster')
 @click.argument('vm', nargs=1)
 @click.argument('dumpfile', nargs=1)
-def pcocc_dump(jobid, jobname,  vm, dumpfile):
+@per_cluster_cli(False)
+def pcocc_dump(jobid, jobname,  vm, dumpfile, cluster):
     """Dump VM memory to a file
 
     The file is saved as ELF and includes the guest's memory
@@ -591,17 +656,30 @@ def pcocc_dump(jobid, jobname,  vm, dumpfile):
 
     """
     try:
-        load_config(jobid, jobname, default_batchname='pcocc')
-        cluster = load_batch_cluster()
-        index = vm_name_to_index(vm)
-        vm = cluster.vms[index]
+        index = vm_set_to_index(vm)
+        start_time = time.time()
 
         dumpfile = os.path.abspath(dumpfile)
 
-        click.secho('Dumping vm memory...')
-        vm.dump(dumpfile)
-        click.secho('vm%d has been dumped to %s'% (index,
-                                                   dumpfile), fg='green')
+        ret = AgentCommand.dump(cluster, index, path=dumpfile)
+
+        last = 0
+        with click.progressbar(length = 100, label = 'Dumping memory') as bar:
+            for k, r in ret.iterate(yield_results=True, yield_errors=True):
+                if isinstance(r, Exception):
+                    click.echo('\nvm{0}: {1}'.format(k, r), err=True)
+                    continue
+
+                upd = int(100 * r.pct) - last
+                last = last + upd
+                if upd:
+                    bar.update(upd)
+
+        ret.raise_errors()
+
+        click.secho("{} VMs dumped in {:.2f}s".format(
+            len(index), time.time() - start_time),
+                    fg='green', err=True)
 
     except PcoccError as err:
         handle_error(err)
@@ -639,18 +717,197 @@ def pcocc_ckpt(jobid, jobname, force, ckpt_dir):
         dest_dir = validate_save_dir(ckpt_dir, force)
 
         # Try to freeze
-        click.secho('Preparing checkpoint')
+        click.secho('Preparing checkpoint...')
         ret = AgentCommand.freeze(cluster, CLIRangeSet("all", cluster), timeout=5)
-        for _, _ in ret.iterate():
-            pass
+        ret.iterate_all()
 
-        cluster.checkpoint(dest_dir)
+
+        save_drive_list = []
+        for vm in cluster.vms:
+            if vm.image_type != DRIVE_IMAGE_TYPE.NONE:
+                save_drive_list.append(vm.rank)
+
+        if save_drive_list:
+            ret = save_drive(cluster,
+                             RangeSet(save_drive_list),
+                             ['drive0'],
+                             [os.path.join(dest_dir, 'disk')],
+                             Hypervisor.DRIVE_SAVE_MODE.TOP,
+                             Hypervisor.VM_FREEZE_OPT.NO,
+                             True,
+                             True,
+                             'Drive checkpoint complete')
+
+            ret.raise_errors()
+
+        ret = ckpt_memory(cluster, CLIRangeSet("all", cluster),
+                          os.path.join(dest_dir, 'memory'), True,
+                          'Memory checkpoint complete')
+        ret.raise_errors()
+
         click.secho('Cluster state succesfully checkpointed '
                     'to %s'%(dest_dir), fg='green')
 
     except PcoccError as err:
         handle_error(err)
 
+
+def ckpt_memory(cluster, vm_indices, path, use_suffix, final_message):
+    ret = AgentCommand.checkpoint(cluster,
+                                 RangeSet(vm_indices),
+                                 path=path,
+                                 vm_suffix_path=use_suffix)
+
+    running_count = len(vm_indices)
+
+    vm_tx = [0] * len(cluster.vms)
+    vm_tot = [0] * len(cluster.vms)
+
+
+    show_eta = False
+    show_percent = False
+    item_show_func = (lambda x: ('({:.2f}MB / {:.2f}MB)'.format(
+                float(x[0]) / 1024 / 1024,
+                float(x[1]) / 1024 / 1024 )) if x
+                      else '')
+
+    with click.progressbar(length = 1000000,
+                           label = 'Stopping VMs',
+                           show_eta = show_eta,
+                           show_percent = show_percent,
+                           bar_template = '%(label)s %(info)s',
+                           item_show_func = item_show_func,
+                           ) as bar:
+
+        for k, r in ret.iterate(yield_results=True, yield_errors=True):
+            if isinstance(r, Exception):
+                click.echo('\nvm{0}: {1}'.format(k, r), err=True)
+                continue
+
+            if r.status == 'active':
+                if running_count > 1:
+                    vm_str = ' ({} VMs)'.format(running_count)
+                else:
+                    vm_str = ''
+
+                bar.label = 'Copying memory{}...'.format(vm_str)
+                vm_tx[k] = (r.total - r.remaining)
+                vm_tot[k] = r.total
+
+            if r.status == 'complete':
+                running_count = running_count - 1
+
+                vm_tx[k] = vm_tot[k]
+                if running_count == 0:
+                    bar.label = final_message
+
+            bar.current_item = (sum(vm_tx), sum(vm_tot), running_count)
+            bar.update(1)
+
+    return ret
+
+def save_drive(cluster, vm_indices, drives, paths, save_mode, freeze_mode,
+               use_suffix, stop_vm, final_message):
+
+    ret = AgentCommand.save(cluster,
+                            RangeSet(vm_indices),
+                            drives = drives,
+                            paths  = paths,
+                            mode   = save_mode,
+                            freeze = freeze_mode,
+                            vm_suffix_path = use_suffix)
+
+    if save_mode == Hypervisor.DRIVE_SAVE_MODE.FULL and len(vm_indices) == 1:
+        show_eta = True
+        show_percent = True
+        item_show_func = (lambda x: ('({:.2f}MB / {:.2f}MB)'.format(
+                    float(x[0]) / 1024 / 1024,
+                    float(x[1]) / 1024 / 1024) ) if x
+                          else '')
+    else:
+        show_eta = False
+        show_percent = False
+        item_show_func = (lambda x: ('({:.2f}MB)'.format(
+                    float(x[0]) / 1024 / 1024)) if x
+                          else '')
+
+    running_count = len(vm_indices)
+    vm_tx = [0] * len(cluster.vms)
+
+    if freeze_mode == Hypervisor.VM_FREEZE_OPT.NO:
+        initial_message = 'Initiating copy...'
+        freeze_count = 0
+    else:
+        initial_message = 'Freezing drives...'
+        freeze_count = len(vm_indices)
+
+    if stop_vm:
+        stop_count = len(vm_indices)
+    else:
+        stop_count = 0
+
+    with click.progressbar(length = 1000000,
+                           label = initial_message,
+                           show_eta = show_eta,
+                           show_percent = show_percent,
+                           bar_template = '%(label)s %(info)s',
+                           item_show_func = item_show_func,
+                           ) as bar:
+
+        for k, r in ret.iterate(yield_results=True, yield_errors=True):
+            if isinstance(r, Exception):
+                click.echo('\nvm{0}: {1}'.format(k, r), err=True)
+                continue
+
+            if r.status == 'freeze-failed':
+                click.secho('\nvm{0}: failed to freeze filesystems, '
+                            'data could be corrupted if filesystems are in use'.format(k),
+                            fg='red',
+                            err=True)
+                freeze_count = freeze_count - 1
+                bar.update(1)
+                continue
+
+            if r.status == 'frozen':
+                freeze_count = freeze_count - 1
+                bar.update(1)
+                continue
+
+            if r.status == 'vm-stopped':
+                stop_count = stop_count - 1
+                if freeze_count == 0:
+                    bar.label = 'Stopping VMs...'
+                bar.update(1)
+                continue
+
+            if r.status == 'running':
+                if show_percent:
+                    upd = int(1000000. * float(r.offset - vm_tx[k]) /
+                              float(r.len))
+                else:
+                    upd = 1
+
+                vm_tx[k] = r.offset
+
+                if running_count > 1:
+                    drv_str = ' ({} drives)'.format(running_count)
+                else:
+                    drv_str = ''
+                if stop_count == 0:
+                    bar.label = 'Copying drive data{}...'.format(drv_str)
+                    bar.current_item = (sum(vm_tx), r.len, running_count)
+
+                bar.update(upd)
+
+            elif r.status == 'complete':
+                running_count = running_count - 1
+                bar.current_item = (sum(vm_tx), sum(vm_tx),
+                                    running_count)
+                if running_count == 0:
+                    bar.label = final_message
+                    bar.update(1000000)
+
+    return ret
 
 @cli.command(name='console',
              short_help='Connect to a VM console')
@@ -1246,27 +1503,6 @@ class CLIRangeSet(RangeSet):
         except RangeSetParseError as e:
             raise PcoccError(str(e))
 
-def per_cluster_cli(allows_user):
-    """Decorator for CLI commands which act on a running cluster The
-       function arguments must contain jobid, jobname and cluster, and
-       optionally user if allows_user is True
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            if allows_user:
-                load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc',
-                            batchuser=kwargs["user"])
-            else:
-                load_config(kwargs["jobid"], kwargs["jobname"], default_batchname='pcocc')
-
-            kwargs["cluster"] = load_batch_cluster()
-            try:
-                return func(*args, **kwargs)
-            except PcoccError as err:
-                handle_error(err)
-        return wrapper
-    return decorator
-
 
 def writefile(cluster, indices, source, destination, timeout=DEFAULT_AGENT_TIMEOUT):
     try:
@@ -1296,7 +1532,7 @@ def parallel_execve(cluster, indices, cmd, env, user, display_errors=True,
                     timeout=DEFAULT_AGENT_TIMEOUT):
     # Launch tasks on rangeset
     exec_id = random.randint(0, 2**63-1)
-    ret = AgentCommand.execve(cluster, indices, filename=cmd[0],
+    ret = AgentCommand.execve(cluster, RangeSet(indices), filename=cmd[0],
                               exec_id=exec_id, args=cmd[1:],
                               env=env, username=user, timeout=timeout)
 

@@ -164,6 +164,66 @@ message HelloResult {
    int32 version = 2;
 }
 
+message ResetMessage {
+}
+
+message ResetResult {
+}
+
+message DumpMessage {
+   string path = 1;
+}
+
+message DumpResult {
+   bool complete = 1;
+   float pct = 2;
+}
+
+message MonitorCmdMessage {
+   repeated string cmd = 1;
+}
+
+message MonitorCmdResult {
+   string output = 1;
+}
+
+message CheckpointMessage {
+   string path = 1;
+   bool vm_suffix_path = 2;
+}
+
+message CheckpointResult {
+  uint64 remaining = 1;
+  uint64 total = 2;
+  string status = 3;
+}
+
+message SaveDriveResult {
+  string drive = 1;
+  uint64 len = 2;
+  uint64 offset = 3;
+  string status = 4;
+}
+
+message SaveDriveMessage {
+   repeated string  drives = 1;
+   repeated string  paths = 2;
+   enum SaveMode {
+        FULL = 0;
+        TOP = 1;
+        INCR = 2;
+   }
+   SaveMode mode = 3;
+   enum FreezeMode {
+        NO = 0;
+        TRY = 1;
+        YES = 2;
+   }
+   FreezeMode freeze = 4;
+   bool vm_suffix_path = 5;
+   bool stop_vm = 6;
+}
+
 message MkdirMessage {
    string path = 1;
    uint32 mode = 2;

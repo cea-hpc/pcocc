@@ -21,7 +21,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   name='agent.proto',
   package='',
   syntax='proto3',
-  serialized_pb=_b('\n\x0b\x61gent.proto\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"U\n\x0cRouteMessage\x12\x13\n\x0b\x64\x65stination\x18\x01 \x01(\x05\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\"\n\x04\x61rgs\x18\x03 \x01(\x0b\x32\x14.google.protobuf.Any\"V\n\x0cMcastMessage\x12\x14\n\x0c\x64\x65stinations\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\"\n\x04\x61rgs\x18\x03 \x01(\x0b\x32\x14.google.protobuf.Any\"{\n\x12RouteMessageResult\x12\x1e\n\x05\x65rror\x18\x01 \x01(\x0b\x32\r.GenericErrorH\x00\x12&\n\x06result\x18\x02 \x01(\x0b\x32\x14.google.protobuf.AnyH\x00\x12\x0e\n\x06source\x18\x03 \x01(\x05\x42\r\n\x0bresult_type\"\xdf\x01\n\x0cGenericError\x12%\n\x04kind\x18\x01 \x01(\x0e\x32\x17.GenericError.ErrorKind\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12%\n\x07\x64\x65tails\x18\x03 \x01(\x0b\x32\x14.google.protobuf.Any\"l\n\tErrorKind\x12\x10\n\x0cGenericError\x10\x00\x12\x0b\n\x07Timeout\x10\x01\x12\x0f\n\x0bUnreachable\x10\x02\x12\r\n\tCancelled\x10\x03\x12\x10\n\x0cPayloadError\x10\x04\x12\x0e\n\nAgentError\x10\x05\"\xcf\x01\n\x0c\x41gentMessage\x12#\n\x04kind\x18\x01 \x01(\x0e\x32\x15.AgentMessage.MsgKind\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0b\n\x03tag\x18\x03 \x01(\x03\x12\"\n\x04\x64\x61ta\x18\x04 \x01(\x0b\x32\x14.google.protobuf.Any\"[\n\x07MsgKind\x12\x0b\n\x07Request\x10\x00\x12\t\n\x05Reply\x10\x01\x12\t\n\x05\x41sync\x10\x02\x12\x11\n\rStreamRequest\x10\x03\x12\x0f\n\x0bStreamReply\x10\x04\x12\t\n\x05\x45rror\x10\x05\"]\n\x0b\x45xecMessage\x12\x0f\n\x07\x65xec_id\x18\x01 \x01(\x03\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x0c\n\x04\x61rgs\x18\x03 \x03(\t\x12\x0b\n\x03\x65nv\x18\x04 \x03(\t\x12\x10\n\x08username\x18\x05 \x01(\t\"\x0c\n\nExecResult\"\x11\n\x0fListExecMessage\"?\n\x08\x45xecInfo\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x10\n\x08\x61ttached\x18\x02 \x01(\x08\x12\x0f\n\x07running\x18\x03 \x01(\x08\"t\n\x0eListExecResult\x12)\n\x05\x65xecs\x18\x01 \x03(\x0b\x32\x1a.ListExecResult.ExecsEntry\x1a\x37\n\nExecsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ExecInfo:\x02\x38\x01\" \n\rAttachMessage\x12\x0f\n\x07\x65xec_id\x18\x02 \x01(\x03\"\x0e\n\x0c\x41ttachResult\"-\n\rDetachMessage\x12\x0f\n\x07\x65xec_id\x18\x02 \x01(\x03\x12\x0b\n\x03tag\x18\x03 \x01(\x03\"\x0e\n\x0c\x44\x65tachResult\"\x1e\n\x0bKillMessage\x12\x0f\n\x07\x65xec_id\x18\x02 \x01(\x03\"\x0c\n\nKillResult\"\x87\x01\n\tIOMessage\x12 \n\x04kind\x18\x01 \x01(\x0e\x32\x12.IOMessage.MsgKind\x12\x0b\n\x03\x65of\x18\x02 \x01(\x08\x12\x0c\n\x04\x64\x61ta\x18\x03 \x01(\x0c\x12\x0f\n\x07\x65xec_id\x18\x04 \x01(\x03\",\n\x07MsgKind\x12\t\n\x05stdin\x10\x00\x12\n\n\x06stdout\x10\x01\x12\n\n\x06stderr\x10\x02\"\n\n\x08IOResult\"\x1c\n\nExitStatus\x12\x0e\n\x06status\x18\x01 \x01(\x05\"\r\n\x0bThawMessage\"\x0c\n\nThawResult\"\x0f\n\rFreezeMessage\"\x0e\n\x0c\x46reezeResult\"\x0e\n\x0cHelloMessage\"-\n\x0bHelloResult\x12\r\n\x05\x65poch\x18\x01 \x01(\x03\x12\x0f\n\x07version\x18\x02 \x01(\x05\"?\n\x0cMkdirMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04mode\x18\x02 \x01(\r\x12\x13\n\x0bmake_parent\x18\x03 \x01(\x08\"\r\n\x0bMkdirResult\"\x11\n\x0fHostnameMessage\"\"\n\x0eHostnameResult\x12\x10\n\x08hostname\x18\x01 \x01(\t\";\n\x0c\x43hmodMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04mode\x18\x02 \x01(\r\x12\x0f\n\x07recurse\x18\x03 \x01(\x08\"\r\n\x0b\x43hmodResult\"G\n\x0c\x43hownMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0b\n\x03uid\x18\x02 \x01(\r\x12\x0b\n\x03gid\x18\x03 \x01(\r\x12\x0f\n\x07recurse\x18\x04 \x01(\x08\"\r\n\x0b\x43hownResult\"*\n\x0eSymlinkMessage\x12\x0b\n\x03src\x18\x01 \x01(\t\x12\x0b\n\x03\x64st\x18\x02 \x01(\t\"\x0f\n\rSymlinkResult\".\n\rRemoveMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0f\n\x07recurse\x18\x02 \x01(\x08\"\x0e\n\x0cRemoveResult\"\'\n\x0bMoveMessage\x12\x0b\n\x03src\x18\x01 \x01(\t\x12\x0b\n\x03\x64st\x18\x02 \x01(\t\"\x0c\n\nMoveResult\"-\n\x0fTruncateMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04size\x18\x02 \x01(\x03\"\x10\n\x0eTruncateResult\"\x1b\n\x0bStatMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\"t\n\nStatResult\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04size\x18\x02 \x01(\x03\x12\x0c\n\x04mode\x18\x03 \x01(\x05\x12,\n\x08mod_time\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x0e\n\x06is_dir\x18\x05 \x01(\x08\"M\n\x10WriteFileMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\r\n\x05perms\x18\x04 \x01(\x05\x12\x0e\n\x06\x61ppend\x18\x03 \x01(\x08\"\"\n\x0fWriteFileResult\x12\x0f\n\x07written\x18\x01 \x01(\x03\x32x\n\tpcoccNode\x12\x33\n\rroute_command\x12\r.RouteMessage\x1a\x13.RouteMessageResult\x12\x36\n\x0croute_stream\x12\r.McastMessage\x1a\x13.RouteMessageResult(\x01\x30\x01\x42\x10Z\x0e\x61gent_protocolb\x06proto3')
+  serialized_pb=_b('\n\x0b\x61gent.proto\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"U\n\x0cRouteMessage\x12\x13\n\x0b\x64\x65stination\x18\x01 \x01(\x05\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\"\n\x04\x61rgs\x18\x03 \x01(\x0b\x32\x14.google.protobuf.Any\"V\n\x0cMcastMessage\x12\x14\n\x0c\x64\x65stinations\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\"\n\x04\x61rgs\x18\x03 \x01(\x0b\x32\x14.google.protobuf.Any\"{\n\x12RouteMessageResult\x12\x1e\n\x05\x65rror\x18\x01 \x01(\x0b\x32\r.GenericErrorH\x00\x12&\n\x06result\x18\x02 \x01(\x0b\x32\x14.google.protobuf.AnyH\x00\x12\x0e\n\x06source\x18\x03 \x01(\x05\x42\r\n\x0bresult_type\"\xdf\x01\n\x0cGenericError\x12%\n\x04kind\x18\x01 \x01(\x0e\x32\x17.GenericError.ErrorKind\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12%\n\x07\x64\x65tails\x18\x03 \x01(\x0b\x32\x14.google.protobuf.Any\"l\n\tErrorKind\x12\x10\n\x0cGenericError\x10\x00\x12\x0b\n\x07Timeout\x10\x01\x12\x0f\n\x0bUnreachable\x10\x02\x12\r\n\tCancelled\x10\x03\x12\x10\n\x0cPayloadError\x10\x04\x12\x0e\n\nAgentError\x10\x05\"\xcf\x01\n\x0c\x41gentMessage\x12#\n\x04kind\x18\x01 \x01(\x0e\x32\x15.AgentMessage.MsgKind\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0b\n\x03tag\x18\x03 \x01(\x03\x12\"\n\x04\x64\x61ta\x18\x04 \x01(\x0b\x32\x14.google.protobuf.Any\"[\n\x07MsgKind\x12\x0b\n\x07Request\x10\x00\x12\t\n\x05Reply\x10\x01\x12\t\n\x05\x41sync\x10\x02\x12\x11\n\rStreamRequest\x10\x03\x12\x0f\n\x0bStreamReply\x10\x04\x12\t\n\x05\x45rror\x10\x05\"]\n\x0b\x45xecMessage\x12\x0f\n\x07\x65xec_id\x18\x01 \x01(\x03\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x0c\n\x04\x61rgs\x18\x03 \x03(\t\x12\x0b\n\x03\x65nv\x18\x04 \x03(\t\x12\x10\n\x08username\x18\x05 \x01(\t\"\x0c\n\nExecResult\"\x11\n\x0fListExecMessage\"?\n\x08\x45xecInfo\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x10\n\x08\x61ttached\x18\x02 \x01(\x08\x12\x0f\n\x07running\x18\x03 \x01(\x08\"t\n\x0eListExecResult\x12)\n\x05\x65xecs\x18\x01 \x03(\x0b\x32\x1a.ListExecResult.ExecsEntry\x1a\x37\n\nExecsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x03\x12\x18\n\x05value\x18\x02 \x01(\x0b\x32\t.ExecInfo:\x02\x38\x01\" \n\rAttachMessage\x12\x0f\n\x07\x65xec_id\x18\x02 \x01(\x03\"\x0e\n\x0c\x41ttachResult\"-\n\rDetachMessage\x12\x0f\n\x07\x65xec_id\x18\x02 \x01(\x03\x12\x0b\n\x03tag\x18\x03 \x01(\x03\"\x0e\n\x0c\x44\x65tachResult\"\x1e\n\x0bKillMessage\x12\x0f\n\x07\x65xec_id\x18\x02 \x01(\x03\"\x0c\n\nKillResult\"\x87\x01\n\tIOMessage\x12 \n\x04kind\x18\x01 \x01(\x0e\x32\x12.IOMessage.MsgKind\x12\x0b\n\x03\x65of\x18\x02 \x01(\x08\x12\x0c\n\x04\x64\x61ta\x18\x03 \x01(\x0c\x12\x0f\n\x07\x65xec_id\x18\x04 \x01(\x03\",\n\x07MsgKind\x12\t\n\x05stdin\x10\x00\x12\n\n\x06stdout\x10\x01\x12\n\n\x06stderr\x10\x02\"\n\n\x08IOResult\"\x1c\n\nExitStatus\x12\x0e\n\x06status\x18\x01 \x01(\x05\"\r\n\x0bThawMessage\"\x0c\n\nThawResult\"\x0f\n\rFreezeMessage\"\x0e\n\x0c\x46reezeResult\"\x0e\n\x0cHelloMessage\"-\n\x0bHelloResult\x12\r\n\x05\x65poch\x18\x01 \x01(\x03\x12\x0f\n\x07version\x18\x02 \x01(\x05\"\x0e\n\x0cResetMessage\"\r\n\x0bResetResult\"\x1b\n\x0b\x44umpMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\"+\n\nDumpResult\x12\x10\n\x08\x63omplete\x18\x01 \x01(\x08\x12\x0b\n\x03pct\x18\x02 \x01(\x02\" \n\x11MonitorCmdMessage\x12\x0b\n\x03\x63md\x18\x01 \x03(\t\"\"\n\x10MonitorCmdResult\x12\x0e\n\x06output\x18\x01 \x01(\t\"M\n\x0fSaveDriveResult\x12\r\n\x05\x64rive\x18\x01 \x01(\t\x12\x0b\n\x03len\x18\x02 \x01(\x04\x12\x0e\n\x06offset\x18\x03 \x01(\x04\x12\x0e\n\x06status\x18\x04 \x01(\t\"9\n\x11\x43heckpointMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x16\n\x0evm_suffix_path\x18\x02 \x01(\x08\"D\n\x10\x43heckpointResult\x12\x11\n\tremaining\x18\x01 \x01(\x04\x12\r\n\x05total\x18\x02 \x01(\x04\x12\x0e\n\x06status\x18\x03 \x01(\t\"\x83\x02\n\x10SaveDriveMessage\x12\x0e\n\x06\x64rives\x18\x01 \x03(\t\x12\r\n\x05paths\x18\x02 \x03(\t\x12(\n\x04mode\x18\x03 \x01(\x0e\x32\x1a.SaveDriveMessage.SaveMode\x12,\n\x06\x66reeze\x18\x04 \x01(\x0e\x32\x1c.SaveDriveMessage.FreezeMode\x12\x16\n\x0evm_suffix_path\x18\x05 \x01(\x08\x12\x0f\n\x07stop_vm\x18\x06 \x01(\x08\"\'\n\x08SaveMode\x12\x08\n\x04\x46ULL\x10\x00\x12\x07\n\x03TOP\x10\x01\x12\x08\n\x04INCR\x10\x02\"&\n\nFreezeMode\x12\x06\n\x02NO\x10\x00\x12\x07\n\x03TRY\x10\x01\x12\x07\n\x03YES\x10\x02\"?\n\x0cMkdirMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04mode\x18\x02 \x01(\r\x12\x13\n\x0bmake_parent\x18\x03 \x01(\x08\"\r\n\x0bMkdirResult\"\x11\n\x0fHostnameMessage\"\"\n\x0eHostnameResult\x12\x10\n\x08hostname\x18\x01 \x01(\t\";\n\x0c\x43hmodMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04mode\x18\x02 \x01(\r\x12\x0f\n\x07recurse\x18\x03 \x01(\x08\"\r\n\x0b\x43hmodResult\"G\n\x0c\x43hownMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0b\n\x03uid\x18\x02 \x01(\r\x12\x0b\n\x03gid\x18\x03 \x01(\r\x12\x0f\n\x07recurse\x18\x04 \x01(\x08\"\r\n\x0b\x43hownResult\"*\n\x0eSymlinkMessage\x12\x0b\n\x03src\x18\x01 \x01(\t\x12\x0b\n\x03\x64st\x18\x02 \x01(\t\"\x0f\n\rSymlinkResult\".\n\rRemoveMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0f\n\x07recurse\x18\x02 \x01(\x08\"\x0e\n\x0cRemoveResult\"\'\n\x0bMoveMessage\x12\x0b\n\x03src\x18\x01 \x01(\t\x12\x0b\n\x03\x64st\x18\x02 \x01(\t\"\x0c\n\nMoveResult\"-\n\x0fTruncateMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04size\x18\x02 \x01(\x03\"\x10\n\x0eTruncateResult\"\x1b\n\x0bStatMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\"t\n\nStatResult\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04size\x18\x02 \x01(\x03\x12\x0c\n\x04mode\x18\x03 \x01(\x05\x12,\n\x08mod_time\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x0e\n\x06is_dir\x18\x05 \x01(\x08\"M\n\x10WriteFileMessage\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\r\n\x05perms\x18\x04 \x01(\x05\x12\x0e\n\x06\x61ppend\x18\x03 \x01(\x08\"\"\n\x0fWriteFileResult\x12\x0f\n\x07written\x18\x01 \x01(\x03\x32x\n\tpcoccNode\x12\x33\n\rroute_command\x12\r.RouteMessage\x1a\x13.RouteMessageResult\x12\x36\n\x0croute_stream\x12\r.McastMessage\x1a\x13.RouteMessageResult(\x01\x30\x01\x42\x10Z\x0e\x61gent_protocolb\x06proto3')
   ,
   dependencies=[google_dot_protobuf_dot_any__pb2.DESCRIPTOR,google_dot_protobuf_dot_timestamp__pb2.DESCRIPTOR,])
 
@@ -128,6 +128,58 @@ _IOMESSAGE_MSGKIND = _descriptor.EnumDescriptor(
   serialized_end=1417,
 )
 _sym_db.RegisterEnumDescriptor(_IOMESSAGE_MSGKIND)
+
+_SAVEDRIVEMESSAGE_SAVEMODE = _descriptor.EnumDescriptor(
+  name='SaveMode',
+  full_name='SaveDriveMessage.SaveMode',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='FULL', index=0, number=0,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TOP', index=1, number=1,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='INCR', index=2, number=2,
+      options=None,
+      type=None),
+  ],
+  containing_type=None,
+  options=None,
+  serialized_start=2150,
+  serialized_end=2189,
+)
+_sym_db.RegisterEnumDescriptor(_SAVEDRIVEMESSAGE_SAVEMODE)
+
+_SAVEDRIVEMESSAGE_FREEZEMODE = _descriptor.EnumDescriptor(
+  name='FreezeMode',
+  full_name='SaveDriveMessage.FreezeMode',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='NO', index=0, number=0,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TRY', index=1, number=1,
+      options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='YES', index=2, number=2,
+      options=None,
+      type=None),
+  ],
+  containing_type=None,
+  options=None,
+  serialized_start=2191,
+  serialized_end=2229,
+)
+_sym_db.RegisterEnumDescriptor(_SAVEDRIVEMESSAGE_FREEZEMODE)
 
 
 _ROUTEMESSAGE = _descriptor.Descriptor(
@@ -1025,6 +1077,388 @@ _HELLORESULT = _descriptor.Descriptor(
 )
 
 
+_RESETMESSAGE = _descriptor.Descriptor(
+  name='ResetMessage',
+  full_name='ResetMessage',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1586,
+  serialized_end=1600,
+)
+
+
+_RESETRESULT = _descriptor.Descriptor(
+  name='ResetResult',
+  full_name='ResetResult',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1602,
+  serialized_end=1615,
+)
+
+
+_DUMPMESSAGE = _descriptor.Descriptor(
+  name='DumpMessage',
+  full_name='DumpMessage',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='path', full_name='DumpMessage.path', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1617,
+  serialized_end=1644,
+)
+
+
+_DUMPRESULT = _descriptor.Descriptor(
+  name='DumpResult',
+  full_name='DumpResult',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='complete', full_name='DumpResult.complete', index=0,
+      number=1, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='pct', full_name='DumpResult.pct', index=1,
+      number=2, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1646,
+  serialized_end=1689,
+)
+
+
+_MONITORCMDMESSAGE = _descriptor.Descriptor(
+  name='MonitorCmdMessage',
+  full_name='MonitorCmdMessage',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='cmd', full_name='MonitorCmdMessage.cmd', index=0,
+      number=1, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1691,
+  serialized_end=1723,
+)
+
+
+_MONITORCMDRESULT = _descriptor.Descriptor(
+  name='MonitorCmdResult',
+  full_name='MonitorCmdResult',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='output', full_name='MonitorCmdResult.output', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1725,
+  serialized_end=1759,
+)
+
+
+_SAVEDRIVERESULT = _descriptor.Descriptor(
+  name='SaveDriveResult',
+  full_name='SaveDriveResult',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='drive', full_name='SaveDriveResult.drive', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='len', full_name='SaveDriveResult.len', index=1,
+      number=2, type=4, cpp_type=4, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='offset', full_name='SaveDriveResult.offset', index=2,
+      number=3, type=4, cpp_type=4, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='status', full_name='SaveDriveResult.status', index=3,
+      number=4, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1761,
+  serialized_end=1838,
+)
+
+
+_CHECKPOINTMESSAGE = _descriptor.Descriptor(
+  name='CheckpointMessage',
+  full_name='CheckpointMessage',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='path', full_name='CheckpointMessage.path', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='vm_suffix_path', full_name='CheckpointMessage.vm_suffix_path', index=1,
+      number=2, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1840,
+  serialized_end=1897,
+)
+
+
+_CHECKPOINTRESULT = _descriptor.Descriptor(
+  name='CheckpointResult',
+  full_name='CheckpointResult',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='remaining', full_name='CheckpointResult.remaining', index=0,
+      number=1, type=4, cpp_type=4, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='total', full_name='CheckpointResult.total', index=1,
+      number=2, type=4, cpp_type=4, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='status', full_name='CheckpointResult.status', index=2,
+      number=3, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1899,
+  serialized_end=1967,
+)
+
+
+_SAVEDRIVEMESSAGE = _descriptor.Descriptor(
+  name='SaveDriveMessage',
+  full_name='SaveDriveMessage',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='drives', full_name='SaveDriveMessage.drives', index=0,
+      number=1, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='paths', full_name='SaveDriveMessage.paths', index=1,
+      number=2, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='mode', full_name='SaveDriveMessage.mode', index=2,
+      number=3, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='freeze', full_name='SaveDriveMessage.freeze', index=3,
+      number=4, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='vm_suffix_path', full_name='SaveDriveMessage.vm_suffix_path', index=4,
+      number=5, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='stop_vm', full_name='SaveDriveMessage.stop_vm', index=5,
+      number=6, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+    _SAVEDRIVEMESSAGE_SAVEMODE,
+    _SAVEDRIVEMESSAGE_FREEZEMODE,
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1970,
+  serialized_end=2229,
+)
+
+
 _MKDIRMESSAGE = _descriptor.Descriptor(
   name='MkdirMessage',
   full_name='MkdirMessage',
@@ -1065,8 +1499,8 @@ _MKDIRMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1586,
-  serialized_end=1649,
+  serialized_start=2231,
+  serialized_end=2294,
 )
 
 
@@ -1089,8 +1523,8 @@ _MKDIRRESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1651,
-  serialized_end=1664,
+  serialized_start=2296,
+  serialized_end=2309,
 )
 
 
@@ -1113,8 +1547,8 @@ _HOSTNAMEMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1666,
-  serialized_end=1683,
+  serialized_start=2311,
+  serialized_end=2328,
 )
 
 
@@ -1144,8 +1578,8 @@ _HOSTNAMERESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1685,
-  serialized_end=1719,
+  serialized_start=2330,
+  serialized_end=2364,
 )
 
 
@@ -1189,8 +1623,8 @@ _CHMODMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1721,
-  serialized_end=1780,
+  serialized_start=2366,
+  serialized_end=2425,
 )
 
 
@@ -1213,8 +1647,8 @@ _CHMODRESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1782,
-  serialized_end=1795,
+  serialized_start=2427,
+  serialized_end=2440,
 )
 
 
@@ -1265,8 +1699,8 @@ _CHOWNMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1797,
-  serialized_end=1868,
+  serialized_start=2442,
+  serialized_end=2513,
 )
 
 
@@ -1289,8 +1723,8 @@ _CHOWNRESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1870,
-  serialized_end=1883,
+  serialized_start=2515,
+  serialized_end=2528,
 )
 
 
@@ -1327,8 +1761,8 @@ _SYMLINKMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1885,
-  serialized_end=1927,
+  serialized_start=2530,
+  serialized_end=2572,
 )
 
 
@@ -1351,8 +1785,8 @@ _SYMLINKRESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1929,
-  serialized_end=1944,
+  serialized_start=2574,
+  serialized_end=2589,
 )
 
 
@@ -1389,8 +1823,8 @@ _REMOVEMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1946,
-  serialized_end=1992,
+  serialized_start=2591,
+  serialized_end=2637,
 )
 
 
@@ -1413,8 +1847,8 @@ _REMOVERESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1994,
-  serialized_end=2008,
+  serialized_start=2639,
+  serialized_end=2653,
 )
 
 
@@ -1451,8 +1885,8 @@ _MOVEMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2010,
-  serialized_end=2049,
+  serialized_start=2655,
+  serialized_end=2694,
 )
 
 
@@ -1475,8 +1909,8 @@ _MOVERESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2051,
-  serialized_end=2063,
+  serialized_start=2696,
+  serialized_end=2708,
 )
 
 
@@ -1513,8 +1947,8 @@ _TRUNCATEMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2065,
-  serialized_end=2110,
+  serialized_start=2710,
+  serialized_end=2755,
 )
 
 
@@ -1537,8 +1971,8 @@ _TRUNCATERESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2112,
-  serialized_end=2128,
+  serialized_start=2757,
+  serialized_end=2773,
 )
 
 
@@ -1568,8 +2002,8 @@ _STATMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2130,
-  serialized_end=2157,
+  serialized_start=2775,
+  serialized_end=2802,
 )
 
 
@@ -1627,8 +2061,8 @@ _STATRESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2159,
-  serialized_end=2275,
+  serialized_start=2804,
+  serialized_end=2920,
 )
 
 
@@ -1679,8 +2113,8 @@ _WRITEFILEMESSAGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2277,
-  serialized_end=2354,
+  serialized_start=2922,
+  serialized_end=2999,
 )
 
 
@@ -1710,8 +2144,8 @@ _WRITEFILERESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2356,
-  serialized_end=2390,
+  serialized_start=3001,
+  serialized_end=3035,
 )
 
 _ROUTEMESSAGE.fields_by_name['args'].message_type = google_dot_protobuf_dot_any__pb2._ANY
@@ -1735,6 +2169,10 @@ _LISTEXECRESULT_EXECSENTRY.containing_type = _LISTEXECRESULT
 _LISTEXECRESULT.fields_by_name['execs'].message_type = _LISTEXECRESULT_EXECSENTRY
 _IOMESSAGE.fields_by_name['kind'].enum_type = _IOMESSAGE_MSGKIND
 _IOMESSAGE_MSGKIND.containing_type = _IOMESSAGE
+_SAVEDRIVEMESSAGE.fields_by_name['mode'].enum_type = _SAVEDRIVEMESSAGE_SAVEMODE
+_SAVEDRIVEMESSAGE.fields_by_name['freeze'].enum_type = _SAVEDRIVEMESSAGE_FREEZEMODE
+_SAVEDRIVEMESSAGE_SAVEMODE.containing_type = _SAVEDRIVEMESSAGE
+_SAVEDRIVEMESSAGE_FREEZEMODE.containing_type = _SAVEDRIVEMESSAGE
 _STATRESULT.fields_by_name['mod_time'].message_type = google_dot_protobuf_dot_timestamp__pb2._TIMESTAMP
 DESCRIPTOR.message_types_by_name['RouteMessage'] = _ROUTEMESSAGE
 DESCRIPTOR.message_types_by_name['McastMessage'] = _MCASTMESSAGE
@@ -1761,6 +2199,16 @@ DESCRIPTOR.message_types_by_name['FreezeMessage'] = _FREEZEMESSAGE
 DESCRIPTOR.message_types_by_name['FreezeResult'] = _FREEZERESULT
 DESCRIPTOR.message_types_by_name['HelloMessage'] = _HELLOMESSAGE
 DESCRIPTOR.message_types_by_name['HelloResult'] = _HELLORESULT
+DESCRIPTOR.message_types_by_name['ResetMessage'] = _RESETMESSAGE
+DESCRIPTOR.message_types_by_name['ResetResult'] = _RESETRESULT
+DESCRIPTOR.message_types_by_name['DumpMessage'] = _DUMPMESSAGE
+DESCRIPTOR.message_types_by_name['DumpResult'] = _DUMPRESULT
+DESCRIPTOR.message_types_by_name['MonitorCmdMessage'] = _MONITORCMDMESSAGE
+DESCRIPTOR.message_types_by_name['MonitorCmdResult'] = _MONITORCMDRESULT
+DESCRIPTOR.message_types_by_name['SaveDriveResult'] = _SAVEDRIVERESULT
+DESCRIPTOR.message_types_by_name['CheckpointMessage'] = _CHECKPOINTMESSAGE
+DESCRIPTOR.message_types_by_name['CheckpointResult'] = _CHECKPOINTRESULT
+DESCRIPTOR.message_types_by_name['SaveDriveMessage'] = _SAVEDRIVEMESSAGE
 DESCRIPTOR.message_types_by_name['MkdirMessage'] = _MKDIRMESSAGE
 DESCRIPTOR.message_types_by_name['MkdirResult'] = _MKDIRRESULT
 DESCRIPTOR.message_types_by_name['HostnameMessage'] = _HOSTNAMEMESSAGE
@@ -1966,6 +2414,76 @@ HelloResult = _reflection.GeneratedProtocolMessageType('HelloResult', (_message.
   ))
 _sym_db.RegisterMessage(HelloResult)
 
+ResetMessage = _reflection.GeneratedProtocolMessageType('ResetMessage', (_message.Message,), dict(
+  DESCRIPTOR = _RESETMESSAGE,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:ResetMessage)
+  ))
+_sym_db.RegisterMessage(ResetMessage)
+
+ResetResult = _reflection.GeneratedProtocolMessageType('ResetResult', (_message.Message,), dict(
+  DESCRIPTOR = _RESETRESULT,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:ResetResult)
+  ))
+_sym_db.RegisterMessage(ResetResult)
+
+DumpMessage = _reflection.GeneratedProtocolMessageType('DumpMessage', (_message.Message,), dict(
+  DESCRIPTOR = _DUMPMESSAGE,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:DumpMessage)
+  ))
+_sym_db.RegisterMessage(DumpMessage)
+
+DumpResult = _reflection.GeneratedProtocolMessageType('DumpResult', (_message.Message,), dict(
+  DESCRIPTOR = _DUMPRESULT,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:DumpResult)
+  ))
+_sym_db.RegisterMessage(DumpResult)
+
+MonitorCmdMessage = _reflection.GeneratedProtocolMessageType('MonitorCmdMessage', (_message.Message,), dict(
+  DESCRIPTOR = _MONITORCMDMESSAGE,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:MonitorCmdMessage)
+  ))
+_sym_db.RegisterMessage(MonitorCmdMessage)
+
+MonitorCmdResult = _reflection.GeneratedProtocolMessageType('MonitorCmdResult', (_message.Message,), dict(
+  DESCRIPTOR = _MONITORCMDRESULT,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:MonitorCmdResult)
+  ))
+_sym_db.RegisterMessage(MonitorCmdResult)
+
+SaveDriveResult = _reflection.GeneratedProtocolMessageType('SaveDriveResult', (_message.Message,), dict(
+  DESCRIPTOR = _SAVEDRIVERESULT,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:SaveDriveResult)
+  ))
+_sym_db.RegisterMessage(SaveDriveResult)
+
+CheckpointMessage = _reflection.GeneratedProtocolMessageType('CheckpointMessage', (_message.Message,), dict(
+  DESCRIPTOR = _CHECKPOINTMESSAGE,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:CheckpointMessage)
+  ))
+_sym_db.RegisterMessage(CheckpointMessage)
+
+CheckpointResult = _reflection.GeneratedProtocolMessageType('CheckpointResult', (_message.Message,), dict(
+  DESCRIPTOR = _CHECKPOINTRESULT,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:CheckpointResult)
+  ))
+_sym_db.RegisterMessage(CheckpointResult)
+
+SaveDriveMessage = _reflection.GeneratedProtocolMessageType('SaveDriveMessage', (_message.Message,), dict(
+  DESCRIPTOR = _SAVEDRIVEMESSAGE,
+  __module__ = 'agent_pb2'
+  # @@protoc_insertion_point(class_scope:SaveDriveMessage)
+  ))
+_sym_db.RegisterMessage(SaveDriveMessage)
+
 MkdirMessage = _reflection.GeneratedProtocolMessageType('MkdirMessage', (_message.Message,), dict(
   DESCRIPTOR = _MKDIRMESSAGE,
   __module__ = 'agent_pb2'
@@ -2118,8 +2636,8 @@ _PCOCCNODE = _descriptor.ServiceDescriptor(
   file=DESCRIPTOR,
   index=0,
   options=None,
-  serialized_start=2392,
-  serialized_end=2512,
+  serialized_start=3037,
+  serialized_end=3157,
   methods=[
   _descriptor.MethodDescriptor(
     name='route_command',

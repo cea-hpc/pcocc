@@ -23,13 +23,20 @@ from .Misc import fake_signalfd
 
 
 class AgentCommandClass(ABCMeta):
+    """ Helper meta-class to define RPC classes """
     def __init__(cls, name, bases, dct):
         if '_name' in dct:
             AgentCommand.register_command(dct['_name'],
                                           dct['_request_pb'],
                                           dct['_reply_pb'],
                                           cls)
+        elif '_stream_name' in dct:
+            AgentCommand.register_stream_command(dct['_stream_name'],
+                                                 dct['_request_pb'],
+                                                 dct['_reply_pb'],
+                                                 cls)
         super(AgentCommandClass, cls).__init__(name, bases, dct)
+
 
 class AgentCommand(object):
     __metaclass__ = AgentCommandClass
@@ -81,6 +88,37 @@ class AgentCommand(object):
                                     direct, rng,  single_fn, **kwargs)
 
         setattr(cls, name, fn)
+
+
+    @classmethod
+    def register_stream_command(cls, name, request_pb, reply_pb, cmd_class):
+        @staticmethod
+        def stream_fn(cluster, indices, timeout=10, cancel_cb=None, **kwargs):
+            cmd_class.validate_args(**kwargs)
+
+            def encap_iterin():
+                yield request_pb(**kwargs)
+
+            res, ctx = cluster.vms[0].agent_client.route_stream(
+                indices,
+                name,
+                "_none_",
+                encap_iterin())
+
+            if cancel_cb:
+                ctx.add_callback(cancel_cb)
+
+            def canceller():
+                logging.info("Cancelling RPC")
+                ctx.cancel()
+
+            return ParallelAgentResult(name,
+                                       res, indices, cls.pretty_str,
+                                       canceller)
+
+        setattr(cls, name, stream_fn)
+
+
 
     @staticmethod
     def _send_rpc_single(cluster, timeout, direct, vmid, command, data):
@@ -172,7 +210,8 @@ class AgentCommand(object):
             cls.del_intr_handler(cluster, indices, execid, ctx)
 
         cls.add_intr_handler(cluster, indices, execid, ctx)
-        ctx.add_callback(cancel_cb)
+        if cancel_cb:
+            ctx.add_callback(cancel_cb)
         ctx.add_callback(del_intr_handler)
 
         def canceller():
@@ -207,7 +246,7 @@ class AgentCommand(object):
                         # select will detect that the fd has gone bad
                         continue
 
-                    data = os.read(stdin, 4096)
+                    data = os.read(stdin, 1048576)
                 except OSError as e:
                     if e.errno == errno.EBADF:
                         data = None
@@ -310,7 +349,7 @@ class Move(AgentCommand):
     _request_pb = agent_pb2.MoveMessage
     _reply_pb = agent_pb2.MoveResult
 
-class Move(AgentCommand):
+class Freeze(AgentCommand):
     _name = "freeze"
     _request_pb = agent_pb2.FreezeMessage
     _reply_pb = agent_pb2.FreezeResult
@@ -356,6 +395,39 @@ class Listexec(AgentCommand):
                                                   e.attached, e.filename)
                           for execid, e in msg.execs.iteritems()])
 
+class Reset(AgentCommand):
+    _name = "reset"
+    _request_pb = agent_pb2.ResetMessage
+    _reply_pb = agent_pb2.ResetResult
+
+class MonitorCmd(AgentCommand):
+    _name = "monitor_cmd"
+    _request_pb = agent_pb2.MonitorCmdMessage
+    _reply_pb = agent_pb2.MonitorCmdResult
+    @classmethod
+    def pretty_str(cls, msg):
+        if isinstance(msg, Exception):
+            return str(msg)
+
+        return str(msg.output)
+
+class DumpCmd(AgentCommand):
+    _stream_name = "dump"
+    _request_pb = agent_pb2.DumpMessage
+    _reply_pb = agent_pb2.DumpResult
+
+class CheckpointCmd(AgentCommand):
+    _stream_name = "checkpoint"
+    _request_pb = agent_pb2.CheckpointMessage
+    _reply_pb = agent_pb2.CheckpointResult
+
+class SaveDriveCmd(AgentCommand):
+    _stream_name = "save"
+    _request_pb = agent_pb2.SaveDriveMessage
+    _reply_pb = agent_pb2.SaveDriveResult
+
+
+
 class ParallelAgentResult(object):
     """
     Manages the results for parallel client commands
@@ -380,12 +452,13 @@ class ParallelAgentResult(object):
         self.raise_errors()
 
     def iterate(self, yield_results=False, print_results=False,
-                keep_results=True):
+                keep_results=True, yield_errors=True):
 
         for key, res in self._result_iter:
             if isinstance(res, Exception):
                 self._errors.setdefault(key, list()).append(res)
-                yield key, res
+                if yield_errors:
+                    yield key, res
             else:
                 if keep_results:
                     self._res_tree.add(str(key),

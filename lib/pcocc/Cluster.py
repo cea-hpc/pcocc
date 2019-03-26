@@ -26,7 +26,6 @@ from . import Hypervisor
 from . import Batch
 from .Error import PcoccError
 from .Config import Config
-from .Misc import ThreadPool
 from .scripts import click
 from .Tbon import TreeNode, TreeClient
 from .Templates import DRIVE_IMAGE_TYPE
@@ -50,20 +49,6 @@ class ClusterSetupError(PcoccError):
     """
     def __init__(self, error):
         super(ClusterSetupError, self).__init__('Failed to start cluster: ' + error)
-
-
-def do_checkpoint_vm(key, vm, ckpt_dir):
-    vm.checkpoint(ckpt_dir)
-
-def do_save_vm(key, vm, ckpt_dir):
-    if  vm.image_type != DRIVE_IMAGE_TYPE.NONE:
-        vm.save(vm.checkpoint_img_file(ckpt_dir),
-                freeze=Hypervisor.VM_FREEZE_OPT.NO)
-
-def do_quit_vm(key, vm):
-    vm.quit()
-
-
 
 class VM(object):
     def __init__(self, rank, template):
@@ -114,7 +99,7 @@ class VM(object):
         self._agent = hypervisor_agent
         self._agent_server = TreeNode(
             vmid    = self.rank,
-            handler = self._agent.send_message,
+            handler = self._agent.message_handler,
             stream_init_handler = self._agent.stream_init_handler
         )
 
@@ -144,24 +129,6 @@ class VM(object):
 
     def put_file(self, source, dest):
         return Config().hyp.put_file(self, source, dest)
-
-    def checkpoint(self, ckpt_dir):
-        Config().hyp.checkpoint(self, ckpt_dir)
-
-    def save(self, dest_file, full=False, freeze=Hypervisor.VM_FREEZE_OPT.TRY):
-        Config().hyp.save(self, dest_file, full, freeze)
-
-    def quit(self):
-        Config().hyp.quit(self)
-
-    def reset(self):
-        Config().hyp.reset(self)
-
-    def human_monitor_cmd(self, cmd):
-        return Config().hyp.human_monitor_cmd(self, cmd)
-
-    def dump(self, dumpfile):
-        Config().hyp.dump(self, dumpfile)
 
     def wait_start(self):
         Config().hyp.wait_vm_start(self.rank)
@@ -395,24 +362,6 @@ class Cluster(object):
             ret.append(self.vms[vmid].exec_cmd(cmd, user))
 
         return ret
-
-    def checkpoint(self, ckpt_dir):
-        pool = ThreadPool(16)
-
-        print "Checkpointing disks..."
-        for vm in self.vms:
-            pool.add_task(do_save_vm, None, vm, ckpt_dir)
-        pool.wait_completion()
-
-        print "Checkpointing memory..."
-        for vm in self.vms:
-            pool.add_task(do_checkpoint_vm, None, vm, ckpt_dir)
-        pool.wait_completion()
-
-        print "Checkpoint complete."
-        for vm in self.vms:
-            pool.add_task(do_quit_vm, None, vm)
-        pool.wait_completion()
 
 
     def _set_host_state(self, state, priority, desc, value, host_rank=None):

@@ -42,7 +42,7 @@ import uuid
 import Queue
 import agent_pb2
 
-
+from abc import ABCMeta
 from ClusterShell.NodeSet  import RangeSet
 from .scripts import click
 from .Backports import subprocess_check_output, enum
@@ -63,6 +63,8 @@ def try_kill(sproc):
         pass
 
 VM_FREEZE_OPT = enum('NO', 'TRY', 'YES')
+
+DRIVE_SAVE_MODE = enum('FULL', 'TOP', 'INCR')
 
 class InvalidImageError(PcoccError):
     """Exception raised when the image file cannot be handled
@@ -133,19 +135,25 @@ class HostAgentCtx(object):
 
         return ret
 
-
 class HostAgent(object):
     """
-    This class is in charge of managing and sending
-    commands to the VM agent
-
-    It acts both as a client and server for theses
-    requests. It is also providing some state management
-    through the hostAgentContext class
+    This class is in charge of proxying commands to the VM agent and the Qemu
+    Monitor
     """
-    def __init__(self, vm_rank):
-        # The rank of the VM this agent works for
-        self.rank = vm_rank
+    _stream_req_handlers = {}
+    _req_handlers = {}
+
+    @classmethod
+    def register_handler(cls, name, rq_class):
+        cls._req_handlers[name] = rq_class.handle
+
+    @classmethod
+    def register_stream_handler(cls, name, rq_class):
+        cls._stream_req_handlers[name] = rq_class.handle
+
+    def __init__(self, vm):
+        self.vm = vm
+
         batch = Config().batch
 
         # Lock for the serial port and tag allocation
@@ -164,7 +172,7 @@ class HostAgent(object):
         self.ctx = HostAgentCtx()
 
         # Connect a socket to the VM agent serial port
-        agent_file = batch.get_vm_state_path(vm_rank,
+        agent_file = batch.get_vm_state_path(vm.rank,
                                              "serial_pcocc_agent_socket")
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -181,37 +189,48 @@ class HostAgent(object):
         #Make sure the agent is unfrozen
         self.send_message("thaw", agent_pb2.ThawMessage())
 
-
     def stream_init_handler(self, name, init_msg, req_ctx):
         """
         Return functions to be used as callbacks to manage input and
         output for streaming RPCs
         """
-
         tag = self._alloc_tag()
 
-        ret_iter = self.send_stream_message(name, init_msg,
-                                            agent_pb2.AgentMessage.StreamRequest,
-                                            tag, req_ctx)
+        # If the message is to be handled on the host, a handler will be
+        # registered
+        if name in self._stream_req_handlers:
+            ret_iter = self._stream_req_handlers[name](self, init_msg,
+                                                       agent_pb2.AgentMessage.StreamRequest,
+                                                       tag, req_ctx)
+            def input_handler(cmd, msg, req_ctx):
+                # Currently messages handled by the host accept no subsequent input
+                pass
+        else:
+            # If no local handler was registered, passthrough the message to the VM
+            # agent
+            ret_iter = self.send_stream_message(name, init_msg,
+                                                agent_pb2.AgentMessage.StreamRequest,
+                                                tag, req_ctx)
+            def input_handler(cmd, msg, req_ctx):
+                # In some cases we may be interested in the agent answer
+                # we should route it to the output_handler. For now the only case
+                # is attach where we don't really care.
+                self.send_message(cmd, msg, None)
+
         first_reply = next(ret_iter)
 
         if isinstance(first_reply, agent_pb2.GenericError):
             logging.info("Stream handler: error handling header msg: %s", first_reply)
             return None, None, first_reply
 
-        def input_handler(cmd, msg, req_ctx):
-            # FIXME: In some cases we may be interested in the agent answer
-            # we should route it to the output_handler
-            self.send_message(cmd, msg, None)
-
         def output_handler(req_ctx):
             for r in ret_iter:
-                logging.debug("Stream handler: relaying msg from VM agent: %s", r)
+                logging.debug("Stream handler: relaying stream msg from VM agent: %s", r)
                 yield r
 
-        #We should define a more generic way to do this but we only
-        #have one case for now. If an attach gets cancelled, force a detach
-        #in cas de the client didnt send it
+        # We should define a more generic way to do this but we only
+        # have one case for now. If an attach gets cancelled, force a detach
+        # in case the client didnt send it
         if name == "attach":
             def detach():
                 self.send_message("detach",
@@ -221,6 +240,20 @@ class HostAgent(object):
             req_ctx.add_callback(detach)
 
         return input_handler, output_handler, first_reply
+
+    def message_handler(self, name, args, request_context=None):
+        """
+        Handle a message sent to the host agent
+        """
+
+        # If the message is to be handled on the host, a handler will be
+        # registered
+        if name in self._req_handlers:
+            return self._req_handlers[name](self, args, request_context)
+
+        # If no local handler was registered, passthrough the message to the VM
+        # agent
+        return self.send_message(name, args, request_context)
 
     def send_message(self, name, args, request_context=None):
         """
@@ -253,7 +286,7 @@ class HostAgent(object):
 
         """
         logging.info("Host agent: sending message %s "
-                     "to VM %d agent", name, self.rank)
+                     "to VM %d agent", name, self.vm.rank)
 
         retq = Queue.Queue()
 
@@ -296,7 +329,7 @@ class HostAgent(object):
             enc=base64.b64encode(am.SerializeToString())
             self.sock.sendall(enc+'\n')
         except IOError as e:
-            logging.warning("Failed to %s message to agent due to %s", am.name, str(e))
+            logging.warning("Failed to send %s message to agent due to %s", am.name, str(e))
 
         self.wlock.release()
 
@@ -368,12 +401,12 @@ class HostAgent(object):
         and run the registered callbacks
         """
         logging.info("Host agent: listening to VM %d agent over serial port",
-                     self.rank)
+                     self.vm.rank)
         while True:
             sdata = self._read_a_command()
             if sdata == None:
                 logging.info("Host agent: disconnected from VM %d "
-                             "serial port", self.rank)
+                             "serial port", self.vm.rank)
                 break
 
             if len(sdata.replace("\n","")) == 0:
@@ -411,197 +444,647 @@ class HostAgent(object):
         return ret
 
 
-QMP_READ_SIZE=32768
+class HAStreamReqClass(ABCMeta):
+    def __init__(cls, name, bases, dct):
+        if '_name' in dct:
+            HostAgent.register_stream_handler(dct['_name'], cls)
 
-class RemoteMonitor(object):
-    def __init__(self, vm):
-        self.s_mon = Config().hyp.socket_connect(vm, 'monitor_socket')
+        super(HAStreamReqClass, cls).__init__(name, bases, dct)
 
-        self.flush_output()
-        self.send_raw('{ "execute": "qmp_capabilities" }')
-        self.flush_output()
+class HAReqClass(ABCMeta):
+    def __init__(cls, name, bases, dct):
+        if '_name' in dct:
+            HostAgent.register_handler(dct['_name'], cls)
+        super(HAReqClass, cls).__init__(name, bases, dct)
 
-    def send_raw(self, data):
-        return os.write(self.s_mon.stdin.fileno(), data)
+class HADumpReq(object):
+    _name = "dump"
+    __metaclass__ = HAStreamReqClass
 
-    def flush_output(self):
-        """Read everything from the monitor to start fresh
-        """
-        _ = os.read(self.s_mon.stdout.fileno(), 1)
-        while select.select([self.s_mon.stdout.fileno()],[],[],0.0)[0]:
-            _ = os.read(self.s_mon.stdout.fileno(), QMP_READ_SIZE)
+    def __init__(self):
+        pass
 
-    def read_filtered(self, event_list=None):
-        """Read from the monitor socket and discard all events not in the event_list array
-        """
-        if event_list is None:
-            event_list = []
+    @staticmethod
+    def handle(agent, args, kind, tag, request_context):
+        retq = Queue.Queue()
+
+        def complete_cb(event):
+            if event is None:
+                retq.put({'error': 'disconnected'})
+
+            if 'event' in event and event['event'] == 'DUMP_COMPLETED':
+                retq.put(event)
+                return False
+            return True
+
+        try:
+            res = agent.vm.qemu_mon.dump(args.path)
+        except PcoccError as e:
+            yield agent_pb2.GenericError(
+                        kind = agent_pb2.GenericError.AgentError,
+                        description = str(e))
+            return
+
+        agent.vm.qemu_mon.async_cb.append(complete_cb)
 
         while True:
-            data = self.s_mon.stdout.readline()
             try:
-                ret = json.loads(data)
-                if 'event' in ret and ret['event'] not in event_list:
-                    continue
-            except Exception:
+                res = retq.get(True, 0.1)
+                break
+            except Queue.Empty:
                 pass
 
-            return data
+            r = agent.vm.qemu_mon.query_dump()
+
+            if r['status'] == 'active':
+                pct=float(r['completed']) / float(r['total'])
+                yield agent_pb2.DumpResult(complete=False, pct=pct)
+
+        if 'error' in res:
+            yield agent_pb2.GenericError(
+                        kind = agent_pb2.GenericError.AgentError,
+                        description = res['error'])
+        else:
+            yield agent_pb2.DumpResult(complete=True, pct=100.)
+        return
 
 
-    def quit(self):
-        mon_quit_cmd = ('{"execute": "quit", "arguments":{'
-                        '} }\n\n')
-        self.send_raw(mon_quit_cmd)
-        self.read_filtered()
+class HACkptReq(object):
+    _name = "checkpoint"
+    __metaclass__ = HAStreamReqClass
 
-    def stop(self):
-        mon_stop_cmd = ('{"execute": "stop", "arguments":{'
-                        '} }\n\n')
-        self.send_raw(mon_stop_cmd)
-        self.read_filtered()
+    @staticmethod
+    def handle(agent, args, kind, tag, request_context):
+        retq = Queue.Queue()
 
-    def query_status(self):
-        mon_query_cmd = ('{"execute": "query-status", "arguments":{'
-                        '} }\n\n')
-        self.send_raw(mon_query_cmd)
-        data = self.read_filtered()
-        try:
-            ret = json.loads(data)
-        except:
-            raise PcoccError("Could not parse query-status return: " + data)
+        complete = False
 
-        try:
-            return ret["return"]["status"]
-        except:
-            raise PcoccError("Could not parse query-status return: " + data)
+        if args.vm_suffix_path:
+            args.path = args.path + "-vm{}".format(agent.vm.rank)
 
+        def cancel_cb():
+            if complete:
+                logging.debug('Ignoring cancel of complete migrate job')
+                return
 
-    def cont(self):
-        mon_cont_cmd = ('{"execute": "cont", "arguments":{'
-                        '} }\n\n')
-        self.send_raw(mon_cont_cmd)
-        self.read_filtered()
+            logging.debug('Cancelling migrate job')
+            try:
+                agent.vm.qemu_mon.cancel_migration()
+            except:
+                logging.error('Failed to cancel migrate job')
 
-    def drive_backup_start(self, device, dest, sync_type):
-        mon_backup_cmd = ('{"execute": "drive-backup",'
-                        '"arguments": { "device": "%s",'
-                        '"target": "%s", "sync": "%s"'
-                        '} }\n\n' % (device, dest, sync_type))
-        self.send_raw(mon_backup_cmd)
-        ret = self.read_filtered()
+            logging.debug('Resuming VM')
+            try:
+                agent.vm.qemu_mon.cont()
+            except:
+                logging.error('Failed to resume VM')
 
-        try:
-            ret = json.loads(ret)
-        except:
-            raise PcoccError("Could not parse drive-backup return: " + ret)
+        def complete_cb(event):
+            if event is None:
+                retq.put({'error': 'disconnected'})
+                return
 
-        if "error" in ret:
-            raise ImageSaveError(ret["error"]["desc"])
+            if ('event' in event and
+                event['event'] == 'MIGRATION' and (
+                 event['data']['status'] == 'completed' or
+                 event['data']['status'] == 'failed' or
+                 event['data']['status'] == 'cancelled')):
+                logging.debug('Notifying job completion')
+                retq.put(event)
+                return False
 
+            return True
 
-    def drive_backup_complete(self):
-        ret = self.read_filtered(["BLOCK_JOB_COMPLETED"])
-        try:
-            ret = json.loads(ret)
-            event = ret["event"]
-        except:
-            raise PcoccError("Could not parse drive-backup event: " + ret)
+        agent.vm.qemu_mon.stop()
+        agent.vm.qemu_mon.start_migration(args.path)
 
-
-        if event != "BLOCK_JOB_COMPLETED":
-            raise ImageSaveError("Qemu returned event {0}, "
-                                 "expected BLOCK_JOB_COMPLETED".format(event))
-
-        if "error" in ret["data"]:
-            raise ImageSaveError(ret["data"]["error"])
-
-    def dump(self, dump_file):
-        mon_dump_cmd = ('{"execute": "dump-guest-memory", "arguments":{ '
-                        '"paging": true, '
-                        '"protocol": "file:%s"'
-                        '} }\n\n'  % dump_file)
-        self.send_raw(mon_dump_cmd)
+        agent.vm.qemu_mon.async_cb.append(complete_cb)
+        request_context.add_callback(cancel_cb)
 
         while True:
-            data = self.read_filtered()
-            for line in data.splitlines():
-                ret = json.loads(line)
-                if "error" in ret:
-                    raise ImageSaveError(ret["error"]["desc"])
-                elif "event" in ret:
-                    continue
-                elif "return" in ret:
-                    return
+            try:
+                res = retq.get(True, 0.1)
+                complete = True
+                if res['data']['status'] != 'completed':
+                    yield agent_pb2.GenericError(
+                        kind = agent_pb2.GenericError.AgentError,
+                        description = 'Migration '+ res['data']['error'])
                 else:
-                    raise ImageSaveError('unexpected output from qemu: ' + line)
-            time.sleep(2)
+                    yield agent_pb2.CheckpointResult(status = 'complete')
+                    agent.vm.qemu_mon.quit()
+                return
+            except Queue.Empty:
+                pass
 
-    def system_reset(self):
-        mon_reset_cmd = ('{"execute": "system_reset", "arguments":{'
-                        '} }\n\n')
-        self.send_raw(mon_reset_cmd)
-        self.read_filtered()
+            r = agent.vm.qemu_mon.query_migration()
+            if not 'status' in r:
+                # If we are too fast, Qemu may not return the status
+                continue
 
-    def system_powerdown(self):
-        mon_reset_cmd = ('{"execute": "system_powerdown", "arguments":{'
-                        '} }\n\n')
-        self.send_raw(mon_reset_cmd)
-        self.read_filtered()
+            if r['status'] == 'active':
+                yield agent_pb2.CheckpointResult(
+                    status = 'active',
+                    remaining = int(r['ram']['remaining']),
+                    total     = int(r['ram']['total']))
+            elif r['status'] == 'completed':
+                complete = True
+                yield agent_pb2.CheckpointResult(status = 'complete')
+                agent.vm.qemu_mon.quit()
+                return
 
-    def human_monitor_cmd(self, human_cmd):
-        mon_human_cmd = ('{"execute": "human-monitor-command", "arguments":{'
-                         '"command-line": "%s"} }\n\n' % human_cmd)
-        self.send_raw(mon_human_cmd)
-        raw_data = self.read_filtered()
+
+class HASaveDriveReq(object):
+    _name = "save"
+    __metaclass__ = HAStreamReqClass
+
+    @staticmethod
+    def handle(agent, args, kind, tag, request_context):
+        retq = Queue.Queue()
+
+        if len(args.drives) != 1:
+            yield agent_pb2.GenericError(
+                        kind = agent_pb2.GenericError.AgentError,
+                        description = 'Only single drive saves are supported')
+            return
+
+        if len(args.drives) != len(args.paths):
+            yield agent_pb2.GenericError(
+                        kind = agent_pb2.GenericError.AgentError,
+                        description = 'Mismatch between drives and paths counts')
+            return
+
+        use_fsfreeze = False
+        if args.freeze != VM_FREEZE_OPT.NO:
+            if args.freeze == VM_FREEZE_OPT.YES:
+                timeout = 0
+            else:
+                timeout = 2
+
+            try:
+                Config().hyp.fsthaw(agent.vm, timeout=timeout)
+                use_fsfreeze = True
+            except AgentError:
+                if args.freeze == VM_FREEZE_OPT.YES:
+                    raise ImageSaveError('Unable to freeze filesystems')
+
+                yield agent_pb2.SaveDriveResult(
+                    status = 'freeze-failed')
+
+        if use_fsfreeze:
+            Config().hyp.fsfreeze(agent.vm)
+
+            yield agent_pb2.SaveDriveResult(
+                status = 'frozen')
+
+        if args.stop_vm:
+            agent.vm.qemu_mon.stop()
+            yield agent_pb2.CheckpointResult(status = 'vm-stopped')
+
+        complete = False
+
+        if args.vm_suffix_path:
+            for i, path in enumerate(args.paths):
+                args.paths[i] = path + "-vm{}".format(agent.vm.rank)
+
+        def cancel_cb():
+            if complete:
+                logging.debug('Ignoring cancel of complete block job')
+                return False
+
+            try:
+                logging.debug('Cancelling block job')
+                agent.vm.qemu_mon.block_job_cancel(
+                    args.drives[0])
+            except:
+                logging.error('Failed to cancel block job')
+
+            try:
+                if args.stop_vm:
+                    logging.debug('Resuming VM')
+                    agent.vm.qemu_mon.cont()
+            except:
+                logging.error('Failed to resume VM')
+
+            return False
+
+
+        def complete_cb(event):
+            if event is None:
+                retq.put({'error': 'disconnected'})
+                return
+
+            if ('event' in event and
+                (event['event'] == 'BLOCK_JOB_COMPLETED' or
+                 event['event'] == 'BLOCK_JOB_ERROR' or
+                 event['event'] == 'BLOCK_JOB_CANCELLED') and
+                event['data']['device'] == args.drives[0]):
+                logging.debug('Notifying job completion')
+                retq.put(event)
+                return False
+            return True
+
         try:
-            data = json.loads(raw_data)
-        except:
-            raise PcoccError("Unable to parse output from qemu: " + raw_data)
+            res = agent.vm.qemu_mon.drive_backup(args.drives,
+                                                args.paths,
+                                                args.mode)
+        except PcoccError as e:
+            if use_fsfreeze:
+                Config().hyp.fsthaw(agent.vm)
+
+            yield agent_pb2.GenericError(
+                        kind = agent_pb2.GenericError.AgentError,
+                        description = str(e))
+            return
+
+        if use_fsfreeze:
+            Config().hyp.fsthaw(agent.vm)
+
+        agent.vm.qemu_mon.async_cb.append(complete_cb)
+        request_context.add_callback(cancel_cb)
+
+        while True:
+            try:
+                res = retq.get(True, 0.1)
+                complete = True
+                break
+            except Queue.Empty:
+                pass
+
+            r = agent.vm.qemu_mon.query_block_jobs()
+
+            for job in r:
+                if job['device'] in args.drives:
+                    yield agent_pb2.SaveDriveResult(
+                        status = 'running',
+                        len      = int(job['len']),
+                        offset   = int(job['offset']),
+                        drive    = job['device'])
+
+        if 'error' in res:
+            yield agent_pb2.GenericError(
+                kind = agent_pb2.GenericError.AgentError,
+                        description = res['error'])
+        else:
+            yield agent_pb2.SaveDriveResult(status='complete', len=1, offset=1)
+        return
+
+class HAResetReq(object):
+    _name = "reset"
+    __metaclass__ = HAReqClass
+
+    @staticmethod
+    def handle(agent, args, request_context):
+        agent.vm.qemu_mon.system_reset()
+        return agent_pb2.HelloResult()
+
+class HAMonCmdReq(object):
+    _name = "monitor_cmd"
+    __metaclass__ = HAReqClass
+
+    @staticmethod
+    def handle(agent, args, request_context):
+        res = agent.vm.qemu_mon.human_monitor_cmd(' '.join(args.cmd))
+        return agent_pb2.MonitorCmdResult(output=res)
+
+class QemuMonitor(object):
+    def __init__(self, vm):
+        self.vm = vm
+
+        # Lock for the serial port and tag allocation
+        self.wlock = threading.Lock()
+        self.current_tag = 1
+
+        # Pipe to notify the client thread
+        self.sp_r, self.sp_w = os.pipe()
+
+        # Context manager for callbacks
+        self.sync_cb = Queue.Queue()
+        self.async_cb = []
+
+        self.sync_cb.put(self._handle_hello)
+
+        qmp_file = Config().batch.get_vm_state_path(vm.rank, 'monitor_socket')
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.sock.connect(qmp_file)
+        except Exception as e:
+            raise PcoccError("Could not connect to Qemu monitor socket:" + str(e))
+
+        self.sock_file = self.sock.makefile()
+
+        self.databuff = ""
+        # Read the VM agent serial port socket and handle messages
+        threading.Thread(target=self._client_thread).start()
+
+        # Signal the client thread to stop when we want to exit
+        threading.Thread(target=self._killer_thread).start()
+
+        self.negotiate_caps()
+
+    def _handle_hello(self, data):
+        if 'QMP' in data:
+            logging.info('Qemu monitor said hello')
+        else:
+            raise PcoccError('Unexepected first message from Qemu ' + data)
+
+    def negotiate_caps_cmd(self):
+        return ('{"execute": "qmp_capabilities", "arguments":{} }\n\n')
+
+    def negotiate_caps(self):
+        self.validate_reply(self.exec_cmd_sync(self.negotiate_caps_cmd()))
+
+    def _cancel_all_requests(self):
+        logging.info('Qemu monitor: cancelling pending requests')
+
+        for cb in self.async_cb:
+            cb(None)
+
+        self.async_cb = []
+
+        while True:
+            try:
+                cb = self.sync_cb.get(None)
+            except Queue.Empty:
+                break
+            cb(None)
+
+    def _killer_thread(self):
+        """Waits for a stop_threads event and signal the client thread to stop blocking"""
+        stop_threads.wait()
+        logging.info("Qemu monitor: signaling serial port reader thread to exit")
+        os.write(self.sp_w, "x")
+
+    def _client_thread(self):
+        logging.info("Listening to Qemu monitor for VM %d",
+                     self.vm.rank)
+
+        while True:
+            sdata = self._read_sock_line()
+            if sdata == None:
+                logging.info("Qemu monitor for VM %d disconnected"
+                             , self.vm.rank)
+                break
+
+            if len(sdata.replace("\n","")) == 0:
+                continue
+            self._handle_monitor(sdata)
+
+        # If we disconnect, cancel all pending requests to the host
+        # agent
+        self._cancel_all_requests()
+
+    def _read_sock_line(self):
+        """
+        Read data from the VM until a complete command is read
+        """
+        while not '\n' in self.databuff:
+            rdr, _, _ = select.select([self.sp_r, self.sock], [], [])
+            if self.sp_r in rdr:
+                # The host agent is shutting down
+                # so we interrupt our read
+                return None
+            elif rdr:
+                try:
+                    tdata = self.sock.recv(32768)
+                except socket.error:
+                    tdata = None
+
+                if not tdata:
+                    return None
+                else:
+                    self.databuff = self.databuff + tdata
+
+        sret = self.databuff.split("\n")
+        self.databuff = "\n".join(sret[1:])
+        ret = sret[0]
+        return ret
+
+    def _handle_monitor(self, monitor_data):
+        """
+        Run the callback for a given Qemu Monitor answer or async notification
+        """
+        logging.debug("Qemu monitor: received %s",
+                      str(monitor_data))
+
+        try:
+            json_msg = json.loads(monitor_data)
+        except Exception as e:
+            # TODO: We should implement a better recovery strategy
+            # from leftover garbage in the serial port
+            logging.error("Host agent: cannot decode data from Qemu monitor: %s",
+                          str(e))
+            return
+
+        if 'event' in json_msg:
+            kept_cbs = []
+            for cb in self.async_cb:
+                keep = cb(json_msg)
+                if keep:
+                    kept_cbs.append(cb)
+            self.async_cb = kept_cbs
+        else:
+            try:
+                cb = self.sync_cb.get(False)
+            except Queue.Empty:
+                logging.error("Qemu monitor sent unexpected reply: %s", json_msg)
+                return
+            cb(json_msg)
+
+    def register_async_cb(self, cb):
+        self.wlock.acquire()
+        self.async_cb.append(cb)
+        self.wlock.release()
+
+    def exec_cmd_cb(self, payload, cb):
+        self.wlock.acquire()
+        self.sync_cb.put(cb)
+        try:
+            self.sock.sendall(payload)
+        except IOError as e:
+            logging.warning("Failed to send message to monitor due to %s",
+                            str(e))
+        self.wlock.release()
+
+    def exec_cmd_sync(self, json_cmd):
+        retq = Queue.Queue()
+
+        def return_cb(result):
+            retq.put(result)
+
+        self.exec_cmd_cb(json_cmd, return_cb)
+
+        return retq.get()
+
+    def quit_cmd(self):
+        return '{"execute": "quit"}\n\n'
+
+    def quit(self):
+        self.validate_reply(self.exec_cmd_sync(self.quit_cmd()))
+
+    def stop_cmd(self):
+        return '{"execute": "stop"}\n\n'
+
+    def stop(self):
+        self.validate_reply(self.exec_cmd_sync(self.stop_cmd()))
+
+    def query_dump_cmd(self):
+        return '{"execute": "query-dump"}\n\n'
+
+    def query_dump(self):
+        data = self.exec_cmd_sync(self.query_dump_cmd())
+        self.validate_reply(data)
 
         try:
             return data["return"]
-        except KeyError:
-            pass
-
-        try:
-            raise PcoccError("Qemu monitor error: " + data["error"]["desc"])
-        except KeyError:
-            raise PcoccError("Unable to parse output from qemu: " + raw_data)
-
-    def start_migration(self, dest_mem_file):
-        mon_speed_cmd = ('{"execute": "migrate_set_speed", "arguments":{'
-                         '"value": 4294967296'
-                         '} }\n\n')
-        self.send_raw(mon_speed_cmd)
-        self.read_filtered()
-
-        mon_save_cmd = ('{"execute": "migrate", "arguments":{'
-                        '"uri": "exec:lzop > %s"'
-                        '} }\n\n'%(dest_mem_file))
-        self.send_raw(mon_save_cmd)
-        data = self.read_filtered()
-        try:
-            ret = json.loads(data)
-            if 'error' in ret:
-                raise PcoccError('Failed to start memory transfer: ' +
-                                 ret['error']['desc'])
         except:
-            raise
-#            raise PcoccError("Unable to parse output from qemu: " + data)
+            raise PcoccError("Could not parse query-dump answer: " + data)
 
-    def snapshot_image(self, dest_image_file):
-        #TODO
-        pass
+    def query_block_jobs_cmd(self):
+        return '{"execute": "query-block-jobs"}\n\n'
+
+    def query_block_jobs(self):
+        data = self.exec_cmd_sync(self.query_block_jobs_cmd())
+        self.validate_reply(data)
+
+        try:
+            return data["return"]
+        except:
+            raise PcoccError("Could not parse query-block-jobs answer: " + data)
+
+
+    def query_status_cmd(self):
+        return '{"execute": "query-status"}\n\n'
+
+    def query_status(self):
+        data = self.exec_cmd_sync(self.query_status_cmd())
+        self.validate_reply(data)
+
+        try:
+            return data["return"]["status"]
+        except:
+            raise PcoccError("Could not parse query-status answer: " + data)
+
+    def query_migration_cmd(self):
+        return '{"execute": "query-migrate" }\n\n'
 
     def query_migration(self):
-        mon_query_cmd = ('{"execute": "query-migrate" }\n\n')
-        self.send_raw(mon_query_cmd)
-        return self.read_filtered()
+        data = self.exec_cmd_sync(self.query_migration_cmd())
+        self.validate_reply(data)
 
-    def close_monitor(self):
-        self.s_mon.terminate()
-        self.s_mon.communicate()
+        try:
+            return data["return"]
+        except:
+            raise PcoccError("Could not parse query-migration answer: " + data)
+
+    def cont_cmd(self):
+        return '{"execute": "cont"}\n\n'
+
+    def cont(self):
+        self.validate_reply(self.exec_cmd_sync(self.cont_cmd()))
+
+    def dump_cmd(self, dump_file):
+        return (
+    '{"execute": "dump-guest-memory", "arguments":{ '
+    '"paging": true, '
+    '"detach": true, '
+    '"protocol": "file:%s"'
+    '} }\n\n'  % dump_file)
+
+    def dump(self, dump_file):
+        self.validate_reply(self.exec_cmd_sync(self.dump_cmd(dump_file)))
+
+    def system_reset_cmd(self):
+        return ('{"execute": "system_reset"}\n\n')
+
+    def system_reset(self):
+        self.validate_reply(self.exec_cmd_sync(self.system_reset_cmd()))
+
+    def system_powerdown_cmd(self):
+        return '{"execute": "system_powerdown"}\n\n'
+
+    def system_powerdown(self):
+        self.validate_reply(self.exec_cmd_sync(self.system_powerdown_cmd()))
+
+    def human_monitor_cmd_cmd(self, human_cmd):
+        return ('{"execute": "human-monitor-command", "arguments":{'
+                '"command-line": "%s"} }\n\n' % human_cmd)
+
+    def human_monitor_cmd(self, human_cmd):
+        data = self.validate_reply(self.exec_cmd_sync(
+                  self.human_monitor_cmd_cmd(human_cmd)))
+
+        try:
+            return data["return"]
+        except:
+            raise PcoccError("Could not parse human-monitor-cmd answer: " + data)
+
+    def start_migration_cmd(self, dest_mem_file):
+        return ('{"execute": "migrate", "arguments":{'
+                '"uri": "exec:lzop > %s"'
+                '} }\n\n'%(dest_mem_file))
+
+    def start_migration(self, dest_mem_file):
+        self.validate_reply(self.exec_cmd_sync(self.start_migration_cmd(
+            dest_mem_file)))
+
+    def cancel_migration_cmd(self):
+        return '{"execute": "migrate_cancel" }}\n\n'
+
+    def cancel_migration(self, dest_mem_file):
+        self.validate_reply(self.exec_cmd_sync(self.migrate_cancel_cmd()))
+
+    def prepare_migration_cmd(self):
+        return ('{"execute": "migrate_set_speed", "arguments":{'
+                         '"value": 4294967296'
+                         '} }\n\n')
+
+    def prepare_migration(self):
+        self.validate_reply(self.exec_cmd_sync(self.prepare_migration_cmd()))
+
+    def drive_backup_cmd(self, devices, dests, sync_type):
+        if sync_type == DRIVE_SAVE_MODE.FULL:
+            sync_arg = 'full'
+        elif sync_type == DRIVE_SAVE_MODE.TOP:
+            sync_arg = 'top'
+
+        return ('{"execute": "drive-backup",'
+                '"arguments": { "device": "%s",'
+                '"target": "%s", "sync": "%s"'
+                '} }\n\n' % (devices[0], dests[0], sync_arg))
+
+    def drive_backup(self, device, dest, sync_type):
+        self.validate_reply(self.exec_cmd_sync(self.drive_backup_cmd(
+            device, dest, sync_type)))
+
+    def block_job_cancel_cmd(self, drive):
+        return ('{ "execute": "block-job-cancel",'
+                '"arguments": { "device": "%s"} }\n\n' % (drive))
+
+    def block_job_cancel(self, drive):
+        self.validate_reply(self.exec_cmd_sync(self.block_job_cancel_cmd(drive)))
+
+    def query_cpus_cmd(self):
+        return '{ "execute": "query-cpus" }'
+
+    def query_cpus(self):
+        data = self.validate_reply(self.exec_cmd_sync(self.query_cpus_cmd()))
+        return data['return']
+
+    def validate_reply(self, data):
+        if data is None:
+            raise PcoccError('Qemu monitor disconnected')
+
+        if 'error' in data:
+            if 'desc' in data['error']:
+                raise PcoccError('Qemu monitor command failed: {}'.format(
+                                 str(data['error']['desc'])))
+            else:
+                raise PcoccError('Qemu monitor command failed')
+
+        return data
+
+
+QMP_READ_SIZE=32768
 
 class Qemu(object):
     def __init__(self):
@@ -849,7 +1332,7 @@ username={3}@pcocc
         qemu_version = float(match.group(1))
 
         if ckpt_dir:
-            dest_mem_file = self.checkpoint_mem_file(vm, ckpt_dir)
+            dest_mem_file = checkpoint_mem_file(vm, ckpt_dir)
 
             cmdline += ['-incoming',
                         "exec: lzop -dc %s" % (dest_mem_file)]
@@ -881,7 +1364,7 @@ username={3}@pcocc
         block_idx = 0
         if vm.image_type != DRIVE_IMAGE_TYPE.NONE:
             if ckpt_dir:
-                image_path = self.checkpoint_img_file(vm, ckpt_dir)
+                image_path = checkpoint_img_file(vm, ckpt_dir)
             else:
                 image_path = vm.image_path
 
@@ -917,7 +1400,8 @@ username={3}@pcocc
                                       self._do_lock_image,
                                       vm.persistent_drives[drive])
                 atexit.register(self._unlock_image, spath)
-            cmdline += qemu_gen_block_cmdline(vm.disk_model, path, 'drive'+str(block_idx), block_idx,
+            cmdline += qemu_gen_block_cmdline(vm.disk_model, path, 'drive'+str(block_idx),
+                                              block_idx,
                                               vm.persistent_drives[drive]['cache'])
             block_idx += 1
 
@@ -1151,38 +1635,36 @@ username={3}@pcocc
             os.setpgid(0, 0)
             os.execvp(cmdline[0], cmdline)
 
+
+        # If we need to properly shutdown the guest, catch SIGTERMs
+        # and SIGINTS
+
+        # Intialize the qemu monitor
+        # This also serves as waiting for Qemu to be initialized
         while True:
             try:
-                # Init qemu monitor
-                s_mon = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                s_mon.connect(batch.get_vm_state_path(vm.rank, 'monitor_socket'))
+                qemu_mon = QemuMonitor(vm)
                 break
-
-            except socket.error as err:
+            #FIXME: We should use a more specific exception
+            except PcoccError:
                 pid, status = os.waitpid(qemu_pid, os.WNOHANG)
                 if pid:
                     ret = status >> 8
                     raise HypervisorError("qemu exited during init with"
-                                          " status %d" % (ret))
+                                          " status {}".format(ret))
                 time.sleep(1)
 
-
-        data = s_mon.recv(QMP_READ_SIZE)
-        s_mon.sendall('{ "execute": "qmp_capabilities" }')
-        data = s_mon.recv(QMP_READ_SIZE)
 
         self._set_vm_state('qemu-start',
                            'binding vcpus',
                            None, vm.rank)
 
-        if autobind_cpumem:
-            # Ask for vcpu thread info
-            s_mon.sendall('{ "execute": "query-cpus" }')
-            data = s_mon.recv(QMP_READ_SIZE)
-            ret = json.loads(data)
+        vm.qemu_mon = qemu_mon
 
+        if autobind_cpumem:
+            infos = qemu_mon.query_cpus()
             # Bind each vcpu thread on its physical cpu
-            for cpu_info in ret["return"]:
+            for cpu_info in infos:
                 cpu_id = cpu_info["CPU"]
                 cpu_thread_id = cpu_info["thread_id"]
                 phys_coreid = subprocess_check_output(
@@ -1193,7 +1675,6 @@ username={3}@pcocc
                 subprocess_check_output(['taskset', '-p', '-c',
                                          phys_coreid, str(cpu_thread_id)])
 
-        s_mon.close()
 
         if ckpt_dir:
             # Signal VM restore
@@ -1201,18 +1682,12 @@ username={3}@pcocc
                            'restoring',
                            None, vm.rank)
 
-            mon = RemoteMonitor(vm)
-            while mon.query_status() == 'inmigrate':
+            while qemu_mon.query_status() == 'inmigrate':
                 time.sleep(1)
-            mon.cont()
-            mon.close_monitor()
+            qemu_mon.cont()
         else:
-            mon = RemoteMonitor(vm)
-            mon.cont()
-            mon.close_monitor()
+            qemu_mon.cont()
 
-        # If we need to properly shutdown the guest, catch SIGTERMs
-        # and SIGINTS
         if vm.wait_for_poweroff:
             term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
         else:
@@ -1222,8 +1697,7 @@ username={3}@pcocc
             watchdog = threading.Thread(None, self.watchdog, args=[vm])
             watchdog.start()
 
-
-        vm.enable_agent_server(HostAgent(vm.rank))
+        vm.enable_agent_server(HostAgent(vm))
 
         # Proxy the VM console until Qemu closes it
         client_sock = None
@@ -1342,9 +1816,7 @@ username={3}@pcocc
                         qemu_console_sock = None
                         break
 
-                    mon = RemoteMonitor(vm)
-                    mon.system_powerdown()
-                    mon.close_monitor()
+                    qemu_mon.system_powerdown()
                     logging.debug('Waiting for VM to poweroff')
                     # Wait 10s for Qemu to exit and resend signal
                     if t:
@@ -1391,145 +1863,6 @@ username={3}@pcocc
 
         logging.info('Got thread termination event')
 
-    def dump(self, vm, dumpfile):
-        mon = RemoteMonitor(vm)
-        mon.dump(dumpfile)
-        mon.close_monitor()
-
-    def reset(self, vm):
-        mon = RemoteMonitor(vm)
-        mon.system_reset()
-        mon.close_monitor()
-
-    def human_monitor_cmd(self, vm, cmd):
-        mon = RemoteMonitor(vm)
-        res = mon.human_monitor_cmd(cmd)
-        mon.close_monitor()
-        return res
-
-    def checkpoint(self, vm, ckpt_dir):
-        dest_mem_file = self.checkpoint_mem_file(vm, ckpt_dir)
-
-        mon = RemoteMonitor(vm)
-        mon.stop()
-
-        try:
-            mon.start_migration(dest_mem_file)
-            retry_count = 0
-            status = 'failed'
-
-            while True:
-                time.sleep(1)
-                data = mon.query_migration()
-
-                ret =  json.loads(data)
-                # If we are too fast, it seems qemu doesn't return the status
-                if not 'status' in ret["return"]:
-                    continue
-
-                status = ret["return"]["status"]
-                if status == "active":
-                    remain_mb = (int(ret["return"]["ram"]["remaining"])
-                                 // (1024 * 1024))
-                    tot_mb = (int(ret["return"]["ram"]["total"])
-                              // (1024 * 1024))
-                    remain_pct = 100. * remain_mb / tot_mb
-
-                    if remain_mb > 0:
-                        print ("checkpointing vm%d memory: "
-                               "%d MB remaining (%d %%)" )% (
-                            vm.rank,
-                            remain_mb,
-                            remain_pct)
-                elif status == 'completed':
-                    break
-                elif status == 'failed':
-                    sys.stderr.write('Memory save error for VM %d, '
-                    'output was %s \n' % (vm.rank, data))
-                    if retry_count < Config().ckpt_retry_count:
-                        retry_count += 1
-                        sys.stderr.write('Retrying...\n')
-                        mon.start_migration(dest_mem_file)
-                        continue
-                    else:
-                        break
-                elif status == 'setup':
-                    continue
-                else:
-                    break
-        except PcoccError as err:
-            try:
-                mon.cont()
-            except:
-                pass
-            raise CheckpointError(str(err))
-
-        except (KeyError , ValueError)  as err:
-            try:
-                mon.cont()
-            except:
-                pass
-            raise CheckpointError(str(err) + ' Monitor sent: ' + data)
-
-
-        if status != 'completed':
-            raise CheckpointError('status is %s. Monitor sent: ' + data)
-
-        mon.close_monitor()
-
-
-
-    def quit(self, vm):
-        s_mon = RemoteMonitor(vm)
-        s_mon.quit()
-        s_mon.close_monitor()
-
-    def save(self, vm, dest_img_file, full=False, freeze=VM_FREEZE_OPT.TRY):
-        drive_idx = 0
-        use_fsfreeze = False
-        drive_name = 'drive' + str(drive_idx)
-
-        if freeze != VM_FREEZE_OPT.NO:
-            if freeze == VM_FREEZE_OPT.YES:
-                timeout = 0
-            else:
-                timeout = 2
-
-            try:
-                self.fsthaw(vm, timeout=timeout)
-                use_fsfreeze = True
-            except AgentError:
-                if freeze == VM_FREEZE_OPT.YES:
-                    raise ImageSaveError('Unable to freeze filesystems')
-
-                print ('No answer from Qemu agent when trying to freeze filesystem: '
-                       'saved image could be corrupted if the filesystem '
-                       'is accessed')
-
-        if use_fsfreeze:
-            self.fsfreeze(vm)
-
-        if full:
-            sync_type = 'full'
-        else:
-            sync_type = 'top'
-
-        try:
-            mon = RemoteMonitor(vm)
-            mon.drive_backup_start(drive_name, dest_img_file, sync_type)
-            print ('Image copy started')
-        except:
-            if use_fsfreeze:
-                self.fsthaw(vm)
-            raise
-
-        if use_fsfreeze:
-            self.fsthaw(vm)
-
-        mon.drive_backup_complete()
-        mon.close_monitor()
-
-        print ('Image copy complete')
     def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0, kill_atexit=True):
         # We need to make several tries because nc and qemu may drop or
         # input silently if we race with them
@@ -1685,7 +2018,6 @@ username={3}@pcocc
         if  ret <= 0:
             raise AgentError("No filesystem frozen")
 
-        print 'vm{0} frozen'.format(vm.rank)
         s_ctl.terminate()
 
     def fsthaw(self, vm, port=QEMU_GUEST_AGENT_PORT, timeout=0):
@@ -1701,9 +2033,6 @@ username={3}@pcocc
             raise AgentError("Error while thawing VM: " + ret["error"]["desc"])
 
         ret = json.loads(data)["return"]
-
-        if ret > 0:
-            print 'vm{0} thawed'.format(vm.rank)
 
         s_ctl.terminate()
 
@@ -1833,12 +2162,6 @@ username={3}@pcocc
                     break
             else:
                 break
-
-    def checkpoint_mem_file(self, vm, ckpt_dir):
-        return os.path.join(ckpt_dir,'memory-vm%d' % (vm.rank))
-
-    def checkpoint_img_file(self, vm, ckpt_dir):
-        return os.path.join(ckpt_dir,'disk-vm%d' % (vm.rank))
 
     def socket_connect(self,vm, name, kill_atexit=True):
         batch = Config().batch
@@ -1971,3 +2294,9 @@ def qemu_gen_drive_cmdline(path, name, cache):
     return ['-drive',
             'file={0},cache={1},id={2},'
             'if=none'.format(path, cache, name)]
+
+def checkpoint_mem_file(vm, ckpt_dir):
+    return os.path.join(ckpt_dir,'memory-vm{}'.format(vm.rank))
+
+def checkpoint_img_file(vm, ckpt_dir):
+    return os.path.join(ckpt_dir,'disk-vm{}'.format(vm.rank))

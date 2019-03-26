@@ -471,7 +471,12 @@ class TreeNodeRelay(object):
 
 
         if stub is None:
-            logging.error("Bad stub for %d from %d", command.destination, self._vmid)
+            logging.info("Bad stub for %d from %d", command.destination, self._vmid)
+            return agent_pb2.RouteMessageResult(source=command.destination,
+                                                error=agent_pb2.GenericError(
+                                                    kind=agent_pb2.GenericError.GenericError,
+                                                    description='No route for vm{}'.format(
+                                                        command.destination)))
 
         try:
             # Route the command by executing a RPC on the next
@@ -491,7 +496,7 @@ class TreeNodeRelay(object):
             else:
                 return agent_pb2.RouteMessageResult(source=command.destination,
                                                     error=agent_pb2.GenericError(
-                    type=agent_pb2.GenericError.GenericError,
+                    kind=agent_pb2.GenericError.GenericError,
                     description=str(e)))
         except grpc.FutureCancelledError as e:
             # Again should not be necessary as the parent should be

@@ -50,7 +50,7 @@ from .Error import PcoccError
 from .Config import Config
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import stop_threads, systemd_notify
-from .Templates import TEMPLATE_IMAGE_TYPE
+from .Templates import DRIVE_IMAGE_TYPE
 
 lock = threading.Lock()
 
@@ -324,7 +324,7 @@ class HostAgent(object):
             cmd.ParseFromString(base64.b64decode(command_data))
             logging.debug("Host agent: decoded protobuf to:\n%s", str(cmd))
         except Exception as e:
-            # TODO: We shoudl implement a better recovery strategy
+            # TODO: We should implement a better recovery strategy
             # from leftover garbage in the serial port
             logging.error("Host agent: cannot decode protobuf from VM agent: %s",
                           str(e))
@@ -483,11 +483,11 @@ class RemoteMonitor(object):
         self.send_raw(mon_cont_cmd)
         self.read_filtered()
 
-    def drive_backup(self, device, dest):
+    def drive_backup_start(self, device, dest, sync_type):
         mon_backup_cmd = ('{"execute": "drive-backup",'
                         '"arguments": { "device": "%s",'
-                        '"target": "%s", "sync": "top"'
-                        '} }\n\n' % (device, dest))
+                        '"target": "%s", "sync": "%s"'
+                        '} }\n\n' % (device, dest, sync_type))
         self.send_raw(mon_backup_cmd)
         ret = self.read_filtered()
 
@@ -499,6 +499,8 @@ class RemoteMonitor(object):
         if "error" in ret:
             raise ImageSaveError(ret["error"]["desc"])
 
+
+    def drive_backup_complete(self):
         ret = self.read_filtered(["BLOCK_JOB_COMPLETED"])
         try:
             ret = json.loads(ret)
@@ -877,7 +879,7 @@ username={3}@pcocc
         cmdline += [ '-device', 'virtio-scsi-pci,id=scsi0']
 
         block_idx = 0
-        if vm.image_type != TEMPLATE_IMAGE_TYPE.NONE:
+        if vm.image_type != DRIVE_IMAGE_TYPE.NONE:
             if ckpt_dir:
                 image_path = self.checkpoint_img_file(vm, ckpt_dir)
             else:
@@ -899,7 +901,7 @@ username={3}@pcocc
 
             atexit.register(os.remove, snapshot_path)
 
-            cmdline += qemu_gen_block_cmdline(vm.disk_model, snapshot_path, 'bootdisk',
+            cmdline += qemu_gen_block_cmdline(vm.disk_model, snapshot_path, 'drive0',
                                               block_idx, vm.disk_cache)
             block_idx += 1
 
@@ -915,7 +917,7 @@ username={3}@pcocc
                                       self._do_lock_image,
                                       vm.persistent_drives[drive])
                 atexit.register(self._unlock_image, spath)
-            cmdline += qemu_gen_block_cmdline(vm.disk_model, path, 'datadisk'+str(i), block_idx,
+            cmdline += qemu_gen_block_cmdline(vm.disk_model, path, 'drive'+str(block_idx), block_idx,
                                               vm.persistent_drives[drive]['cache'])
             block_idx += 1
 
@@ -1483,9 +1485,9 @@ username={3}@pcocc
         s_mon.close_monitor()
 
     def save(self, vm, dest_img_file, full=False, freeze=VM_FREEZE_OPT.TRY):
-        remote_host = vm.get_host()
-        vm_image_path = vm.image_path
+        drive_idx = 0
         use_fsfreeze = False
+        drive_name = 'drive' + str(drive_idx)
 
         if freeze != VM_FREEZE_OPT.NO:
             if freeze == VM_FREEZE_OPT.YES:
@@ -1507,10 +1509,15 @@ username={3}@pcocc
         if use_fsfreeze:
             self.fsfreeze(vm)
 
+        if full:
+            sync_type = 'full'
+        else:
+            sync_type = 'top'
+
         try:
             mon = RemoteMonitor(vm)
-            mon.drive_backup('bootdisk', dest_img_file)
-            mon.close_monitor()
+            mon.drive_backup_start(drive_name, dest_img_file, sync_type)
+            print ('Image copy started')
         except:
             if use_fsfreeze:
                 self.fsthaw(vm)
@@ -1519,44 +1526,10 @@ username={3}@pcocc
         if use_fsfreeze:
             self.fsthaw(vm)
 
-        need_rebase = False
-        if full:
-            need_rebase = True
-            new_backing_file = '""'
-            print 'Merging snapshot with backing file to make it standalone...'
-        else:
-            try:
-                img_info_output =  subprocess_check_output(['ssh', remote_host,
-                                                            'qemu-img', 'info', "--output=json",
-                                                            dest_img_file])
+        mon.drive_backup_complete()
+        mon.close_monitor()
 
-            except (OSError, subprocess.CalledProcessError):
-                raise ImageSaveError('unable to determine backing file')
-
-            try:
-                data = json.loads(img_info_output)
-                backing_file = data.get("full-backing-filename", None)
-                if backing_file is None:
-                    backing_file = data["backing-filename"]
-            except Exception as e:
-                raise ImageSaveError('unable to determine backing file. Qemu-img '
-                                     'output was ' + img_info_output + str(e))
-
-            if not os.path.samefile(backing_file, vm_image_path):
-                need_rebase = True
-                new_backing_file = vm_image_path
-                print 'Current snapshot backing file is %s' % backing_file
-                print 'Rebasing snapshot on %s to preserve chaining...' % vm_image_path
-
-        if need_rebase:
-            try:
-                subprocess.check_call(['ssh', remote_host,
-                                       'qemu-img', 'rebase',
-                                       '-b', new_backing_file,
-                                       dest_img_file])
-            except (OSError, subprocess.CalledProcessError):
-                raise ImageSaveError('Unable to rebase disk')
-
+        print ('Image copy complete')
     def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0, kill_atexit=True):
         # We need to make several tries because nc and qemu may drop or
         # input silently if we race with them

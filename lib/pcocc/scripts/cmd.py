@@ -45,7 +45,7 @@ from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from pcocc.scripts.Shine.TextTable import TextTable
 from pcocc.Agent import AgentCommand
-from pcocc.Templates import TEMPLATE_IMAGE_TYPE
+from pcocc.Templates import DRIVE_IMAGE_TYPE
 from pcocc import agent_pb2
 
 from ClusterShell.NodeSet import RangeSet, RangeSetParseError
@@ -414,7 +414,7 @@ def vm_name_to_index(name):
               is_flag=True)
 @click.argument('vm', nargs=1, default='vm0')
 def pcocc_save(jobid, jobname, dest, vm, safe, full):
-    """Save the disk of a VM
+    """Save the main drive of a VM
 
     By default the output file only contains the differences between
     the current state of the disk and the template from which the VM
@@ -431,32 +431,48 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
         index   = vm_name_to_index(vm)
         vm = cluster.vms[index]
 
-        if  vm.image_type == TEMPLATE_IMAGE_TYPE.NONE:
-            click.secho('Template is not based on a CoW image',
-                        fg='red', err=True)
-            sys.exit(-1)
 
-        if vm.image_type == TEMPLATE_IMAGE_TYPE.REPO:
-            if dest:
-                # For incremental save into a new image, start by making sure
-                # all the incremental data blobs are in the destination repo
-                if not full:
-                    config.images.copy_image(vm.image, dest)
-                else:
-                    # We dont allow silent overwrite so check if the
-                    # destination exists now instead of erroring out later
-                    # (in the non-full case, the copy catches it early)
-                    config.images.check_overwrite(dest)
+        drives = vm.block_drives
+        if not drives:
+            raise PcoccError('VM has no drive to save')
 
-            else:
-                dest = vm.image
+        drive = drives[0]
 
-            save_path = config.images.prepare_vm_import(dest)
-        else:
-            if dest:
+        # For now we only support full backups for persistent drives
+        if drive['persistent']:
+            full = True
+
+        new_dest = False
+        # Explicit destination specified: store in a new image
+        if dest:
+            new_dest = True
+            if drive['type'] == DRIVE_IMAGE_TYPE.REPO:
+                # If there was no previous repository image
+                # force full new image
+                if drive['image'] is None:
+                    full = True
+
+                # We dont allow silent overwrite so check if the
+                # destination exists now instead of erroring out later
+                config.images.check_overwrite(dest)
+            elif drive['type'] == DRIVE_IMAGE_TYPE.DIR:
                 validate_save_dir(dest, False)
-                save_path = os.path.join(dest, 'image')
+                # In directory mode, new images are always full iamges
                 full = True
+        else:
+            # Store in the current image
+            dest = drive['image']
+
+
+        if not dest:
+            raise PcoccError('No default target image to save VM main drive. '
+                             'Please use specify one with --dest')
+
+        if drive['type'] == DRIVE_IMAGE_TYPE.REPO:
+            save_path = config.images.prepare_vm_import(dest)
+        elif drive['type'] == DRIVE_IMAGE_TYPE.DIR:
+            if full:
+                save_path = os.path.join(dest, 'image')
             else:
                 save_path = os.path.join(vm.image_dir,
                                          'image-rev%d'%(vm.revision + 1))
@@ -469,8 +485,13 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
         click.echo("Saving image...")
         vm.save(save_path, full, freeze_opt)
 
-        if vm.image_type == TEMPLATE_IMAGE_TYPE.REPO:
+        if drive['type'] == DRIVE_IMAGE_TYPE.REPO:
             if not full:
+                if new_dest:
+                    # For incremental save into a new image, start by copying the previous
+                    # image to the new one so that we can add the new layer on top later
+                    config.images.copy_image(drive['image'], dest)
+
                 new_image = config.images.add_revision_layer(dest, save_path)
             else:
                 new_image = config.images.add_revision_full("vm", dest, save_path)

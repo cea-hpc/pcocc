@@ -28,7 +28,7 @@ from .Error import InvalidConfigurationError
 from .Backports import OrderedDict, enum
 
 
-TEMPLATE_IMAGE_TYPE = enum('NONE', 'REPO', 'DIR')
+DRIVE_IMAGE_TYPE = enum('NONE', 'REPO', 'DIR')
 
 # For each valid setting, is it required, whats the default value and is it
 # inheritable
@@ -48,7 +48,7 @@ template_settings = {'image': (False, None, True),
                      'machine-type': (False, 'pc', True),
                      'remote-display': (False, None, True),
                      'description': (False, '', False),
-                     'persistent-drives': (False, [], True),
+                     'persistent-drives': (False, {}, True),
                      'placeholder': (False, False, False)}
 
 class TemplateConfig(dict):
@@ -221,7 +221,7 @@ class Template(object):
 
     def image_type(self, vm=None):
         if getattr(self, 'image') is None:
-            return TEMPLATE_IMAGE_TYPE.NONE
+            return DRIVE_IMAGE_TYPE.NONE
 
         image = Config().resolve_path(getattr(self, 'image'), vm)
 
@@ -230,16 +230,16 @@ class Template(object):
         # a hacky heuristic to know whether the user is referring to a folder or
         # a repository
         if os.sep in image:
-            return TEMPLATE_IMAGE_TYPE.DIR
+            return DRIVE_IMAGE_TYPE.DIR
         else:
-            return TEMPLATE_IMAGE_TYPE.REPO
+            return DRIVE_IMAGE_TYPE.REPO
 
     def resolve_image(self, vm=None):
         image = Config().resolve_path(getattr(self, 'image'), vm)
 
-        if self.image_type(vm) == TEMPLATE_IMAGE_TYPE.NONE:
+        if self.image_type(vm) == DRIVE_IMAGE_TYPE.NONE:
             return None, 0
-        elif self.image_type(vm) == TEMPLATE_IMAGE_TYPE.REPO:
+        elif self.image_type(vm) == DRIVE_IMAGE_TYPE.REPO:
             meta, data = Config().images.get_image(image)
             return data, meta['revision']
 
@@ -337,12 +337,16 @@ class Template(object):
                 if not 'cache' in opts:
                     opts['cache'] = 'writeback'
 
+                if not 'backup' in opts:
+                    opts['backup'] = None
+
                 ordered_drives[path] = opts
             # String syntax
             else:
                 ordered_drives[drive] = {
                     'mmp': True,
-                    'cache': 'writeback'
+                    'cache': 'writeback',
+                    'backup': None
                 }
 
         self.settings['persistent-drives'] = ordered_drives

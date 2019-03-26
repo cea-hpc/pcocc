@@ -109,19 +109,28 @@ class ImageMgr(object):
         _, dst_repo, _ = self.parse_image_uri(dst_uri)
         dst_store = self.object_store.get_repo(dst_repo)
 
-        backing_file = self.read_vm_image_backing_file(path)
-        backing_blob = os.path.basename(backing_file)
+
+        _, tgt_backing_file = self.get_image(dst_uri)
+        tgt_backing_blob = os.path.basename(tgt_backing_file)
+
+
+        cur_backing_file = self.read_vm_image_backing_file(path,
+                                                           full=True)
+
+        if not os.path.samefile(cur_backing_file, tgt_backing_file):
+            print 'Rebasing snapshot to preserve chaining...'
+            self.rebase(path, tgt_backing_file, False)
 
         rel_backing_file = dst_store.get_obj_path('data',
-                                                  backing_blob,
+                                                  tgt_backing_blob,
                                                   True,
                                                   True)
 
         self.rebase(path, rel_backing_file, True)
+
         meta, _ = self.get_image(dst_uri)
         h = dst_store.put_data_blob(path)
         meta['data_blobs'].append(h)
-
 
         return dst_store.put_meta(meta['name'], meta['revision'] + 1,
                                   meta['kind'], meta['data_blobs'],
@@ -303,7 +312,7 @@ class ImageMgr(object):
         return data.get("format", None)
 
     @staticmethod
-    def read_vm_image_backing_file(path):
+    def read_vm_image_backing_file(path, full=False):
         if not os.path.isfile(path):
             raise PcoccError("{} is not an image file".format(path))
         if not os.access(path, os.R_OK):
@@ -319,7 +328,14 @@ class ImageMgr(object):
         except Exception:
             return None
 
-        return data.get("backing-filename", None)
+        res = None
+        if full:
+            res = data.get("full-backing-filename", None)
+
+        if not res:
+            res = data.get("backing-filename", None)
+
+        return res
 
     def extract_extension(self, in_path, kind):
         suffix = os.path.splitext(in_path)[-1].lower().replace(".", "")

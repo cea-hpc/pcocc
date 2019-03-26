@@ -29,7 +29,7 @@ from .Config import Config
 from .Misc import ThreadPool
 from .scripts import click
 from .Tbon import TreeNode, TreeClient
-from .Templates import TEMPLATE_IMAGE_TYPE
+from .Templates import DRIVE_IMAGE_TYPE
 
 class InvalidClusterError(PcoccError):
     """Exception raised when the cluster definition cannot be parsed
@@ -56,7 +56,7 @@ def do_checkpoint_vm(key, vm, ckpt_dir):
     vm.checkpoint(ckpt_dir)
 
 def do_save_vm(key, vm, ckpt_dir):
-    if  vm.image_type != TEMPLATE_IMAGE_TYPE.NONE:
+    if  vm.image_type != DRIVE_IMAGE_TYPE.NONE:
         vm.save(vm.checkpoint_img_file(ckpt_dir),
                 freeze=Hypervisor.VM_FREEZE_OPT.NO)
 
@@ -185,11 +185,33 @@ class VM(object):
 
     @property
     def image_dir(self):
-        if self.image_type != TEMPLATE_IMAGE_TYPE.DIR:
+        if self.image_type != DRIVE_IMAGE_TYPE.DIR:
             raise PcoccError("VM image is not a directory")
 
         return Config().resolve_path(self._template.image, self)
 
+    @property
+    def block_drives(self):
+        drives = []
+        idx = 0
+        if self.image:
+            drives.append({'image': self.image,
+                           'name': 'drive0',
+                           'path': self.image_path,
+                           'type': self.image_type,
+                           'persistent': False})
+            idx+=1
+
+        for path, settings in self.persistent_drives.items():
+            drives.append({
+                    'image': settings['backup'],
+                    'name': 'drive'+str(idx),
+                    'path': Config().resolve_path(path, self),
+                    'type': DRIVE_IMAGE_TYPE.REPO,
+                    'persistent': False})
+            idx+=1
+
+        return drives
     @property
     def revision(self):
         _, revision = self._template.resolve_image(self)

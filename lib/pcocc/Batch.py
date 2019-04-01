@@ -1490,17 +1490,22 @@ class SlurmManager(EtcdManager):
         # from the batch scheduler
         self._rank_map = []
 
-        # Find the uid: if we are executed as a management plugin, the uid will
-        # be set as an env var, otherwise we can use the current user
         if batchuser and self.proc_type == ProcessType.USER:
+            # For some CLI invocations, we allow targeting arbitrary users
             self.batchuser = batchuser
         else:
+            # Find the uid: if we are executed as a management plugin,
+            # it has to be provided as an evironment variable by
+            # SLURM. Otherwise, we default to the current user.
             try:
                 uid = int(os.environ['SLURM_JOB_UID'])
-                self.batchuser = pwd.getpwuid(uid).pw_name
             except KeyError:
-                # Assume we are the caller
-                self.batchuser = pwd.getpwuid(os.getuid()).pw_name
+                if self.proc_type == ProcessType.SETUP:
+                    raise
+                # Assume the user is the caller
+                uid = os.getuid()
+
+            self.batchuser = pwd.getpwuid(uid).pw_name
 
         # Find the job id.
         # Look in order at the specified job id, job name, environment variable,

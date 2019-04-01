@@ -48,22 +48,52 @@ function option_handler (v, arg, remote)
    vm_option = arg
 end
 
+function setenv(env_name, val)
+   local r, msg = posix.setenv(env_name, val)
+   if r ~= 0 then
+      SPANK.log_error("Failed to set variable %s: %s", env_name, val)
+      return 1
+   end
+
+   return 0
+end
+
+function replicate_var(spank, slurm_name, env_name)
+   local val, msg = spank:get_item (slurm_name)
+   if val == nil then
+      SPANK.log_error("Faile to get item %s: %s", slurm_name, msg)
+      return 1
+   end
+
+   return setenv(env_name, val)
+end
+
+
+function replicate_env(spank, slurm_name, env_name)
+   local val, msg = spank:getenv (slurm_name)
+   if val == nil then
+      SPANK.log_error("Faile to get env %s: %s", slurm_name, msg)
+      return 1
+   end
+
+   return setenv(env_name, val)
+end
+
+
 -- Unfortuntately slurm environment variables aren't set in this
 -- context so we replicate them by hand.
 function replicate_slurm_vars (spank)
-      local jobid = spank:get_item  ("S_JOB_ID")
-      local jobuid = spank:get_item ("S_JOB_UID")
-      posix.setenv("SLURM_JOB_ID", jobid, 1)
-      posix.setenv("SLURM_JOB_UID", jobuid, 1)
+     local r = 0
 
-      local tpn = spank:getenv ("SLURM_STEP_TASKS_PER_NODE")
-      local nodelist = spank:getenv ("SLURM_STEP_NODELIST")
-      posix.setenv("SLURM_TASKS_PER_NODE", tpn, 1)
-      posix.setenv("SLURM_NODELIST", nodelist, 1)
+     r = r + replicate_var(spank, "S_JOB_ID", "SLURM_JOB_ID")
+     r = r + replicate_var(spank, "S_JOB_UID", "SLURM_JOB_UID")
+     r = r + replicate_env(spank, "SLURM_STEP_TASKS_PER_NODE", "SLURM_TASKS_PER_NODE")
+     r = r + replicate_env(spank, "SLURM_STEP_NODELIST", "SLURM_NODELIST")
+     r = r + replicate_env(spank, "PCOCC_REQUEST_CRED", "SPANK_PCOCC_REQUEST_CRED")
 
-      local credential = spank:getenv ("PCOCC_REQUEST_CRED")
-      posix.setenv("SPANK_PCOCC_REQUEST_CRED", credential, 1)
-      posix.setenv("SPANK_PCOCC_SETUP", vm_option, 1)
+     r = r + setenv("SPANK_PCOCC_SETUP", vm_option)
+
+     return r
 end
 
 function slurm_spank_init(spank)
@@ -117,8 +147,10 @@ function slurm_spank_init_post_opt (spank)
       local stepid = spank:get_item ("S_JOB_STEPID")
       if stepid == 0 then
             debug("lua/vmsetup: init_post_op: remote context")
-            replicate_slurm_vars(spank)
-
+            local r = replicate_slurm_vars(spank)
+            if r ~= 0 then
+                return SPANK.FAILURE
+            end
             do_and_log_output(pcocc_node_setup(spank).." internal setup init")
             do_and_log_output(pcocc_node_setup(spank).." internal setup create")
       end
@@ -138,8 +170,11 @@ function slurm_spank_exit (spank)
       local stepid = spank:get_item ("S_JOB_STEPID")
       if stepid == 0 then
             debug("lua/vmsetup: exit: remote context")
-      	    replicate_slurm_vars(spank)
-      	    do_and_log_output(pcocc_node_setup(spank).." internal setup delete")
+            local r = replicate_slurm_vars(spank)
+            if r ~= 0 then
+                return SPANK.FAILURE
+            end
+            do_and_log_output(pcocc_node_setup(spank).." internal setup delete")
        end
    end
 

@@ -119,7 +119,14 @@ pygments_style = 'sphinx'
 todo_include_todos = True
 
 # Important for MAN not to convert to UTF8 chars
-html_use_smartypants = False
+# Prevent alteration of command-line arguments
+# Sphinx <1.6 use `html_use_smartypants` and >=1.6 use `smartquotes`
+from sphinx import __version__ as sphinx_version
+sphinx_version_parts = [int(i) for i in sphinx_version.split('.')]
+if sphinx_version_parts[0] <= 1 and sphinx_version_parts[1] < 6:
+    html_use_smartypants = False
+else:
+    smartquotes = False
 
 
 # -- Options for HTML output ----------------------------------------------

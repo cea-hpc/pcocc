@@ -522,7 +522,7 @@ func (em *ExecManager) detachAllExecs() (error) {
 	em.Lock.Lock()
 	defer em.Lock.Unlock()
 
-	if !em.isDetaching {
+	if  !em.isDetaching && em.attachCount > 0 {
 		em.isDetaching = true
 		for _, ex := range em.Execs {
 			// We cant hold the lock here because it's

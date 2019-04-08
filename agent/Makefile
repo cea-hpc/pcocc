@@ -6,6 +6,7 @@ all : pcocc-agent
 pcocc-agent : $(FILES)
 	GOPATH=$(PWD) go get github.com/sirupsen/logrus
 	GOPATH=$(PWD) go get github.com/onrik/logrus/filename
+	GOPATH=$(PWD) go get github.com/golang/protobuf/proto
 	GOPATH=$(PWD) go build ./src/pcocc-agent.go
 
 install:

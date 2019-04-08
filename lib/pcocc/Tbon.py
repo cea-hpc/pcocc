@@ -639,7 +639,7 @@ class TreeClient(object):
 
         return ex
     def command(self, dest, cmd, data, timeout):
-        logging.info("sending %d to %d", cmd, dest)
+        logging.info("sending %s to %d", cmd, dest)
         try:
             grpc_message = agent_pb2.RouteMessage(destination=dest, name=cmd)
             grpc_message.args.Pack(data)

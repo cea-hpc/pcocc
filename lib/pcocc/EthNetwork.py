@@ -245,9 +245,9 @@ additionalProperties: false
                 host_veth.add_route('default', self._int_gw_ip)
 
         # Classify packets on the internal bridge
-        # ARP packets go to ARP responder
+        # ARP requests go to ARP responder
         int_br.add_flow(table=self._classifier_table,
-                        match='dl_type=0x0806',
+                        match='dl_type=0x0806,arp_op=0x1',
                         action='goto_table={0}'.format(self._arp_table))
 
         # Packets for the virtual gateway go to L3 forwarding
@@ -285,7 +285,7 @@ additionalProperties: false
 
 
         # L2 forwarding
-        # TODO: flood and learn unknown unicast
+        # TODO: Learn unknown unicast
         local_ports = []
         remote_ports = []
         host_tunnels = {}
@@ -316,6 +316,11 @@ additionalProperties: false
                                 'dl_dst=01:00:00:00:00:00/01:00:00:00:00:00'.format(port_id),
                                 action='group={0}'.format(vm.rank + 100))
 
+                # Flood unknown unicast on local and remote interfaces
+                int_br.add_flow(table=self._l2_forward_table, priority=100,
+                                match='in_port={0}'.format(port_id),
+                                action='group={0}'.format(vm.rank + 100))
+
                 vm_label = self._vm_res_label(vm)
                 net_res[vm_label] = {'tap_name': tap.name,
                                      'hwaddr': net_vms_attrs[vm.rank]['mac_addr'],
@@ -344,6 +349,11 @@ additionalProperties: false
                                         tunnel_port_id),
                                     action='group=1')
 
+                    # Flood unknown unicast on local interfaces
+                    int_br.add_flow(table=self._l2_forward_table, priority=100,
+                                    match='in_port={0}'.format(tunnel_port_id),
+                                    action='group=1')
+
                     # Deliver packets for the host interface on the virtual net
                     if vm.get_host_rank() == master:
                         int_br.add_flow(table=self._l2_forward_table,
@@ -370,6 +380,11 @@ additionalProperties: false
             int_br.add_flow(table=self._l2_forward_table,
                             match='in_port={0},'
                             'dl_dst=01:00:00:00:00:00/01:00:00:00:00:00'.format(br_veth_port),
+                            action='group=2')
+
+            # Flood unknown unicast on local and remote interfaces
+            int_br.add_flow(table=self._l2_forward_table, priority=100,
+                            match='in_port={0}'.format(br_veth_port),
                             action='group=2')
 
 

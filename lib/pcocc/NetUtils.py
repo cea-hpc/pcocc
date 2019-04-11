@@ -637,7 +637,7 @@ class PidDaemon(TrackableObject):
             with open(self._pid_file, 'r') as f:
                 pid = f.read()
                 try:
-                    os.kill(int(pid), signal.SIGTERM)
+                    os.kill(int(pid), signal.SIGKILL)
                 except (OSError ,ValueError):
                     pass
             os.remove(self._pid_file)

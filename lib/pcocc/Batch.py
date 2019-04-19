@@ -121,6 +121,8 @@ properties:
           - password
           - munge
           - none
+      batch-args:
+        type: array
     additionalProperties: false
     required:
       - etcd-servers
@@ -1486,6 +1488,9 @@ class SlurmManager(EtcdManager):
             batchid, batchname, default_batchname, settings,
             proc_type, batchuser)
 
+        # Parse batch settings
+        self._batch_args = settings.get('batch-args', [])
+
         # At init time we get all the necessery info about the job state
         # from the batch scheduler
         self._rank_map = []
@@ -1739,7 +1744,7 @@ class SlurmManager(EtcdManager):
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             #Make sure user owned keys and cert are generated
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
-            ret = subprocess.call(['salloc'] + alloc_opt + cmd)
+            ret = subprocess.call(['salloc'] + self._batch_args + alloc_opt + cmd)
         except KeyboardInterrupt:
             raise AllocationError("interrupted")
 
@@ -1751,8 +1756,11 @@ class SlurmManager(EtcdManager):
             if self._etcd_auth_type == 'password':
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
-            subprocess.check_call(['sbatch'] + ['-J', 'pcocc',
-                                                '--signal', '15'] + alloc_opt + [cmd])
+            subprocess.check_call(['sbatch'] +
+                                  ['-J', 'pcocc','--signal', '15'] +
+                                  self._batch_args +
+                                  alloc_opt +
+                                  [cmd])
         except subprocess.CalledProcessError as err:
             raise AllocationError(str(err))
 

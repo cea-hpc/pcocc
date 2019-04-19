@@ -34,6 +34,8 @@ SLURM settings
   * *password* use password authentication (recommended)
   * *none* do not use authentication
 
+**batch-args**
+ A list of additionnal arguments passed to SLURM at allocation time.
 
 Sample configuration file
 *************************

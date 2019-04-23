@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-TEMPLATES.YAML" "5" "Sep 19, 2018" "0.5.0" "pcocc"
+.TH "PCOCC-TEMPLATES.YAML" "5" "Apr 23, 2019" "0.6.0" "pcocc"
 .SH NAME
 pcocc-templates.yaml \- VM templates definition file
 .
@@ -118,7 +118,7 @@ Model of Qemu virtual Ethernet network card to provide to VMs (defaults to "virt
 Type of Qemu machine to emulate (defaults to "pc").
 .TP
 \fBdisk\-model\fP
-Model of Qemu virtual drive to provide to VMs. Valid parameters are \fIvirtio\fP (default) or \fIide\fP\&.
+Model of Qemu virtual drive to provide to VMs. Valid parameters are \fIvirtio\fP (default), \fIvirtio\-scsi\fP or \fIide\fP\&.
 .TP
 \fBemulator\-cores\fP
 Number of cores to reserve for Qemu threads. These cores are deducted from the cores allocated for each VM (defaults to 0).

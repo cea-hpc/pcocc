@@ -556,10 +556,10 @@ class HACkptReq(object):
             return True
 
         agent.vm.qemu_mon.stop()
-        agent.vm.qemu_mon.start_migration(args.path)
-
         agent.vm.qemu_mon.async_cb.append(complete_cb)
         request_context.add_callback(cancel_cb)
+        agent.vm.qemu_mon.start_migration(args.path)
+
 
         while True:
             try:
@@ -683,6 +683,9 @@ class HASaveDriveReq(object):
                 return False
             return True
 
+        agent.vm.qemu_mon.async_cb.append(complete_cb)
+        request_context.add_callback(cancel_cb)
+
         try:
             res = agent.vm.qemu_mon.drive_backup(args.drives,
                                                 args.paths,
@@ -699,8 +702,6 @@ class HASaveDriveReq(object):
         if use_fsfreeze:
             Config().hyp.fsthaw(agent.vm)
 
-        agent.vm.qemu_mon.async_cb.append(complete_cb)
-        request_context.add_callback(cancel_cb)
 
         while True:
             try:

@@ -2256,7 +2256,7 @@ def qemu_gen_ide_cmdline(path, name, index, cache):
         cmd += ['-device', 'ich9-ahci,id=ahci,addr=06.0']
 
     cmd += ['-device', 'ide-hd,'
-            'drive=bootdisk,bus=ahci.0,unit={0}'.format(index)]
+            'drive={0},bus=ahci.0,unit={1}'.format(name,index)]
 
     return cmd + qemu_gen_drive_cmdline(path, name, cache)
 

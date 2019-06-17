@@ -13,6 +13,3 @@ settings:
  # Protocol
  etcd-protocol: http
  etcd-auth-type: password
- #Command TBON configuration
- tbon-cert-size: 2048
- tbon-expiration-days: 7

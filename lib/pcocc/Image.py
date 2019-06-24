@@ -41,7 +41,6 @@ from .scripts import click
 from .Oci import OciImage, OciRepoBlobs
 from .Misc import path_join, pcocc_at_exit
 
-
 class ImageType(Enum):
     """Enum describing a type of Image (CONT or VM)."""
 
@@ -855,7 +854,7 @@ class ContImage(object):
     known_container_image_formats = ["containers-storage", "dir", "docker",
                                      "docker-archive", "docker-daemon", "oci",
                                      "oci-archive", "ostree", "tarball",
-                                     "simg"]
+                                     "simg", "pcocc-docker-daemon"]
 
     @classmethod
     def known_format(cls, ext):
@@ -894,6 +893,7 @@ class ContImage(object):
                           dst_fmt)
 
     @staticmethod
+
     def convert_singularity_to_oci(src_path):
         if not spawn.find_executable("unsquashfs"):
             # Stop early is squashfs-tools is not installed
@@ -957,6 +957,7 @@ fi
         # Is now time to convert this to an OCI image
         temp_oci = tempfile.mkdtemp()
         oci = OciImage(temp_oci)
+
         cont = oci.new_container()
         cont.set_cmd(["/bin/sh", "/singularity_run"])
         oci.add_layer(cont, path_join(bundle_dest, "rootfs/"))
@@ -968,13 +969,40 @@ fi
         return temp_oci
 
     @staticmethod
+    def skopeo_parse(path, fmt, docker, prefix='src-'):
+        args = []
+        if fmt == "pcocc-docker-daemon":
+            fmt = "docker-daemon"
+            try:
+                vm_name, path = path.split('/', 1)
+                vm_index = re.match(r'vm(\d+)$', vm_name).group(1)
+            except Exception:
+                raise PcoccError('Unable to parse image location')
+
+            docker_host = docker.get_docker_host()
+            cert = docker.cert_dir()
+
+            args += ["--{}daemon-host".format(prefix), docker_host,
+                     "--{}cert-dir".format(prefix), cert]
+
+        return path, fmt, args
+
+    @staticmethod
     def skopeo_convert(src_path,
                        dest_path,
                        src_fmt,
-                       dst_format="docker-archive"):
-        cmd = ["skopeo", "copy",
-               src_fmt + ":" + src_path,
-               dst_format + ":" + dest_path + ":latest"]
+                       dst_format,
+                       docker=None):
+
+        src_path, src_fmt, args = ContImage.skopeo_parse(src_path, src_fmt, docker, 'src-')
+
+        if not args:
+            args = ["--src-tls-verify=false"]
+
+
+        cmd = (["skopeo", "copy" ] + args +
+               [src_fmt + ":" + src_path ] +
+               [dst_format + ":" + dest_path + ":latest"])
 
         try:
             subprocess.call(cmd)
@@ -984,32 +1012,77 @@ fi
 
     @staticmethod
     def pre_convert(src_path,
-                    src_fmt):
+                    src_fmt,
+                    tmp_path):
+
         did_convert = False
+        dst_path = src_path
         if src_fmt == "simg":
-            # For singularity we need to extract them
-            # as OCI bundle first to then proceed with
-            # the regular skopeo manipulation
-            src_path = ContImage.convert_singularity_to_oci(src_path)
+            # Extract singularity images to an OCI bundle first so that OCI
+            # compliant tools may manage it
+            dst_path = os.path.join(tmp_path, 'simg')
+            ContImage.convert_singularity_to_oci(src_path)
             src_fmt = "oci"
             did_convert = True
 
-        return did_convert, src_path, src_fmt
+        return did_convert, dst_path, src_fmt
+
+    @staticmethod
+    def prepare_skopeo_cache(src_path,
+                             src_fmt,
+                             dst_path,
+                             dst_store,
+                             docker=None
+                         ):
+
+        src_path, src_fmt, args = ContImage.skopeo_parse(src_path, src_fmt, docker, '')
+
+        cmd = ["skopeo", "inspect", "--tls-verify=false" ] + args + [src_fmt + ":" + src_path]
+
+        # Check error messages readability
+        try:
+            skopeo_out = subprocess.check_output(cmd)
+        except subprocess.CalledProcessError:
+            raise PcoccError("Unable to inspect container layers")
+
+        try:
+            layers = json.loads(skopeo_out)['Layers']
+        except Exception:
+            raise PcoccError("Failed to parse skopeo output")
+
+        blobs_path = os.path.join(dst_path, 'blobs')
+
+        algorithms = []
+        for l in layers:
+            try:
+                p = dst_store.get_obj_path('data', l, check_exists=True)
+            except PcoccError:
+                continue
+
+            algorithm, enc = l.split(":")
+            if algorithm not in algorithms:
+                os.makedirs(os.path.join(blobs_path, algorithm))
+                algorithms.append(algorithm)
+
+            os.link(p, os.path.join(blobs_path, algorithm, enc))
 
     @staticmethod
     def convert(src_path,
-                dest_path,
+                dst_path,
                 src_fmt,
-                dst_format="oci"):
+                dst_format="oci",
+                dst_store=None,
+                docker=None):
         """Convert a container image from one type to the other.
 
         Arguments:
             src_path {str} -- input image path
-            dest_path {str} -- output image path
+            dst_path {str} -- output image path
             src_fmt {str} -- input image format
 
         Keyword Arguments:
             dst_format {str} -- output format (default: {"oci"})
+            dst_store {ObjectStore} -- object store which can provide blobs)
 
         Raises:
             PcoccError -- image conversion failed
@@ -1019,16 +1092,22 @@ fi
 
         """
         did_convert, src_path, src_fmt = ContImage.pre_convert(src_path,
-                                                               src_fmt)
+                                                               src_fmt,
+                                                               dst_path)
+
+        ContImage.prepare_skopeo_cache(src_path,
+                                       src_fmt,
+                                       dst_path,
+                                       dst_store,
+                                       docker)
 
         ContImage.skopeo_convert(src_path,
-                                 dest_path,
+                                 dst_path,
                                  src_fmt,
-                                 dst_format)
+                                 dst_format,
+                                 docker)
 
         if did_convert:
-            # Delete the temporary
-            # as we did a pre-conversion
             shutil.rmtree(src_path)
 
         return dst_format
@@ -1379,7 +1458,7 @@ class ImageMgr(object):
         h = dst_store.put_data_blob(path)
         return dst_store.put_meta(dst_name, revision, kind, [h], {})
 
-    def import_image(self, src_path, dst_uri, src_fmt=None):
+    def import_image(self, src_path, dst_uri, src_fmt=None, docker=None):
         """Import an image in the objectstore.
 
         Arguments:
@@ -1429,25 +1508,23 @@ class ImageMgr(object):
             image_blobs = [h]
         elif kind == ImageType.cont:
             image_custom_meta["target_format"] = "oci"
-            src_size = _compute_path_size(src_path)
-            tmp_path = _cont_get_tmp_directory(size=src_size)
 
-            def remove_tmp_path():
-                shutil.rmtree(tmp_path)
-
-            # Register in atexit as we want to ensure cleanup
+            tmp_oci = dst_store.tmp_dir()
+            def remove_tmp_oci():
+                shutil.rmtree(tmp_oci)
             pcocc_at_exit.register(remove_tmp_path)
-
             try:
                 ContImage.convert(src_path,
-                                  tmp_path,
+                                  tmp_oci,
                                   src_fmt,
-                                  "oci")
-                # At this point tmp_path contains
-                # an OCI image
+                                  "oci",
+                                  dst_store,
+                                  docker=docker)
+
+                # At this point tmp_oci contains an OCI image
                 index, blobs = ContImage.add_oci_image_to_repo(dst_name,
                                                                dst_store,
-                                                               tmp_path)
+                                                               tmp_oci)
                 # At this points all blobs are saved
                 image_blobs = [b["digest"] for b in blobs.values()]
                 image_custom_meta["oci_index"] = index

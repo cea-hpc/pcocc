@@ -1372,7 +1372,7 @@ def pcocc_launcher(restart_ckpt,
         print("Waiting for docker VM to start ...")
         # We do the setup here to avoid any race when launching
         # a docker shell agains a docker alloc
-        docker = PcoccDocker()
+        docker = PcoccDocker(cluster.vms[0])
         docker.apply_mounts(cluster, CLIRangeSet("all", cluster))
         # Now wait for Docker to start
         docker.wait_for_docker_start(cluster,
@@ -2642,7 +2642,7 @@ def parse_docker_image(docker_image):
 @per_cluster_cli(False)
 def docker_export(jobid, jobname, cluster, index, source, dest):
     try:
-        docker = PcoccDocker(index)
+        docker = PcoccDocker(cluster.vms[index])
         dest, tag = parse_docker_image(dest)
         docker.send_image(cluster, index, source, dest, tag)
     except PcoccError as err:
@@ -2662,7 +2662,7 @@ def docker_export(jobid, jobname, cluster, index, source, dest):
 @per_cluster_cli(False)
 def docker_import(jobid, jobname, cluster, index, source, dest):
     try:
-        docker = PcoccDocker(index)
+        docker = PcoccDocker(cluster.vms[index])
         source, tag = parse_docker_image(source)
         docker.get_image(cluster, index, dest, source, tag=tag)
     except PcoccError as err:
@@ -2683,7 +2683,7 @@ def docker_import(jobid, jobname, cluster, index, source, dest):
 @per_cluster_cli(False)
 def docker_edit(jobid, jobname, cluster, index, source, dest, command):
     try:
-        docker = PcoccDocker(index)
+        docker = PcoccDocker(cluster.vms[index])
         command = list(command)
 
         docker.edit_image(cluster, index, source, dest, command)
@@ -2704,7 +2704,7 @@ def docker_edit(jobid, jobname, cluster, index, source, dest, command):
 @per_cluster_cli(False)
 def docker_build(jobid, jobname, cluster, index, path, dest):
     try:
-        docker = PcoccDocker(index)
+        docker = PcoccDocker(cluster.vms[index])
         docker.build_image(cluster, index, dest, path=path)
     except PcoccError as err:
         handle_error(err)
@@ -2783,7 +2783,7 @@ def docker_batch(host_script,
 def docker_mount(jobid, jobname, cluster, index, src_path, dest_path):
     try:
         rangeset = CLIRangeSet(index, cluster)
-        s = PcoccDocker(index)
+        s = PcoccDocker(cluster.vms[index])
         s.mount(cluster, rangeset, src_path, dest_path)
     except PcoccError as err:
         handle_error(err)
@@ -2832,8 +2832,8 @@ def docker_shell(jobid, jobname, cluster, index, script, docker_timeout):
 @per_cluster_cli(False)
 def docker_env(jobid, jobname, cluster, index):
     try:
-        s = PcoccDocker(index)
-        docker_path = Config().containers.config.docker_path
+        s = PcoccDocker(cluster.vms[index])
+        docker_path =  Config().containers.config.docker_path
         s.env(cluster, index, docker_path)
     except PcoccError as err:
         handle_error(err)

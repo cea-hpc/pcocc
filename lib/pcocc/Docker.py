@@ -36,15 +36,18 @@ from .Misc import path_join
 
 
 class PcoccDocker(object):
-
-    def __init__(self, vm_rank=0):
+    def __init__(self, vm=None):
         self.docker_container_id = "docker"
-        self.certs = VMCerts(vm_rank)
+        self.certs = VMCerts(vm.rank)
+        self.vm = vm
 
     def cert_dir(self):
         return self.certs.client_cert_dir
 
-    def get_docker_host(self, vm):
+    def get_docker_host(self, vm=None):
+        if not vm:
+            vm = self.vm
+
         docker_host, docker_port = self.certs.host(vm)
         if Config().containers.config.docker_use_ip:
             # We resolve the host to its IP
@@ -54,10 +57,7 @@ class PcoccDocker(object):
 
     def assert_docker_shell(self):
         if "PCOCC_DOCKER" not in os.environ:
-            raise PcoccError("This command is only available in "
-                             " a 'DOCKER shell' consider allocating"
-                             " a docker enabled VM before "
-                             " runing 'pcocc docker shell'")
+            raise PcoccError("This command is only available in a docker shell")
 
     def _delete_docker(self, obj_id, kind):
         rmcmd = ["docker",
@@ -331,37 +331,14 @@ class PcoccDocker(object):
                    "--dest-daemon-host", docker_host,
                    "--dest-cert-dir", self.cert_dir(),
                    "oci:" + oci_view,
-                   "docker-daemon:" + name + ":" + tag]
-            skopeo = subprocess.Popen(cmd, env=os.environ)
-            ret = skopeo.wait()
-            if ret != 0:
+                   "docker-daemon:"+ name + ":" + tag ]
+
+            try:
+                skopeo = subprocess.check_call(cmd, env=os.environ)
+            except Exception:
                 raise PcoccError("Could not send image to docker daemon")
-
-    def get_image_oci(self,
-                      cluster,
-                      vm_index,
-                      name,
-                      tag="latest"):
-        cluster.wait_host_config()
-        self.assert_docker_shell()
-        tmp_oci = tempfile.mkdtemp()
-        oci_image = os.path.join(tmp_oci, "image")
-
-        vm = cluster.vms[vm_index]
-        docker_host = self.get_docker_host(vm)
-
-        cmd = ["skopeo",
-               "copy",
-               "--src-tls-verify",
-               "--src-daemon-host", docker_host,
-               "--src-cert-dir", self.cert_dir(),
-               "docker-daemon:" + name + ":" + tag,
-               "oci:" + oci_image + ":latest"]
-        skopeo = subprocess.Popen(cmd, env=os.environ)
-        ret = skopeo.wait()
-        if ret != 0:
-            raise PcoccError("Could not get image from docker daemon")
-        return oci_image
+            finally:
+                shutil.rmtree(oci_view)
 
     def get_image(self,
                   cluster,
@@ -373,15 +350,16 @@ class PcoccDocker(object):
         # Check that the image is not already in repo
         # we do it before exporting from Docker
         Config().images.check_overwrite(dest_image)
-        oci_image = self.get_image_oci(cluster, vm_index, src_image, tag)
-        Config().images.import_image(oci_image, dest_image, "oci")
-        shutil.rmtree(oci_image)
+        Config().images.import_image("vm{}/{}:{}".format(vm_index, src_image, tag),
+                                     dest_image, "pcocc-docker-daemon", docker=self)
 
     def _generate_docker_env(self,
                              cluster,
                              docker_path,
                              vm_index=0,
                              propagate=True):
+
+        #RQ: Eviter d'en mettre trop bas dans la stack si pas necessaire
         cluster.wait_host_config()
 
         if propagate:

@@ -66,6 +66,8 @@ Template parameters
   Model of Qemu virtual drive to provide to VMs. Valid parameters are *virtio* (default), *virtio-scsi* or *ide*.
 **emulator-cores**
   Number of cores to reserve for Qemu threads. These cores are deducted from the cores allocated for each VM (defaults to 0).
+**bind-vcpus**
+  Controls whether pcocc attempts to bind vCPUS and memory to underlying cores and NUMA nodes (defaults to True).
 
 Sample configuration file
 *************************

@@ -41,3 +41,4 @@ overloads:
   remote-display:
   disk-cache:
   machine-type: 'pc'
+  bind-vcpus: false

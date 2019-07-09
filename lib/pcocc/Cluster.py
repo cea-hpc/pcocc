@@ -206,6 +206,10 @@ class VM(object):
         return self._template.full_node
 
     @property
+    def bind_vcpus(self):
+        return self._template.bind_vcpus
+
+    @property
     def disk_cache(self):
         return self._template.disk_cache
 

@@ -1295,7 +1295,7 @@ username={3}@pcocc
         # Recompute num_cores to exclude emulator_cores
         num_cores -= emulator_cores
 
-        if num_cores == len(coreset):
+        if num_cores == len(coreset) and vm.bind_vcpus:
             logging.info('Physical resources match VM definition, activating autobinding')
             autobind_cpumem = True
             for core_id in coreset:

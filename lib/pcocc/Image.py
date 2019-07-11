@@ -770,7 +770,30 @@ fi
             args += ["--{}daemon-host".format(prefix), docker_host,
                      "--{}cert-dir".format(prefix), cert]
 
+        if fmt == "docker":
+            if Config().containers.config.default_registry and (not '.' in path or ':' in path):
+                if not '/' in path[2:]:
+                    path='//library/' + path[2:]
+
+                try:
+                    path = '//' + Config().containers.config.default_registry + '/' + path[2:]
+                except Exception:
+                    pass
+
+            if path.split('/')[2] in Config().containers.config.insecure_registries:
+                args += ['|insecure_arg|']
+
         return path, fmt, args
+
+    @classmethod
+    def _skopeo_insecure_arg(cls,
+                             args,
+                             tls_type):
+        try:
+            i = args.index('|insecure_arg|')
+            args[i] = "--{}-verify=false".format(tls_type)
+        except ValueError:
+            pass
 
     @classmethod
     def skopeo_convert(cls,
@@ -782,9 +805,7 @@ fi
 
         src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, docker, 'src-')
 
-        if not args:
-            args = ["--src-tls-verify=false"]
-
+        cls._skopeo_insecure_arg(args, "src-tls")
 
         cmd = (["skopeo", "copy" ] + args +
                [src_fmt + ":" + src_path ] +
@@ -824,10 +845,10 @@ fi
                          ):
 
         src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, docker, '')
+        cls._skopeo_insecure_arg(args, "tls")
 
-        cmd = ["skopeo", "inspect", "--tls-verify=false" ] + args + [src_fmt + ":" + src_path]
+        cmd = ["skopeo", "inspect" ] + args + [src_fmt + ":" + src_path]
 
-        # Check error messages readability
         try:
             skopeo_out = subprocess.check_output(cmd)
         except subprocess.CalledProcessError:
@@ -1296,12 +1317,10 @@ class ImageMgr(object):
             h = dst_store.put_data_blob(tmp_path)
             image_blobs = [h]
         elif kind == ImageType.cont:
-            image_custom_meta["target_format"] = "oci"
-
             tmp_oci = dst_store.tmp_dir()
             def remove_tmp_oci():
                 shutil.rmtree(tmp_oci)
-            pcocc_at_exit.register(remove_tmp_path)
+            pcocc_at_exit.register(remove_tmp_oci)
             try:
                 ContImage.convert(src_path,
                                   tmp_oci,
@@ -1322,8 +1341,8 @@ class ImageMgr(object):
                 raise PcoccError("Failed to import {0} : {1}".format(src_path,
                                                                      str(e)))
             finally:
-                remove_tmp_path()
-                pcocc_at_exit.deregister(remove_tmp_path)
+                remove_tmp_oci()
+                pcocc_at_exit.deregister(remove_tmp_oci)
 
         meta = dst_store.put_meta(dst_name, 0, kind.name, image_blobs,
                                   image_custom_meta)

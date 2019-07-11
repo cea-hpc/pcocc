@@ -1301,6 +1301,12 @@ class ContainerOptions(dict):
     pcocc_container_option_schema = """
     type: object
     properties:
+        default_registry:
+            type: string
+        insecure_registries:
+            type: array
+            items:
+                 type: string
         container_shm_work_path:
             type: string
         container_shm_work_limit:
@@ -1347,6 +1353,17 @@ class ContainerOptions(dict):
         self["container_shm_work_path"] = "/dev/shm"
         self["container_shm_work_limit"] = 250
         self["use_runc"] = False
+        self["default_registry"] = None
+        self["insecure_registries"] = []
+
+
+    @property
+    def default_registry(self):
+        return self["default_registry"]
+
+    @property
+    def insecure_registries(self):
+        return self["insecure_registries"]
 
     @property
     def use_runc(self):

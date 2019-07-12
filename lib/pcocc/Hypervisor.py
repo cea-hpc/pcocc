@@ -1543,7 +1543,8 @@ username={3}@pcocc
                             (serialid, serialid, serial)]
 
         # Virtio RNG
-        cmdline += [ '-device', 'virtio-rng-pci']
+        cmdline += [ '-object', 'rng-random,filename=/dev/urandom,id=rng0']
+        cmdline += [ '-device', 'virtio-rng-pci,rng=rng0']
 
         #Display
         if vm.remote_display == 'spice':

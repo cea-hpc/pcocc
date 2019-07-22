@@ -684,7 +684,7 @@ class EtcdManager(BatchManager):
                 password=self._get_keyval_credential())
 
             logging.info('Started etcd client')
-            self._last_cred_renew = datetime.datetime.now()
+            self._last_cred_renew = datetime.datetime.utcnow()
 
             return self._keyval_client
 
@@ -695,11 +695,11 @@ class EtcdManager(BatchManager):
                 e.payload.get("error_code", 0) == 110 or
                 e.payload.get("status", 0) == 401 )):
 
-            delta = datetime.datetime.now() - self._last_cred_renew
+            delta = datetime.datetime.utcnow() - self._last_cred_renew
 
             if delta > datetime.timedelta(seconds=15):
                 logging.debug('Renewing etcd credentials')
-                self._last_cred_renew = datetime.datetime.now()
+                self._last_cred_renew = datetime.datetime.utcnow()
                 self._keyval_client.password = self._get_keyval_credential()
                 return
             else:
@@ -1181,7 +1181,7 @@ class LocalManager(EtcdManager):
             batchid = int(batchid)
             if (include_expired or
                 job['user'] != self.batchuser or
-                datetime_to_epoch(datetime.datetime.now()) - job['start'] < 5 or
+                datetime_to_epoch(datetime.datetime.utcnow()) - job['start'] < 5 or
                 batchid in user_live_batchids):
 
                 jobs[batchid] = job
@@ -1202,7 +1202,7 @@ class LocalManager(EtcdManager):
             if user and job['user'] != user:
                 continue
 
-            elapsed = datetime_to_epoch(datetime.datetime.now()) - job['start']
+            elapsed = datetime_to_epoch(datetime.datetime.utcnow()) - job['start']
             entry = {'batchid':    str(batchid),
                      'user':       job['user'],
                      'exectime':   str(datetime.timedelta(seconds=elapsed)),
@@ -1294,7 +1294,7 @@ class LocalManager(EtcdManager):
             'uuid': str(uuid),
             'user': user,
             'host': socket.gethostname().split('.')[0],
-            'start': datetime_to_epoch(datetime.datetime.now())
+            'start': datetime_to_epoch(datetime.datetime.utcnow())
         }
 
         job_alloc_state = self._validate_job_state(job_alloc_state)

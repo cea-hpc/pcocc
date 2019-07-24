@@ -24,7 +24,7 @@ from .Error import  InvalidConfigurationError
 from .Config import Config
 from .NetUtils import NetworkSetupError
 
-network_config_schema = """
+network_config_schema = yaml.load("""
 type: object
 patternProperties:
   "^([a-zA-Z][a-zA-Z_0-9--]*)$":
@@ -33,7 +33,7 @@ additionalProperties: false
 
 definitions:
   additionalProperties: false
-"""
+""", Loader=yaml.CLoader)
 
 class VNetworkConfig(dict):
     """Manages the network configuration"""
@@ -46,7 +46,7 @@ class VNetworkConfig(dict):
         """
         try:
             stream = file(filename, 'r')
-            net_config = yaml.safe_load(stream)
+            net_config = yaml.load(stream, Loader=yaml.CLoader)
         except yaml.YAMLError as err:
             raise InvalidConfigurationError(str(err))
         except IOError as err:
@@ -102,9 +102,7 @@ class VNetwork(object):
     @classmethod
     def register_network(cls, subschema, network_class):
         if not cls.schema:
-            cls.schema = yaml.safe_load(network_config_schema)
-
-        subschema = yaml.safe_load(subschema)
+            cls.schema = network_config_schema
 
         types = subschema['properties']['type']['enum']
 

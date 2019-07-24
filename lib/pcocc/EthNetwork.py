@@ -22,6 +22,7 @@ import logging
 import tempfile
 import os
 import shlex
+import yaml
 
 from .Networks import VNetwork
 from .Error import PcoccError, InvalidConfigurationError
@@ -33,7 +34,7 @@ from .NetUtils import get_ip_on_network, mac_gen_hwaddr, resolve_host
 from .NetUtils import make_mask, dotted_quad_to_num, num_to_dotted_quad
 
 class VEthNetwork(VNetwork):
-    _schema = r"""
+    _schema = yaml.load(r"""
 properties:
   type:
       enum:
@@ -94,10 +95,11 @@ properties:
      - dev-prefix
 
 additionalProperties: false
-"""
+""", Loader=yaml.CLoader)
 
     def __init__(self, name, settings):
         super(VEthNetwork, self).__init__(name)
+
         self._type = 'ethernet'
 
         self._parse_settings(settings)

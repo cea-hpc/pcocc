@@ -1,6 +1,7 @@
 import os
 import logging
 import random
+import yaml
 
 from .Networks import  VNetwork
 from .Config import Config
@@ -8,7 +9,7 @@ from .NetUtils import bridge_exists, TAP, NetworkSetupError
 
 
 class VBridgedNetwork(VNetwork):
-    _schema="""
+    _schema=yaml.load("""
 properties:
   type:
       enum:
@@ -30,8 +31,7 @@ properties:
      - host-bridge
      - tap-prefix
 additionalProperties: false
-
-"""
+""", Loader=yaml.CLoader)
     def __init__(self, name, settings):
         super(VBridgedNetwork, self).__init__(name)
         self._type = "bridged"

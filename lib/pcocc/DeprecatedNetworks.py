@@ -6,6 +6,7 @@ import re
 import signal
 import struct
 import shlex
+import yaml
 
 from .Networks import  VNetwork
 from .Error import PcoccError, InvalidConfigurationError
@@ -16,7 +17,7 @@ from .NetUtils import NetworkSetupError
 # These network types are deprecated and should no longer be used
 
 class VPVNetwork(VNetwork):
-    _schema="""
+    _schema=yaml.load("""
 properties:
   type:
       enum:
@@ -44,7 +45,7 @@ properties:
      - tap-prefix
 
 additionalProperties: false
-"""
+""", Loader=yaml.CLoader)
 
     def __init__(self, name, settings):
         super(VPVNetwork, self).__init__(name)
@@ -276,7 +277,7 @@ additionalProperties: false
 
 
 class VNATNetwork(VNetwork):
-    _schema="""
+    _schema=yaml.load("""
 properties:
   type:
       enum:
@@ -331,7 +332,7 @@ properties:
      - bridge
      - tap-prefix
 additionalProperties: false
-"""
+""", Loader=yaml.CLoader)
     def __init__(self, name, settings):
         super(VNATNetwork, self).__init__(name)
 

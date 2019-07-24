@@ -1,13 +1,14 @@
 import os
 import logging
 import random
+import yaml
 
 from .Networks import  VNetwork
 from .Config import Config
 from .NetUtils import VFIOInfinibandVF, ibdev_enable_vf_driver
 
 class VHostIBNetwork(VNetwork):
-    _schema = """
+    _schema = yaml.load("""
 properties:
   type:
       enum:
@@ -23,7 +24,7 @@ properties:
     required:
      - host-device
 additionalProperties: false
-"""
+    """, Loader=yaml.CLoader)
 
     def __init__(self, name, settings):
         super(VHostIBNetwork, self).__init__(name)

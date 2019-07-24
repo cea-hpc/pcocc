@@ -8,6 +8,7 @@ import tempfile
 import shutil
 import stat
 import signal
+import yaml
 
 from .Config import Config
 from .NetUtils import VFIOInfinibandVF
@@ -17,7 +18,7 @@ from .Error import PcoccError
 from .NetUtils import NetworkSetupError, ibdev_get_guid
 
 class VIBNetwork(VHostIBNetwork):
-    _schema="""
+    _schema=yaml.load("""
 properties:
   type:
       enum:
@@ -53,10 +54,10 @@ properties:
      - opensm-partition-tpl
 
 additionalProperties: false
-"""
+""", Loader=yaml.CLoader)
 
     # Schema to validate individual pkey entries in the key/value store
-    _pkey_entry_schema = """
+    _pkey_entry_schema = yaml.load("""
 type: object
 properties:
   vf_guids:
@@ -72,7 +73,7 @@ properties:
 required:
     - vf_guids
     - host_guids
-"""
+""", Loader=yaml.CLoader)
 
     def __init__(self, name, settings):
         super(VIBNetwork, self).__init__(name, settings)
@@ -238,7 +239,7 @@ required:
                 try:
                     config = yaml.safe_load(child.value)
                     jsonschema.validate(config,
-                                        yaml.safe_load(self._pkey_entry_schema))
+                                        self._pkey_entry_schema)
                     pkeys[pkey] = config
                 except yaml.YAMLError as e:
                     logging.warning("Misconfigured PKey %s: %s",

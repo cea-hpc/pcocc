@@ -1125,12 +1125,13 @@ class ImageMgr(object):
         """
         self.object_store.get_repo(repo).garbage_collect()
 
-    def find(self, regex=None, repo=None):
+    def find(self, regex=None, repo=None, shallow=False):
         """Search for an image in repositor(y/ies).
 
         Keyword Arguments:
             regex {str} -- regxexpr for search (default: {None})
             repo {str} -- repository name (default: {None})
+            shallow {bool} -- skip fetching full metadata details (default: {False})
 
         Raises:
             PcoccError -- Failed to parse the regular expression
@@ -1139,7 +1140,7 @@ class ImageMgr(object):
             dict -- dictionnary with matching items
 
         """
-        meta = self.object_store.load_meta(repo)
+        meta = self.object_store.load_meta(repo, shallow=shallow)
 
         if not regex:
             return meta

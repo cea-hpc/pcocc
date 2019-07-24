@@ -28,13 +28,14 @@ import shutil
 import errno
 import logging
 import tempfile
+import json
 
 from .Error import InvalidConfigurationError, PcoccError
 from .Config import Config
 from .Backports import OrderedDict
 from .Cache import Cache
 
-metadata_schema = """
+metadata_schema = yaml.safe_load("""
 type: object
 properties:
   name:
@@ -63,9 +64,9 @@ required:
   - owner
   - timestamp
 additionalProperties: false
-"""
+""")
 
-repo_config_schema = """
+repo_config_schema = yaml.safe_load("""
 type: object
 properties:
   version:
@@ -73,9 +74,9 @@ properties:
 required:
   - version
 additionalProperties: false
-"""
+""")
 
-repo_definition_schema = """
+repo_definition_schema = yaml.safe_load("""
 type: object
 properties:
   repos:
@@ -102,7 +103,7 @@ properties:
 required:
   - repos
 additionalProperties: false
-"""
+""")
 
 
 class ObjectNotFound(PcoccError):
@@ -153,8 +154,7 @@ class HierarchObjectStore(object):
             raise InvalidConfigurationError(str(err))
 
         try:
-            jsonschema.validate(repo_config,
-                                yaml.safe_load(repo_definition_schema))
+            jsonschema.validate(repo_config, repo_definition_schema)
         except jsonschema.exceptions.ValidationError as err:
             raise InvalidConfigurationError(err.message)
 
@@ -227,13 +227,13 @@ class HierarchObjectStore(object):
 
         raise ObjectNotFound(name, repo, None)
 
-    def load_meta(self, repo=None):
+    def load_meta(self, repo=None, shallow=False):
         if repo:
             return self.get_repo(repo).load_meta()
 
         glob_meta = {}
         for r in reversed(self._repos.values()):
-            meta = r['store'].load_meta()
+            meta = r['store'].load_meta(shallow=shallow)
             glob_meta.update(meta)
 
         return glob_meta
@@ -295,6 +295,23 @@ class ObjectStore(object):
             obj_hash = h
         return obj_hash
 
+    def get_meta_path(self,
+                      name,
+                      revision,
+                      check_exists=False):
+
+        if self.version < 2:
+            h = self._hash_meta(name, revision)
+            return self.get_obj_path('meta', h, check_exists)
+        else:
+            image = '{}@{}'.format(name, revision)
+            target = os.path.join(self._meta_path, image)
+
+            if check_exists and not os.path.exists(target):
+                raise PcoccError('Object {} not found in repository {}'.format(
+                    image, self.name))
+            return target
+
     def get_obj_path(self,
                      obj_type,
                      obj_hash,
@@ -341,6 +358,32 @@ class ObjectStore(object):
         if not os.listdir(dirname):
             os.rmdir(dirname)
 
+    def upgrade(self):
+        if self.version == 1:
+            logging.warning("Upgrading repository")
+            meta = self.load_meta()
+            self.version = 2
+            shutil.move(self._meta_path, self._meta_path + '.old')
+            try:
+                os.mkdir(self._meta_path)
+                for revs in meta.itervalues():
+                    for m in revs.itervalues():
+                        self.put_meta(m['name'], m['revision'], m['kind'],
+                                      m['data_blobs'], m['custom_meta'],
+                                      m['owner'], m['timestamp'])
+
+                with open(self._config_path, 'w') as f:
+                    yaml.safe_dump({'version': 2}, f)
+            except Exception as e:
+                logging.error("Failed to upgrade repository")
+                self.version = 1
+                try:
+                    shutils.rmtree(self._meta_path, ignore_errors=True)
+                except Exception:
+                    pass
+                shutil.move(self._meta_path + '.old', self._meta_path)
+                raise
+
     def garbage_collect(self):
         meta = self.load_meta()
         in_use = set()
@@ -364,7 +407,12 @@ class ObjectStore(object):
         tmp_list = glob.glob(os.path.join(self._tmp_path, '*'))
         for t in tmp_list:
             logging.info("deleting leftover tmp file %s", t)
-            os.unlink(t)
+            if os.path.isdir(t):
+                shutil.rmtree(t, ignore_errors=True)
+            else:
+                os.unlink(t)
+
+        self.upgrade()
 
     def put_data_blob(self, file_path, known_hash=None):
         if not os.path.isfile(file_path):
@@ -395,17 +443,16 @@ class ObjectStore(object):
 
         return h
 
-    def put_meta(self, name, revision, kind, data_blobs, custom_meta=None):
+    def put_meta(self, name, revision, kind, data_blobs, custom_meta=None, user=None, timestamp=None):
         self._validate_name(name)
-        h = self._hash_meta(name, revision)
-        target = self.get_obj_path('meta', h)
+        target = self.get_meta_path(name, revision)
 
         meta = {}
         meta['name'] = name
         meta['revision'] = revision
         meta['kind'] = kind
-        meta['owner'] = getpass.getuser()
-        meta['timestamp'] = time.time()
+        meta['owner'] = user or getpass.getuser()
+        meta['timestamp'] = timestamp or time.time()
         meta['data_blobs'] = data_blobs
         meta['custom_meta'] = custom_meta
 
@@ -415,7 +462,10 @@ class ObjectStore(object):
             self.get_obj_path('data', b, True)
 
         with open(target, 'w') as f:
-            yaml.safe_dump(meta, f)
+            if self.version < 2:
+                yaml.safe_dump(meta, f)
+            else:
+                json.dump(meta, f)
 
         return meta
 
@@ -425,17 +475,21 @@ class ObjectStore(object):
 
         try:
             with open(meta_path, 'r') as f:
-                meta = yaml.safe_load(f)
+                raw_meta = f.read()
         except (OSError, IOError) as e:
             raise PcoccError('Unable to get metadata for {0}: {1}'.format(
                     name, e))
-        except yaml.YAMLError as e:
-            raise PcoccError('Bad metadata for {0}: {1}'.format(
-                    name, e))
 
         try:
-            jsonschema.validate(meta,
-                                yaml.safe_load(metadata_schema))
+            if self.version < 2:
+                meta = yaml.safe_load(raw_meta)
+            else:
+                meta = json.loads(raw_meta)
+        except (yaml.YAMLError, json.JSONDecodeError) as e:
+            raise PcoccError('Bad metadata for {0}: {1}'.format(name, e))
+
+        try:
+            jsonschema.validate(meta, metadata_schema)
         except jsonschema.exceptions.ValidationError as e:
             raise PcoccError('Bad metadata for {0}: {1}'.format(
                     name, e))
@@ -445,23 +499,49 @@ class ObjectStore(object):
     def get_meta(self, name, revision=None):
         if revision is None:
             revision = max(self.get_revisions(name))
-        h = self._hash_meta(name, revision)
-        target = self.get_obj_path('meta', h)
+
+        target = self.get_meta_path(name, revision)
+
         meta = self._read_meta(target, name, revision)
         meta['repo'] = self._name
         return meta
 
     def get_revisions(self, name):
-        try:
-            return self.load_meta()[name].keys()
-        except KeyError:
-            raise ObjectNotFound(name, self._name, None)
+        if self.version < 2:
+            try:
+                return self.load_meta()[name].keys()
+            except KeyError:
+                raise ObjectNotFound(name, self._name, None)
+        else:
+            ret = []
+            image_list = glob.glob(os.path.join(self._meta_path, '*'))
+            for image_path in image_list:
+                image = os.path.basename(image_path)
+                image, revision = image.split('@')
+                if image == name:
+                    ret.append(revision)
+            if not ret:
+                raise ObjectNotFound(name, self._name, None)
 
-    def load_meta(self):
-        meta_list = glob.glob(os.path.join(self._meta_path, '*/*'))
+            return ret
+
+    def load_meta(self, shallow=False):
+        if self.version < 2:
+            meta_list = glob.glob(os.path.join(self._meta_path, '*/*'))
+        else:
+            meta_list = glob.glob(os.path.join(self._meta_path, '*'))
         ret = {}
         for meta_path in meta_list:
-            meta = self._read_meta(meta_path, None, None)
+            if self.version < 2 or not shallow:
+                meta = self._read_meta(meta_path, None, None)
+                name = meta['name']
+                revision = meta['revision']
+            else:
+                name, revision = os.path.basename(meta_path).split('@')
+                meta = {}
+                meta['name'] = name
+                meta['revision'] = revision
+
             meta['repo'] = self._name
             ret.setdefault(meta['name'], {})[meta['revision']] = meta
 
@@ -474,29 +554,32 @@ class ObjectStore(object):
             revisions = self.get_revisions(name)
 
         for r in revisions:
-            h = self._hash_meta(name, r)
             try:
-                target = self.get_obj_path('meta', h, check_exists=True)
+                target = self.get_meta_path(name, r, check_exists=True)
             except:
                 raise ObjectNotFound(name, self._name, r)
+        if repo_config['version'] < 2:
             self._unlink_and_cleanup_dir(target)
+        else:
+            os.unlink(target)
 
     def _validate_repo_config(self):
         try:
             with open(self._config_path) as f:
                 repo_config = yaml.safe_load(f)
-                jsonschema.validate(repo_config,
-                                    yaml.safe_load(repo_config_schema))
-
+                jsonschema.validate(repo_config, repo_config_schema)
         except (yaml.YAMLError,
                 IOError,
                 jsonschema.exceptions.ValidationError) as err:
             raise PcoccError('Bad repository config'
                              ' file {0} : {1}'.format(self._config_path, err))
 
-        if repo_config['version'] != 1:
-            raise InvalidConfigurationError(
-                'unsupported repository {0} version'.format(self.name))
+        self.version = repo_config['version']
+
+        if repo_config['version'] < 2:
+            logging.info('Please upgrade your %s repository', self.name)
+        elif repo_config['version'] != 2:
+            raise InvalidConfigurationError('Unsupported version for repository "{}"'.format(self.name))
 
     def _init_repodir(self):
         if os.path.isdir(self._path):
@@ -518,10 +601,12 @@ class ObjectStore(object):
             os.mkdir(self._meta_path)
             os.mkdir(self._tmp_path)
             with open(self._config_path, 'w') as f:
-                yaml.safe_dump({'version': 1}, f)
+                yaml.safe_dump({'version': 2}, f)
         except OSError as e:
             raise PcoccError('Unable to create repository directory '
                              '{0}: {1}: '.format(self._path, str(e)))
+
+        self.version = 2
 
     def _validate_name(self, name):
         if re.search(r"[^a-zA-Z0-9_\.-]+", name):

@@ -119,7 +119,7 @@ class Config(object):
 
         self.load_containers(os.path.join(self.user_conf_dir,
                                           'containers.yaml'))
-        self.tpls.populate_image_templates(self.images.find())
+        self.tpls.populate_image_templates(self.images.find(shallow=True))
 
     def load_vnets(self, network_conf_file):
         self.vnets.load(network_conf_file)

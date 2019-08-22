@@ -237,6 +237,10 @@ class BatchManager(object):
         """Called on each node at the resource deletion step"""
         pass
 
+    def dump_resources(self):
+        """Called on each node after resources have been created"""
+        pass
+
     @abstractmethod
     def vm_count(self):
         """Returns the number of VMs in the cluster"""
@@ -373,12 +377,15 @@ class EtcdManager(BatchManager):
 
     def _init_cluster_dir(self):
         self._only_in_a_job()
-        if not os.path.exists(self.cluster_state_dir):
-            os.makedirs(self.cluster_state_dir)
-            atexit.register(self._clean_cluster_dir)
+        if os.path.exists(self.cluster_state_dir):
+            shutil.rmtree(self.cluster_state_dir)
+
+        os.makedirs(self.cluster_state_dir)
+        atexit.register(self._clean_cluster_dir)
 
     def _clean_cluster_dir(self):
         self._only_in_a_job()
+        logging.info("Cleaning cluster dir")
         if os.path.exists(self.cluster_state_dir):
             shutil.rmtree(self.cluster_state_dir)
 
@@ -814,10 +821,10 @@ class EtcdManager(BatchManager):
             u.write()
             self.make_dir('cluster/user', '')
 
-
     def cleanup_cluster_keys(self):
         try:
             logging.debug('Setting self-destruct on cluster etcd keystore')
+            self.write_key('cluster', 'destroyed', True)
             self.keyval_client.write(self.get_key_path('cluster', ''),
                                      None, dir=True, prevExist=True, ttl=600)
             self.keyval_client.write(self.get_key_path('cluster/user', ''),
@@ -1791,8 +1798,8 @@ class SlurmManager(EtcdManager):
                     self._rank_map.append(node_index)
                 node_index += 1
 
-        if (self.proc_type == ProcessType.SETUP and
-            self.node_rank == 0):
+    def dump_resources(self):
+        if self.node_rank == 0:
             self.write_key('cluster', 'rank_map',
                            yaml.dump(self._rank_map))
 

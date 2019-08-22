@@ -111,6 +111,11 @@ def load_config(batchid=None, batchname=None, batchuser=None,
 
 
 def load_batch_cluster():
+    val, index = Config().batch.read_key_index('cluster', 'destroyed')
+    if val:
+        logging.info("Load batch: stale cluster dir, waiting for cleanup")
+        Config().batch.wait_key_index('cluster', 'destroyed', index)
+
     definition = Config().batch.read_key('cluster/user', 'definition',
                                          blocking=True)
     return Cluster(definition)
@@ -1336,7 +1341,12 @@ def pcocc_launcher(restart_ckpt,
         docker_opt = []
 
     # TODO: provide a way for the user to plugin his own pre-run scripts here
-    os.mkdir(os.path.join(batch.cluster_state_dir, 'slurm'))
+    try:
+        os.mkdir(os.path.join(batch.cluster_state_dir, 'slurm'))
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            pass
+
     for path in os.listdir(helperdir):
         path = os.path.abspath(os.path.join(helperdir, path))
         if os.path.isfile(path) and os.access(path, os.X_OK):
@@ -1582,6 +1592,7 @@ def pcocc_setup(action, jobid, nolock, force):
         cluster = Cluster(config.batch.cluster_definition,
                           resource_only=True)
         cluster.alloc_node_resources()
+        config.batch.dump_resources()
     elif action == 'delete':
         config.load(jobid=jobid, process_type=ProcessType.SETUP)
         config.tracker.cleanup_ref(config.batch.batchid)

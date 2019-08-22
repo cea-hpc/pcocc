@@ -28,6 +28,14 @@ local verbose = SPANK.log_verbose
 local error = SPANK.log_error
 
 -- helper function to log external commands
+function do_and_return_output (cmd)
+   verbose("lua/vmsetup: executing %s", cmd)
+   local f = assert(io.popen(cmd.." 2>&1"))
+   local s = assert(f:read('*a'))
+
+   return s
+end
+
 function do_and_log_output (cmd)
    debug("lua/vmsetup: executing %s", cmd)
    local f = assert(io.popen(cmd.." 2>&1"))
@@ -144,8 +152,17 @@ function slurm_spank_init_post_opt (spank)
       end
    else
       -- Called on the node
+      local jobid =  spank:get_item ("S_JOB_ID")
       local stepid = spank:get_item ("S_JOB_STEPID")
-      if stepid == 0 then
+      stepid_path = "/var/run/pcocc/stepid_"..jobid
+      f = io.open(stepid_path, "r")
+      alloc_stepid = f:read()
+      f:close()
+      if tonumber(alloc_stepid) == -1 then
+            f = io.open(stepid_path, "w+")
+            alloc_stepid = f:write(tostring(stepid))
+            f:close()
+
             debug("lua/vmsetup: init_post_op: remote context")
             local r = replicate_slurm_vars(spank)
             if r ~= 0 then
@@ -153,10 +170,29 @@ function slurm_spank_init_post_opt (spank)
             end
             do_and_log_output(pcocc_node_setup(spank).." internal setup init")
             do_and_log_output(pcocc_node_setup(spank).." internal setup create")
+      else
+          error("bad stepid: "..stepid)
       end
    end
 
    return SPANK.SUCCESS
+end
+
+function slurm_spank_job_prolog (spank)
+   debug("lua/vmsetup: prolog")
+   do_and_return_output("mkdir /var/run/pcocc")
+   do_and_return_output("chmod 700 /var/run/pcocc")
+   local jobid = spank:get_item ("S_JOB_ID")
+   f = io.open("/var/run/pcocc/stepid_"..jobid, "w+")
+   f:write("-1")
+   f:close()
+end
+
+
+function slurm_spank_job_epilog (spank)
+   debug("lua/vmsetup: epilog")
+   local jobid = spank:get_item ("S_JOB_ID")
+   do_and_return_output("rm /var/run/pcocc/stepid_"..jobid)
 end
 
 function slurm_spank_exit (spank)
@@ -168,13 +204,20 @@ function slurm_spank_exit (spank)
 
    if spank.context == "remote" then
       local stepid = spank:get_item ("S_JOB_STEPID")
-      if stepid == 0 then
+      local jobid =  spank:get_item ("S_JOB_ID")
+      stepid_path = "/var/run/pcocc/stepid_"..jobid
+      f = io.open(stepid_path, "r")
+      alloc_stepid = f:read()
+      f:close()
+      if stepid == tonumber(alloc_stepid) then
             debug("lua/vmsetup: exit: remote context")
             local r = replicate_slurm_vars(spank)
             if r ~= 0 then
                 return SPANK.FAILURE
             end
             do_and_log_output(pcocc_node_setup(spank).." internal setup delete")
+       else
+            error("bad stepid at exit: "..stepid)
        end
    end
 

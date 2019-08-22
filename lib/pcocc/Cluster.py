@@ -21,7 +21,7 @@ import yaml
 import time
 import logging
 import threading
-
+import etcd
 from . import Hypervisor
 from . import Batch
 from .Error import PcoccError
@@ -318,6 +318,21 @@ class Cluster(object):
         return len(self.vms)
 
     def alloc_node_resources(self):
+        destroyed, index = Config().batch.read_key_index('cluster', 'destroyed')
+
+        if destroyed:
+            logging.error("Stale cluster dirs found")
+            if Config().batch.node_rank != 0:
+                Config().batch.wait_key_index('cluster', 'destroyed', index,
+                                              timeout=60)
+            else:
+                logging.error("Destroying cluster dirs")
+                Config().batch.delete_dir('cluster', '')
+                try:
+                    Config().batch.delete_dir('cluster/user', '')
+                except etcd.EtcdKeyNotFound:
+                    pass
+
         self._set_host_state('network-config',
                              1,
                              'configuring networks',
@@ -439,9 +454,7 @@ class Cluster(object):
         i = 0
         for i in range(5):
             try:
-                host_states, index = batch.read_dir_index(
-                    'cluster',
-                    self._host_state_dir())
+                destroyed, index = Config().batch.read_key_index('cluster', 'destroyed')
                 break
             except Batch.KeyCredentialError:
                 if i == 0:
@@ -455,6 +468,15 @@ class Cluster(object):
         if i > 0:
             sys.stderr.write('User credentials added to keystore: '
                              'welcome to pcocc !\n')
+
+        # The jobid was used by a previoius cluster, wait for cleanup
+        if destroyed:
+            logging.info("Stale cluster dir, waiting for cleanup")
+            Config().batch.wait_key_index('cluster', 'destroyed', index)
+
+        host_states, index = batch.read_dir_index(
+            'cluster',
+            self._host_state_dir())
 
         done, last_state = self._check_all_host_states(host_states)
         if done:

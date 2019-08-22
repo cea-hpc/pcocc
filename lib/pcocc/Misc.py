@@ -114,7 +114,8 @@ def _nanny_thread(child_proc, pipe, return_val, name):
         pid = child_proc.pid
 
     logging.debug("Nanny thread%s detected termination "
-                  "of pid %s", name, pid)
+                  "of pid %s, status %s", name, pid, r)
+
     return_val['val'] = r
     return_val['pid'] = pid
     os.write(pipe, 'x')
@@ -138,6 +139,8 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout, name=""):
     nanny.start()
     cur_timeout = None
     status = CHILD_EXIT.NORMAL
+    next_sig = 0
+    logging.info("Wait/Term child starting for %s", str(child_proc))
 
     while True:
         try:
@@ -150,18 +153,31 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout, name=""):
 
         if child_r in rdy:
             os.read(child_r, 1024)
-            logging.debug("Wait/Term child%s: child has exited",name)
+            logging.debug("Wait/Term child%s: child has exited", name)
+
             break
         else:
             if sigfd in rdy:
+                logging.info("Wait/Term child: Signal received (%s)", str(child_proc))
                 os.read(sigfd,1024)
                 status = CHILD_EXIT.SIGNAL
                 logging.debug("Wait/Term child%s: Signal received", name)
             else:
+                logging.info("Wait or Term: Timeout (%s)", str(child_proc))
                 status = CHILD_EXIT.KILL
                 logging.debug("Wait/Term child%s: Timeout", name)
 
             cur_timeout = timeout
+
+            delay = next_sig - datetime_to_epoch(datetime.datetime.utcnow())
+
+            if delay > 0:
+                logging.debug("Wait/Term child%s:"
+                              "Waiting a maximum of %d more seconds "
+                              "before sending next signal", name, delay)
+                cur_timeout = delay
+                continue
+
             logging.debug("Wait/Term child%s: "
                           "Sending sig %s to %s", name, sig, child_proc)
             try:
@@ -172,9 +188,11 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout, name=""):
                 else:
                     os.kill(child_proc.pid, sig)
             except:
+                logging.info("Wait/Term child: Failed to kill process")
                 pass
 
             # Next time force kill
+            next_sig = datetime_to_epoch(datetime.datetime.utcnow()) + timeout
             sig = signal.SIGKILL
 
 

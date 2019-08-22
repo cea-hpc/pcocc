@@ -1658,10 +1658,6 @@ username={3}@pcocc
             os.setpgid(0, 0)
             os.execvp(cmdline[0], cmdline)
 
-
-        # If we need to properly shutdown the guest, catch SIGTERMs
-        # and SIGINTS
-
         # Intialize the qemu monitor
         # This also serves as waiting for Qemu to be initialized
         while True:
@@ -1832,6 +1828,7 @@ username={3}@pcocc
                     if not vm.wait_for_poweroff:
                         logging.debug('Sending quit to Qemu monitor')
                         qemu_mon.quit()
+                        qemu_console_sock = None
                         break
 
                     if shutdown_attempts >= 3:
@@ -1862,9 +1859,15 @@ username={3}@pcocc
         os.kill(os.getpid(), signal.SIGTERM)
         status, pid, _ = wait_or_term_child(qemu_pid, signal.SIGTERM,
                                             term_sigfd, 5, "qemu cleanup")
-        ret = status >> 8
-        if ret != 0:
-            raise HypervisorError("Qemu exited with status %d" % ret)
+
+        if os.WIFEXITED(status) and os.WEXITSTATUS(status):
+            logging.error("qemu exited with status %d" % os.WEXITSTATUS(status))
+            ret = os.WEXITSTATUS(status)
+        elif os.WIFSIGNALED(status):
+            logging.error("qemu killed by signal %d" % os.WTERMSIG(status))
+            ret = -1
+        else:
+            ret = 0
 
         return ret
 

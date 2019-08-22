@@ -42,7 +42,7 @@ from pcocc.Tbon import UserCA
 from pcocc.scripts import click
 from pcocc import PcoccError, Config, Cluster, Hypervisor, Docker
 from pcocc.Batch import ProcessType
-from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
+from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads,CHILD_EXIT
 from pcocc.scripts.Shine.TextTable import TextTable
 from pcocc.Agent import AgentCommand, DEFAULT_AGENT_TIMEOUT
 from pcocc.Templates import DRIVE_IMAGE_TYPE
@@ -1199,13 +1199,25 @@ PCOCC_HOST_SCRIPT_EOF
 chmod u+x "$TEMP_HOST_SCRIPT"
 """)
 
-        wrpfile.write("""
+        wrpfile.write(
+"""
 PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s %s %s &
-wait
+trap "kill -15 $!; echo Signal received, waiting for pcocc to exit; SIGNAL=1" SIGTERM SIGINT
+while true; do
+  SIGNAL=0
+  wait $!
+  RET=$?
+  if [[ $SIGNAL -eq 0 ]]; then
+    break;
+  fi
+  echo "Restarting wait"
+done
+
 rm "$TEMP_BATCH_SCRIPT" 2>/dev/null
 rm "$TEMP_HOST_SCRIPT" 2>/dev/null
 
 exit $RET
+
 """ % (' '.join(Config().verbose_opt),
             ' '.join(launcher_opt),
             ' '.join(ckpt_opt),
@@ -1315,10 +1327,13 @@ def pcocc_launcher(restart_ckpt,
                    docker,
                    mirror_user,
                    cluster_definition):
+    signal.signal(signal.SIGINT, clean_exit)
+    signal.signal(signal.SIGTERM, clean_exit)
+
     config = load_config(process_type=ProcessType.LAUNCHER)
     batch = config.batch
 
-    logging.debug("Starting pcocc launcher")
+    logging.debug("Starting pcocc launcher for " + cluster_definition)
 
     if sys.stdin.isatty():
         oldterm = termios.tcgetattr(sys.stdin.fileno())
@@ -1415,10 +1430,13 @@ def pcocc_launcher(restart_ckpt,
     monitor_list.append(s_exec.pid)
 
     while True:
-        status, pid, _ = wait_or_term_child(monitor_list,
-                                            signal.SIGTERM, term_sigfd, 40, "launcher")
+        status, pid, reason = wait_or_term_child(monitor_list,
+                                                 signal.SIGTERM, term_sigfd, 40, "launcher")
+
         if pid == s_pjob.pid:
-            if status != 0:
+            if reason != CHILD_EXIT.NORMAL:
+                sys.stderr.write("The cluster has been terminated due to a signal\n")
+            elif status != 0:
                 sys.stderr.write("The cluster terminated unexpectedly\n")
             else:
                 sys.stderr.write("The cluster has shut down\n")
@@ -1454,7 +1472,10 @@ def pcocc_launcher(restart_ckpt,
     if oldterm:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, oldterm)
 
-    sys.exit(status>>8)
+    if reason == CHILD_EXIT.SIGNAL or os.WIFSIGNALED(status):
+        sys.exit(1)
+    else:
+        sys.exit(os.WEXITSTATUS(status))
 
 def wait_timeout(s_proc):
     try:

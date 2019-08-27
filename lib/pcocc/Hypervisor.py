@@ -2294,7 +2294,7 @@ def qemu_gen_iothread_cmdline(name):
 
 def qemu_gen_drive_cmdline(path, name, cache):
     return ['-drive',
-            'file={0},cache={1},id={2},'
+            'file={0},cache={1},id={2},discard=on,'
             'if=none'.format(path, cache, name)]
 
 def checkpoint_mem_file(vm, ckpt_dir):

@@ -906,6 +906,11 @@ class VirtualMachine(Runner):
             Native -- runner to chain commands
 
         """
+        if not core and not node:
+            self.target_rangeset = RangeSet(range(self.cluster.vm_count()))
+            self.command_list = []
+            return
+
         if not core:
             core = 1
 

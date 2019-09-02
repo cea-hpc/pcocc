@@ -174,20 +174,32 @@ class CompressedArchive(object):
 
     @staticmethod
     def extract_tar_elem_no_right(tar, elem, output_dir):
+        if os.path.basename(elem.name).startswith(".wh."):
+            return
+
         try:
             elem_path = path_join(output_dir, elem.name)
+
             if os.path.islink(elem_path):
                 # Check for broken links
                 # which cannot be overwriten
                 if not os.path.exists(elem_path):
                     # This is a broken link delete before overwrite
                     os.unlink(elem_path)
-            tar.extract(elem, path=output_dir)
+            elif os.path.isdir(elem_path) and not elem.isdir():
+                shutil.rmtree(elem_path)
+
+            # Skip device files which we cannot currently extract
+            if elem.ischr() or elem.isblk():
+                pass
+            else:
+                tar.extract(elem, path=output_dir)
+
             if elem.isdir() or elem.isfile():
                 os.chmod(elem_path, 0o700)
-        except (OSError, IOError,):
-            logging.warning("Warning: could not extract file '/%s'"
-                            % format(elem.name))
+        except (OSError, IOError,) as e:
+            logging.warning("Warning: could not extract "
+                            "file '{}': {}".format(str(elem.name), str(e)))
 
     def _extract_no_right_inplace(self):
         try:
@@ -423,58 +435,59 @@ class OciManifest(object):
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         return result
 
-    def _resolve_whiteouts(self, file_sets, output_dir):
-        wh_dict = {}
+    @classmethod
+    def _normalize_path(cls, path):
+        if path[-1] == '/':
+            path = path[:-1]
+        return path
 
-        def hit_wh_dict(path, add_ref=True):
-            inc = 1 if add_ref else -1
-            if path in wh_dict:
-                wh_dict[path] = wh_dict[path] + inc
-            else:
-                wh_dict[path] = inc
+    @classmethod
+    def _set_file_state(cls, path, state_dict, visible=False):
+        state_dict[cls._normalize_path(path)] = visible
+        logging.debug("file %s visible state %s", path, visible)
 
-        def resolve_dir_wh_content(directory, layer_id):
-            layers = file_sets[0:layer_id]
-            all_files = set()
-            for f in layers:
-                all_files.update(f["content"]["set"])
-            return [e for e in all_files
-                    if (e.startswith(directory) and  # Is in the dir
-                        (e != directory) and  # Is not the dir
-                        (e[-1] != "/"))]  # Is not a dir
+    @classmethod
+    def _is_in_dir(cls, path, directory):
+        return (path).startswith(directory + os.sep)
 
-        # Generate the whiteout array
-        opaque_whiteouts = []
-        opaque_wh_list = [".wh..opq",
-                          ".wh..wh..opq",
-                          ".wh.__dir_opaque."]
+    @classmethod
+    def _set_dir_state(cls, directory, state_dict, visible=False):
+        directory = cls._normalize_path(directory)
+        for f, _ in state_dict.items():
+            if cls._is_in_dir(f, directory) and f != directory:
+                state_dict[f] = visible
+
+    def _compute_whiteouts(self, file_sets, output_dir):
+        """Returns the list of files that should be removed from the rootfs
+        due to whiteouts"""
+        state_dict = {}
+        opaque_wh_list = [".wh..wh..opq"]
 
         for i in range(0, len(file_sets)):
             fset = file_sets[i]
+
             for f in fset["content"]["set"]:
-                # The file exists hit the dict
-                hit_wh_dict(f, add_ref=True)
                 dirname = os.path.dirname(f)
                 basename = os.path.basename(f)
+
                 if basename.startswith(".wh."):
                     if basename in opaque_wh_list:
-                        # This is an opaque whiteout
-                        # it means all the siblings are empty
-                        opaque_whiteouts.append(dirname)
-                        ctx = resolve_dir_wh_content(dirname, i)
-                        map(hit_wh_dict,
-                            ctx)
+                        logging.debug("processing opaque directory %s", dirname)
+                        self._set_dir_state(dirname, state_dict, visible=False)
                     else:
+                        target_file = os.path.join(dirname, basename[4:])
+                        logging.debug("processing whiteout for file %s", target_file)
+                        self._set_file_state(target_file, state_dict, visible=False)
 
-                        key = os.path.join(dirname, basename[4:])
-                        # The precise file is whited out
-                        # hit the dict
-                        hit_wh_dict(key)
+                dirname = os.path.dirname(f)
+                basename = os.path.basename(f)
 
-        # If ref is <= 0 then we delete
-        return [path_join(output_dir, k)
-                for (k, v) in wh_dict.items()
-                if v <= 0]
+            for f in fset["content"]["set"]:
+                if not f.startswith(".wh."):
+                    self._set_file_state(f, state_dict, visible=True)
+
+        return [path_join(output_dir, k) for (k, v) in state_dict.items()
+                if not v]
 
     def _delta_groups(self, file_sets, no_strict_ts=True):
         # It is now time to compute parallel buckets
@@ -489,7 +502,6 @@ class OciManifest(object):
         current_group = []
         for fset in file_sets:
             inter = seen_files.intersection(fset["content"]["set"])
-
             new_group = False
 
             if inter:
@@ -582,7 +594,7 @@ class OciManifest(object):
         p.map(set_file_rights, new_rights, chunksize=128)
 
         # We now process whiteout files
-        wh = self._resolve_whiteouts(file_sets, output_dir)
+        wh = self._compute_whiteouts(file_sets, output_dir)
         p.map(rm_wh_file, wh)
 
         p.terminate()
@@ -751,7 +763,6 @@ class OciBlobs(object):
 
 
 class OciFileBlobs(OciBlobs):
-
     def __init__(self, oci_image_path):
         if oci_image_path is None:
             raise PcoccError("No path provided for OCI image")
@@ -811,9 +822,7 @@ class OciFileBlobs(OciBlobs):
         except os.error:
             pass
 
-
 class OciRepoBlobs(OciBlobs):
-
     def __init__(self, repo, meta):
         if meta is None:
             raise PcoccError("No meta provided for OCI image")
@@ -901,6 +910,9 @@ class OciImage(object):
     def load(self, checksig=False):
         self.data = self.oci.index
         for cont in self.data["manifests"]:
+            if cont["mediaType"] != "application/vnd.oci.image.manifest.v1+json":
+                continue
+
             label = None
             if "annotations" in cont:
                 if "org.opencontainers.image.ref.name" in cont["annotations"]:

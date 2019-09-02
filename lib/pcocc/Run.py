@@ -1696,10 +1696,6 @@ class ContainerFs(object):
             mtarget = mount["destination"]
             mtype = mount["type"]
 
-            # TODO: pourquoi doit on se preocupper de ca ici ?
-            # Et si on veut vraiement monter
-            # quelquechose qui commence par rootfs ?
-            # A revoir
             if msource.startswith("/rootfs"):
                 msource = re.sub(r"^/rootfs", "", msource)
 
@@ -1864,13 +1860,13 @@ class ContainerFs(object):
         if rootless:
             bundle_dest = tempfile.mkdtemp()
         else:
-            tmp_roofs_dir = os.path.join(Config().batch.cluster_state_dir,
+            tmp_rootfs_dir = os.path.join(Config().batch.cluster_state_dir,
                                          "cont_bundles")
-            if not os.path.exists(tmp_roofs_dir):
+            if not os.path.exists(tmp_rootfs_dir):
                 os.makedirs(tmp_roofs_dir)
             # We run inside a VM use a shared directory
             # as the CLI is setting up the rootfs
-            bundle_dest = tempfile.mkdtemp(dir=tmp_roofs_dir)
+            bundle_dest = tempfile.mkdtemp(dir=tmp_rootfs_dir)
 
         def cleanup_transposed_bundle():
             """This function is to be deffered to clean the
@@ -1887,6 +1883,9 @@ class ContainerFs(object):
         # Copy the config in the transposed bundle
         shutil.copy(path_join(bundle_path, "config.json"),
                     path_join(bundle_dest, "config.json"))
+
+        # Create an empty rootfs in the transposed bundle
+        os.makedirs(path_join(bundle_dest, "rootfs"))
 
         return bundle_dest
 

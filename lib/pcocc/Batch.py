@@ -1807,6 +1807,10 @@ class SlurmManager(EtcdManager):
         if match:
             return int(match.group(1))
 
+        match = re.search(r'MinMemoryCPU=(\d+)G', raw_output)
+        if match:
+            return int(match.group(1)) * 1024
+
         # Else, try a per node basis:
         match = re.search(r'MinMemoryNode=(\d+)M', raw_output)
         if match:

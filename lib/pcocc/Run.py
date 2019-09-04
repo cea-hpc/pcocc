@@ -16,11 +16,6 @@
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
-"""This module defines classes to run pcocc programs and containers.
-
-    Main configurations are "native", "slurm", "vm",
-    "nativecontainer" and "podcontainer"
-"""
 import os
 import re
 import stat
@@ -50,7 +45,7 @@ from .scripts import click
 from .Container import OciConfig
 from .Config import Config
 from .Error import PcoccError
-from .Image import ContainerView
+from .Image import ContainerBundleView
 from .Misc import path_join, pcocc_at_exit
 
 
@@ -1455,12 +1450,8 @@ class ContainerFs(object):
         self.oci_source_bundle = None
         self.cleanup_transposed_bundle = None
 
-        # The can_mount option means that only singleton will actually
-        # mount the image, others will only generate the bundle (once at CLI)
-        # if needed avoiding replicated extractions
-        self.cont_view = ContainerView(image, can_mount=(singleton or
-                                                         # Mount for CLI VM
-                                                         not self.rootless))
+        self.cont_view = ContainerBundleView(image)
+        self.cont_view.prepare()
 
         self.oci_source_bundle = self.locate_bundle()
 
@@ -1569,7 +1560,7 @@ class ContainerFs(object):
 
         # Otherwise acquire the container view
         if not oci_bundle:
-            oci_bundle = self.cont_view.get("bundle")
+            oci_bundle = self.cont_view.get()
 
         return oci_bundle
 
@@ -2067,7 +2058,7 @@ class ContainerFs(object):
             # by the user manually this setting is overwritten
             cwd = os.getcwd()
             if cwd.startswith(real_user_home):
-                cwd = cwd.replace(real_user_home, os_user_home + "/")
+                cwd = cwd.replace(real_user_home, os_user_home)
             self.oci_config.set_cwd(remove_trailing_slash(cwd))
         else:
             # Make sure to update $HOME in container
@@ -2902,8 +2893,7 @@ class NativeContainer(ContainerFs):
                 self.env[key] = value
 
     def _clean_singleton(self):
-        if Config().containers.config.use_squashfs:
-            self.cont_view.cleanup()
+        self.cont_view.cleanup()
 
         shutil.rmtree(self.oci_bundle)
         pcocc_at_exit.deregister(self.cleanup_transposed_bundle)

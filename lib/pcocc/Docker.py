@@ -26,11 +26,13 @@ import logging
 import shlex
 from distutils import spawn
 
-from pcocc.Agent import AgentCommand
+
 from pcocc import agent_pb2
-from pcocc.Error import PcoccError
-from pcocc.Run import ContainerView
-from pcocc.VMCerts import VMCerts
+
+from .Agent import AgentCommand
+from .Error import PcoccError
+from .Image import ContainerView
+from .VMCerts import VMCerts
 from .Config import Config
 from .Misc import path_join
 
@@ -321,7 +323,7 @@ class PcoccDocker(object):
         cluster.wait_host_config()
         self.assert_docker_shell()
 
-        with ContainerView(src_image, view_type="oci") as oci_view:
+        with ContainerLayoutView(src_image, view_type="oci") as oci_view:
             vm = cluster.vms[vm_index]
             docker_host = self.get_docker_host(vm)
 

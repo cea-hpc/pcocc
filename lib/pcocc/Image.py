@@ -325,15 +325,12 @@ class VMImage(object):
                              "The qemu-img command failed with: " + e.output)
 
 
-def _dir_size(path, depth=0):
+def _layout_size(path):
     ret = 0
-    if depth >= 5:
-        # Do not go too deep
-        return
     for e in os.listdir(path):
         targ = path_join(path, e)
         if os.path.isdir(targ):
-            ret += _dir_size(targ, depth=depth + 1)
+            ret += _layout_size(targ)
         else:
             if os.path.islink(targ):
                 targ = os.readlink(targ)
@@ -342,204 +339,122 @@ def _dir_size(path, depth=0):
     return ret
 
 
-def _compute_path_size(path):
-    if os.path.isdir(path):
-        return _dir_size(path) / (1024.0 * 1024.0)
-    elif os.path.isfile(path):
-        # This is a file
-        return os.stat(path).st_size / (1024.0 * 1024.0)
-    else:
-        # Cannot conclude
-        return None
-
-
-def _cont_get_tmp_directory(size=None):
-    # If tmp directory is forced in environment
-    # it superseded every choice
-    if "PCOCC_CONT_TMP_DIR" in os.environ:
-        tmp_cont = os.environ["PCOCC_CONT_TMP_DIR"]
-        logging.info("Using PCOCC_CONT_TMP_DIR=%s as tmp directory" % tmp_cont)
+def _cont_get_tmp_directory(layout_path):
+    if "PCOCC_CTR_WORK_DIR" in os.environ:
+        tmp_cont = os.environ["PCOCC_CTR_WORK_DIR"]
+        logging.info("Using PCOCC_CTR_WORK_DIR=%s as temporary extraction directory", tmp_cont)
         return tempfile.mkdtemp(dir=tmp_cont)
 
-    if size:
-        tmp_path = Config().containers.config.container_tmp_path
-        # Only do to the optimized case if size is small enough
-        if int(size) <= Config().containers.config.container_tmp_path_trsh_mb:
-            logging.info("Size %s MB is small"
-                         " enough for *container_tmp_path*" % str(size))
-            return tempfile.mkdtemp(dir=tmp_path)
-        else:
-            logging.info("Size %s MB is too"
-                         " big for *container_tmp_path*" % size)
+    size = _layout_size(layout_path)
 
-    logging.info("Using system default for container TMP dir")
-    # Use system's default
-    return tempfile.mkdtemp()
+    if size <= Config().containers.config.container_shm_work_limit * 1024 * 1024:
+        logging.info("Container fits under memory extraction threshold (%d MB)", size // (1024 * 1024))
+        return tempfile.mkdtemp(dir=Config().containers.config.container_shm_work_path)
+    else:
+        logging.info("Container exceeds memory extraction threshold  (%d MB)", size // (1024 * 1024))
+        return tempfile.mkdtemp()
 
 
 class ContainerView(object):
-
-    def __init__(self, image, view_type=None, target_dir=None, can_mount=True):
+    def __init__(self, image):
         self.image = image
-        # Extract image info
+        # FIXMEPARA: should this be parsed earlier
         self.meta, _ = Config().images.get_image(image)
-
-        if self.meta is None:
-            raise PcoccError("Could not find "
-                             "image '%s' in repositories" % image)
-
         repo = self.meta["repo"]
         self.src_store = Config().images.object_store.get_repo(repo)
 
-        self.can_mount = can_mount
-        self.target_dir = target_dir
-        self.path = None
-        self.view_type = view_type
+    def prepare(self):
+        pass
 
-        self.squashfs_atexit_umount = None
-        self.ociview_atexit_delete = None
-
-    def get(self, view_type=None, target_dir=None):
-        if not view_type:
-            view_type = self.view_type
-
-        if view_type == "oci":
-            self.path = self._init_oci_view(target_dir)
-        elif (view_type == "bundle") or (view_type == "rootfs"):
-            self.path = self._init_bundle_view(target_dir)
-        else:
-            raise PcoccError("No such view type {}".format(view_type))
-
-        self.view_type = view_type
-
-        return self.path
-
-    def cleanup(self):
-        if self.view_type == "oci":
-            self._delete_oci_view()
-        elif (self.view_type == "bundle") or (self.view_type == "rootfs"):
-            self._delete_bundle_view()
-        else:
-            return
-        self.view_type = None
+    def get(self):
+        pass
 
     def __enter__(self):
-        return self.get(self.view_type,
-                        target_dir=self.target_dir)
+        return self.get()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.cleanup()
 
-    def _init_oci_view(self, target_dir=None):
-        if not target_dir:
-            target_dir = tempfile.mkdtemp()
+    def cleanup(self):
+        self._call_cleanup_func()
+
+    def _register_cleanup_func(self, func):
+        self.atexit_func = func
+        pcocc_at_exit.register(func)
+
+    def _call_cleanup_func(self):
+        if self.atexit_func is not None:
+            self.atexit_func()
+            pcocc_at_exit.deregister(self.atexit_func)
+            self.atexit_func = None
+
+
+class ContainerLayoutView(ContainerView):
+    def __init__(self, image):
+        ContainerView.__init__(self, image)
+
+    def get(self):
+        self.path = tempfile.mkdtemp()
+        self._register_cleanup_func(lambda : chmod_rm(self.path))
+
         repos_blobs = OciRepoBlobs(self.src_store, self.meta)
         image = OciImage(oci_blobs_iface=repos_blobs)
+
         image.load()
-        image.mirror(target_dir)
-
-        def atexit_delete_ociview():
-            chmod_rm(self.path)
-
-        self.ociview_atexit_delete = atexit_delete_ociview
-        pcocc_at_exit.register(self.ociview_atexit_delete)
-
-        return target_dir
-
-    def _delete_path(self):
-        # Remove tmp directory
-        chmod_rm(self.path)
-
-        pcocc_at_exit.deregister(self.ociview_atexit_delete)
-        self.ociview_atexit_delete = None
-
-        self.path = None
-
-    def _delete_oci_view(self):
-        self._delete_path()
-
-    def _init_bundle_view(self, target_dir=None):
-        if (not self.view_type == "rootfs" and
-                Config().containers.config.use_squashfs):
-            return self._init_bundle_view_squashfs(target_dir)
-        else:
-            return self._init_bundle_view_rootfs(target_dir)
-
-    def _delete_bundle_view(self):
-        if (not self.view_type == "rootfs" and
-                Config().containers.config.use_squashfs):
-            self._delete_bundle_view_squashfs()
-        else:
-            self._delete_bundle_view_rootfs()
-
-    def _get_bundle_from_cache(self):
-        if Config().containers.config.use_squashfs:
-            # This is a path to the squashfs image
-            return Config().images.cache_get(self.image, "cached_squashfs")
-        else:
-            # This is a path to the rootfs in cache
-            return Config().images.cache_get(self.image, "cached_bundle")
-
-    def _init_bundle_view_rootfs(self, target_dir=None):
-        self.path = self._get_bundle_from_cache()
-
-        if not self.path:
-            self.path = self._cont_create_bundle(kind="rootfs")
+        image.mirror(self.path)
 
         return self.path
 
-    def _delete_bundle_view_rootfs(self):
-        # We do not want to delete the roofs from cache
-        pass
+class ContainerBundleView(ContainerView):
+    def __init__(self, image):
+        ContainerView.__init__(self, image)
+        self.bundle_path = None
 
-    def _init_bundle_view_squashfs(self, target_dir=None):
-        squashfs_image = self._get_bundle_from_cache()
+    def prepare(self):
+        self.bundle_path = self._get_bundle_from_cache()
 
-        if not squashfs_image:
-            squashfs_image = self._cont_create_bundle(kind="squashfs")
+    def get(self):
+        if not self.bundle_path:
+            self.prepare()
 
-        if self.can_mount:
-            # At this point we still need to mount
-            self.path = self._mount_squashfs(squashfs_image,
-                                             target_dir=target_dir)
-            return self.path
+        if Config().containers.config.use_squashfs:
+            self.path = self._mount_squashfs()
         else:
-            return None
+            self.path = self.bundle_path
 
-    def _delete_bundle_view_squashfs(self):
-        if not self.path:
-            return
+        return self.path
 
-        def try_unmount():
-            if self.can_mount:
-                self._squash_fs_umount(self.path, force=True)
+    def _get_bundle_from_cache(self):
+        if Config().containers.config.use_squashfs:
+            path = Config().images.cache_get(self.image_uri, "cached_squashfs")
 
-        # There is sometimes latency relative to the update
-        # of the mount table so we add some tolerance with
-        # respect to the unmounting phase to prevent leftovers
-        if self._run_with_patience(try_unmount):
-            logging.warning("Failed to unmount"
-                            " squashfs mount %s" % (self.path))
         else:
-            # Unmount suceeded remove from atexit
-            pcocc_at_exit.deregister(self.squashfs_atexit_umount)
-            self.squashfs_atexit_umount = None
+            path = Config().images.cache_get(self.image_uri, "cached_bundle")
 
-        def delete_squashfs_mountdir():
-            shutil.rmtree(self.path)
+        if not path:
+            path = self._cont_add_to_cache()
 
-        # Here in order not to race fuse we add some tolerance too
-        if self._run_with_patience(delete_squashfs_mountdir):
-            logging.warning("Failed to remove squashfs mount %s"
-                            % self.path)
-        # If we failed to umount give up without errors
+        return path
 
-    def _squash_fs_umount(self, directory, force=False):
+    def _run_with_patience(self, func, trials=20, wait=0.1):
+        while trials:
+            trials = trials - 1
+            if trials == 0:
+                return False
+            try:
+                func()
+                break
+            except Exception as e:
+                time.sleep(wait)
+                logging.debug('Retrying %s', func.__name__)
+        return True
 
-        if not force and not self._check_mounted(directory):
-            # Directory does not seem to be mounted
-            return
+    def _check_mounted(self, directory):
+        with open("/proc/mounts", "r") as f:
+            mounts = f.read()
+            return re.search(r'[ \t]{0}[ \t]'.format(directory), mounts) != None
 
+    def _umount_squashfs(self, directory):
         if spawn.find_executable("fusermount"):
             try:
                 with open("/dev/null", "w") as devnull:
@@ -551,147 +466,87 @@ class ContainerView(object):
             except subprocess.CalledProcessError:
                 raise PcoccError("Failed to unmount {}".format(directory))
         else:
-            raise PcoccError("Could not locate 'fusermount'\n"
-                             "Fuse (and squashfuse) are required to\n"
-                             "mount container images if squashfs is enabled\n"
-                             "in 'containers.yaml', consider disabling it.")
+            raise PcoccError("Could not locate the 'fusermount' binary which is required"
+                             " when the squashfs container format is enabled")
 
-    def _check_mounted(self, directory):
-        mounts = ""
-
-        if os.path.exists("/proc/mounts"):
-            with open("/proc/mounts", "r") as f:
-                mounts = f.read()
-        else:
-            # First make sure path is a mount
-            try:
-                mounts = subprocess.check_output(["mount"])
-            except (subprocess.CalledProcessError, OSError):
-                pass
-
-        if directory in mounts:
-            # Nothing to do skip
-            return True
-
-        return False
-
-    def _run_with_patience(self, func, trials=20, wait=0.1):
-        while trials:
-            trials = trials - 1
-            if trials == 0:
-                return True
-            try:
-                func()
-                break
-            except Exception as e:
-                time.sleep(wait)
-                if not trials:
-                    print(e)
-        return False
-
-    def _mount_squashfs(self, squash_fs_image, target_dir=None):
-
-        if not target_dir:
-            target_dir = tempfile.mkdtemp()
-
-        if not os.path.isdir(target_dir):
-            os.makedirs(target_dir)
-        else:
-            self._squash_fs_umount(target_dir)
-
-        os.stat(target_dir)
-
+    def _mount_squashfs(self):
+        target_dir = tempfile.mkdtemp()
         if spawn.find_executable("squashfuse"):
             try:
-                # For debug if needed start the daemon
-                # in foreground
-                # sp = subprocess.Popen(["squashfuse",
-                #                        "-s",
-                #                        "-d",
-                #                        "-f",
-                #                        squash_fs_image,
-                #                        target_dir])
-                # time.sleep(5)
                 subprocess.check_call(["squashfuse",
-                                       squash_fs_image,
+                                       self.bundle_path,
                                        target_dir])
             except subprocess.CalledProcessError:
                 raise PcoccError("Failed to mount squashfs image")
 
-            # Now list directory content to ensure the FS is available
-            # in order not to race squashfuse
+            # If mount succeeded register unmount atexit
+            self._register_cleanup_func(lambda : self._squashfs_cleanup(target_dir))
+
+            # Wait for the mount to be complete by checking the directory
+            # and contents as squashfuse may return early
             def local_check_mounted():
-                # Make sure the mount table is updated
                 if not self._check_mounted(target_dir):
                     raise PcoccError("Not mounted yet")
-                # Make sure there is someting in the dir
                 if not os.listdir(target_dir):
                     raise PcoccError("Not mounted yet")
 
-            def atexit_umount():
-                self._squash_fs_umount(target_dir, force=True)
-
             if self._run_with_patience(local_check_mounted, wait=0.5):
-                raise PcoccError("squashfs mount failed")
+                logging.debug("squashfs image"
+                              " for %s mounted at %s", self.image_uri , target_dir)
             else:
-                logging.debug("Squashfs image"
-                              " for %s mounted at %s" % (squash_fs_image,
-                                                         target_dir))
-                # If mount succeeded register unmount atexit
-                self.squashfs_atexit_umount = atexit_umount
-                pcocc_at_exit.register(self.squashfs_atexit_umount)
+                raise PcoccError("Squashfs mount did not complete properly")
+
         else:
-            raise PcoccError("Could not locate 'squashfuse'"
-                             "required to mount the container bundle.\n"
-                             " you may consider disabling squashfs support "
-                             "in the 'containers.yaml' configuration.")
-        # done mounting
+            raise PcoccError("Could not locate the 'squashfuse' binary which is required"
+                             " when the squashfs container format is enabled")
+
         return target_dir
 
-    def _cont_add_to_cache(self,
-                           image,
-                           src_store,
-                           meta,
-                           cache_key,
-                           create_op,
-                           etype="DIR"):
+    def _squashfs_cleanup(self, target_dir):
+        # Wait for a previous mount or the unmount to be complete as
+        # squashfuse may return early
+        if not self._run_with_patience(lambda: self._umount_squashfs(target_dir)):
+            logging.warning("Failed to unmount squashfs on %s", target_dir)
+
+        if not self._run_with_patience(lambda: shutil.rmtree(target_dir)):
+            logging.warning("Failed to remove squashfs mount directory %s", self.path)
+
+    def _cont_add_to_cache(self):
         # Prepare to save inside image cache
         oci_bundle_dir = None
 
         img = Config().images
 
-        # Make sure we have no conflict
-        img.cache_delete(image, cache_key)
-
-        with ContainerView(image, "oci") as oci_image:
+        with ContainerLayoutView(self.image_uri) as oci_image:
             # Make sure to delete a previously failed image
-            img.cache_delete(image, cache_key + "_tmp")
-            if etype == "DIR":
-                # Create in a temporary destination
-                with img.cache_add_dir(image, cache_key + "_tmp") as cache_dir:
-                    # Convert to bundle with Pcocc / Umoci / oci-image-tools
-                    create_op(image, oci_image, cache_dir)
-            elif etype == "FILE":
-                # Create in a temporary destination
-                cache_file = img.cache_new_blob(image, cache_key + "_tmp")
-                create_op(image, oci_image, cache_file)
+            if Config().containers.config.use_squashfs:
+                cache_key = "cached_squashfs"
             else:
-                raise PcoccError("No such cache type {}".format(etype))
+                cache_key = "cached_bundle"
+
+            img.cache_delete(self.image_uri, cache_key + "_tmp")
+
+            if Config().containers.config.use_squashfs:
+                img.cache_delete(self.image_uri, cache_key + "_tmp")
+                cache_file = img.cache_new_blob(self.image_uri, cache_key + "_tmp")
+                self._generate_squashfs_image(self.image_uri, oci_image, cache_file)
+            else:
+                with img.cache_add_dir(self.image_uri, cache_key + "_tmp") as cache_dir:
+                    self._extract_oci_bundle(self.image_uri, oci_image, cache_dir)
+
 
             # If we are done we can rename the resulting blob
-            img.cache_rename(image, cache_key + "_tmp", cache_key)
+            # Make sure we have no conflict
+            img.cache_delete(self.image_uri, cache_key)
+            img.cache_rename(self.image_uri, cache_key + "_tmp", cache_key)
 
-            oci_bundle_dir = img.cache_get(image,
-                                           cache_key)
+            oci_bundle_dir = img.cache_get(self.image_uri, cache_key)
 
             # Return where the bundle is instanciated
             return oci_bundle_dir
 
     def _cont_squashfs_populate_systematic_mounts(self, rootfs):
-        mountpoints = ["/etc/resolv.conf",
-                       "/etc/group",
-                       "/etc/passwd"]
-        mountpoints += Config().containers.config.squashfs_image_mountpoints
+        mountpoints = Config().containers.config.squashfs_image_mountpoints
         mountpoints = set(mountpoints)
         for m in mountpoints:
             target = path_join(rootfs, m)
@@ -722,130 +577,61 @@ class ContainerView(object):
             pass
         return "-quiet" in help_output
 
-    def _cont_create_bundle(self, kind="rootfs"):
-        # Add to cache using squashfs
-        def generate_squashfs_image(image, oci_image, cache_file):
-            # Create a TMP directory in /dev/shm
-            image_size = _compute_path_size(oci_image)
-            tmp_bundle = _cont_get_tmp_directory(size=image_size)
-            # Extract the OCI bundle in it
+    def _generate_squashfs_image(self, image, oci_image, cache_file):
+        # Create a TMP directory in /dev/shm
+        tmp_bundle = _cont_get_tmp_directory(oci_image)
+        cleanup_func = lambda: chmod_rm(tmp_bundle)
+        pcocc_at_exit.register(cleanup_func)
 
-            def remove_tmp_bundle():
-                chmod_rm(tmp_bundle)
+        try:
+            ContImage.oci_bundle(oci_image, tmp_bundle)
 
-            # Ensure cleanup using atexit
-            pcocc_at_exit.register(remove_tmp_bundle)
+            if not spawn.find_executable("mksquashfs"):
+                raise PcoccError("Could not locate 'mksquashfs'"
+                                 " to extract the container")
+
+            print("Generating squashfs image ...")
+
+            rootfs = path_join(tmp_bundle, "rootfs")
+            # FIXMEPARA
+            # if os.path.exists(rootfs):
+            self._cont_squashfs_populate_systematic_mounts(rootfs)
+
+            base_cmd = ["mksquashfs",
+                        tmp_bundle,
+                        cache_file.path,
+                        "-noappend",
+                        "-all-root",
+                        # Disable compression for faster creation
+                        "-noDataCompression",
+                        "-noInodeCompression",
+                        "-noFragmentCompression",
+                        "-noXattrCompression"]
 
             try:
-                ContImage.oci_bundle(oci_image, tmp_bundle)
-                # Invoke mksquashfs on it
-                if not spawn.find_executable("mksquashfs"):
-                    raise PcoccError("Could not locate 'mksquashfs'"
-                                     " to extract the container")
-
-                print("Generating squashfs image ...")
-
-                rootfs = path_join(tmp_bundle, "rootfs")
-                if os.path.exists(rootfs):
-                    self._cont_squashfs_populate_systematic_mounts(rootfs)
-
-                base_cmd = ["mksquashfs",
-                            tmp_bundle,
-                            cache_file.path,
-                            "-noappend",
-                            "-all-root",
-                            # No need to compress
-                            "-noDataCompression",
-                            "-noInodeCompression",
-                            "-noFragmentCompression",
-                            "-noXattrCompression"]
-
-                try:
-                    if self._mksquashfs_has_progess():
-                        # We can show a progress bar do a check_call
-                        subprocess.check_call(base_cmd + ["-quiet"])
-                    else:
-                        # We prefer to hide the output run in background
-                        # and how output only in case of error
-                        mksh = subprocess.Popen(base_cmd,
-                                                stdout=subprocess.PIPE,
-                                                stderr=subprocess.PIPE)
-                        stdout, stderr = mksh.communicate()
-                        ret = mksh.returncode
-                        if ret != 0:
-                            print(stdout + stderr)
-                            raise subprocess.CalledProcessError(ret,
-                                                                base_cmd)
-                except (subprocess.CalledProcessError, OSError):
-                    raise PcoccError("Failed to generate squashfs image")
-            finally:
-                remove_tmp_bundle()
-                pcocc_at_exit.deregister(remove_tmp_bundle)
-
-        # Add to cache using the bundle extraction method
-        def extract_oci_bundle(image, oci_image, cache_dir):
-            # Convert to bundle with Pcocc / Umoci / oci-image-tools
-            ContImage.oci_bundle(oci_image, cache_dir.path)
-
-        # Add to cache using external extraction tools
-        def extract_oci_bundle_umoci(image, oci_image, cache_dir):
-            try:
-                if spawn.find_executable("umoci"):
-                    subprocess.check_call(["umoci",
-                                           "--log",
-                                           "error",
-                                           "unpack",
-                                           "--rootless",
-                                           "--image",
-                                           oci_image,
-                                           cache_dir])
+                if self._mksquashfs_has_progess():
+                    # We can show a progress bar do a check_call
+                    subprocess.check_call(base_cmd + ["-quiet"])
                 else:
-                    # No bundle extraction tool found
-                    raise PcoccError("Could not locate 'umoci'"
-                                     " to extract the container")
-            except subprocess.CalledProcessError as e:
-                raise PcoccError("Failed to extract bundle " + str(e))
+                    # We prefer to hide the output run in background
+                    # and how output only in case of error
+                    mksh = subprocess.Popen(base_cmd,
+                                            stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE)
+                    stdout, stderr = mksh.communicate()
+                    ret = mksh.returncode
+                    if ret != 0:
+                        print(stdout)
+                        sys.stderr.write(stderr)
+                        raise subprocess.CalledProcessError(ret, base_cmd)
+            except (subprocess.CalledProcessError, OSError):
+                raise PcoccError("Failed to generate squashfs image")
+        finally:
+            cleanup_func()
+            pcocc_at_exit.deregister(cleanup_func)
 
-        if kind == "squashfs":
-            # If squashfs is enabled try to export as squashfs
-            return self._cont_add_to_cache(self.image,
-                                           self.src_store,
-                                           self.meta,
-                                           "cached_squashfs",
-                                           generate_squashfs_image,
-                                           etype="FILE")
-            # If the user wants to use regular bundles
-            # we expect pcocc to be installed as such
-            # and therefore we do not use extra logic to fallback
-
-        #
-        # "Regular" bundles
-        #
-        elif kind == "rootfs":
-            # Add to cache using the bundle extraction method
-            # using internal OCI driver
-            try:
-                return self._cont_add_to_cache(self.image,
-                                               self.src_store,
-                                               self.meta,
-                                               "cached_bundle",
-                                               extract_oci_bundle)
-            except (PcoccError, subprocess.CalledProcessError):
-                # Something went wrong
-                pass
-
-            # Attemp to add using UMOCI as external tool
-            try:
-                return self._cont_add_to_cache(self.image,
-                                               self.src_store,
-                                               self.meta,
-                                               "cached_bundle",
-                                               extract_oci_bundle_umoci)
-            except PcoccError:
-                raise PcoccError("Failed to extract OCI bundle using all"
-                                 " methods you may have to install UMOCI")
-        else:
-            raise PcoccError("No such image kind {}".format(kind))
+    def _extract_oci_bundle(self, image, oci_image, cache_dir):
+        ContImage.oci_bundle(oci_image, cache_dir.path)
 
 
 class ContImage(object):
@@ -876,8 +662,8 @@ class ContImage(object):
         oci.load(checksig=False)
         oci.extract_bundle(destination_dir)
 
-    @staticmethod
-    def export(source_path, dst_fmt, dst_path, src_fmt="oci"):
+    @classmethod
+    def export(cls, source_path, dst_fmt, dst_path, src_fmt="oci"):
         """Export a container image (from objectstore).
 
         Arguments:
@@ -887,13 +673,12 @@ class ContImage(object):
             src_format {str} -- output image format (optionnal)
 
         """
-        ContImage.convert(source_path,
-                          dst_path,
-                          src_fmt,
-                          dst_fmt)
+        cls.convert(source_path,
+                    dst_path,
+                    src_fmt,
+                    dst_fmt)
 
     @staticmethod
-
     def convert_singularity_to_oci(src_path):
         if not spawn.find_executable("unsquashfs"):
             # Stop early is squashfs-tools is not installed
@@ -987,14 +772,15 @@ fi
 
         return path, fmt, args
 
-    @staticmethod
-    def skopeo_convert(src_path,
+    @classmethod
+    def skopeo_convert(cls,
+                       src_path,
                        dest_path,
                        src_fmt,
                        dst_format,
                        docker=None):
 
-        src_path, src_fmt, args = ContImage.skopeo_parse(src_path, src_fmt, docker, 'src-')
+        src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, docker, 'src-')
 
         if not args:
             args = ["--src-tls-verify=false"]
@@ -1010,8 +796,9 @@ fi
             os.unlink(dest_path)
             raise PcoccError("An error occured during container conversion")
 
-    @staticmethod
-    def pre_convert(src_path,
+    @classmethod
+    def pre_convert(cls,
+                    src_path,
                     src_fmt,
                     tmp_path):
 
@@ -1021,21 +808,22 @@ fi
             # Extract singularity images to an OCI bundle first so that OCI
             # compliant tools may manage it
             dst_path = os.path.join(tmp_path, 'simg')
-            ContImage.convert_singularity_to_oci(src_path)
+            cls.convert_singularity_to_oci(src_path)
             src_fmt = "oci"
             did_convert = True
 
         return did_convert, dst_path, src_fmt
 
-    @staticmethod
-    def prepare_skopeo_cache(src_path,
+    @classmethod
+    def prepare_skopeo_cache(cls,
+                             src_path,
                              src_fmt,
                              dst_path,
                              dst_store,
                              docker=None
                          ):
 
-        src_path, src_fmt, args = ContImage.skopeo_parse(src_path, src_fmt, docker, '')
+        src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, docker, '')
 
         cmd = ["skopeo", "inspect", "--tls-verify=false" ] + args + [src_fmt + ":" + src_path]
 
@@ -1066,8 +854,9 @@ fi
 
             os.link(p, os.path.join(blobs_path, algorithm, enc))
 
-    @staticmethod
-    def convert(src_path,
+    @classmethod
+    def convert(cls,
+                src_path,
                 dst_path,
                 src_fmt,
                 dst_format="oci",
@@ -1091,21 +880,21 @@ fi
             str -- output image format
 
         """
-        did_convert, src_path, src_fmt = ContImage.pre_convert(src_path,
-                                                               src_fmt,
-                                                               dst_path)
+        did_convert, src_path, src_fmt = cls.pre_convert(src_path,
+                                                         src_fmt,
+                                                         dst_path)
 
-        ContImage.prepare_skopeo_cache(src_path,
-                                       src_fmt,
-                                       dst_path,
-                                       dst_store,
-                                       docker)
-
-        ContImage.skopeo_convert(src_path,
-                                 dst_path,
+        cls.prepare_skopeo_cache(src_path,
                                  src_fmt,
-                                 dst_format,
+                                 dst_path,
+                                 dst_store,
                                  docker)
+
+        cls.skopeo_convert(src_path,
+                           dst_path,
+                           src_fmt,
+                           dst_format,
+                           docker)
 
         if did_convert:
             shutil.rmtree(src_path)
@@ -1534,17 +1323,16 @@ class ImageMgr(object):
                                                                      str(e)))
             finally:
                 remove_tmp_path()
-                # Regular cleanup done deregister from atexit
                 pcocc_at_exit.deregister(remove_tmp_path)
 
         meta = dst_store.put_meta(dst_name, 0, kind.name, image_blobs,
                                   image_custom_meta)
 
         if kind == ImageType.cont:
-            # If the image was a container we try to immediately
-            # generate corresponding bundle for user-friendlyness
-            with ContainerView(dst_name, "bundle") as bundle:
-                logging.debug("Bundle generated in %s", bundle)
+            # We prepare a bundle view that we don't use now to make
+            # sure the bundle cache is populated at import time
+            ContainerBundleView(dst_name).prepare()
+            ContainerBundleView(dst_name).cleanup()
 
         return meta
 
@@ -1584,8 +1372,8 @@ class ImageMgr(object):
             storage_format = meta["custom_meta"]["target_format"]
 
             if storage_format == "oci":
-                # For OCI we need to rebuild an OCI view
-                with ContainerView(src_uri, view_type="oci") as source_path:
+                # For OCI we need to rebuild a layout view
+                with ContainerLayoutView(src_uri) as source_path:
                     ContImage.export(source_path,
                                      dst_fmt,
                                      dst_path,

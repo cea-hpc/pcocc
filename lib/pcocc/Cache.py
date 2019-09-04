@@ -123,14 +123,14 @@ class CacheBlob(object):
         self.invalidate()
         return self
 
-    def __exit__(self, typ, value, traceback):
+    def __exit__(self, typ, value, tb):
         if (typ is None and
                 value is None and
-                traceback is None):
+                tb is None):
             self.cache.commit(self)
         else:
             # Someting went wrong delete the item
-            self.cache.delete(self.key)
+            self.remove()
 
 
 class Cache(dict):

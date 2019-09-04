@@ -1301,9 +1301,9 @@ class ContainerOptions(dict):
     pcocc_container_option_schema = """
     type: object
     properties:
-        container_tmp_path:
+        container_shm_work_path:
             type: string
-        container_tmp_path_trsh_mb:
+        container_shm_work_limit:
             type: integer
         use_squashfs:
             type: boolean
@@ -1318,8 +1318,6 @@ class ContainerOptions(dict):
         docker_use_ip_address:
             type: boolean
         docker_pod:
-            type: string
-        docker_test_path:
             type: string
         use_runc:
             type: boolean
@@ -1346,8 +1344,8 @@ class ContainerOptions(dict):
         self["enable_oci_hooks"] = False
         self["use_squashfs"] = False
         self["squashfs_image_mountpoints"] = []
-        self["container_tmp_path"] = "/dev/shm"
-        self["container_tmp_path_trsh_mb"] = 100
+        self["container_shm_work_path"] = "/dev/shm"
+        self["container_shm_work_limit"] = 250
         self["use_runc"] = False
 
     @property
@@ -1355,16 +1353,18 @@ class ContainerOptions(dict):
         return self["use_runc"]
 
     @property
-    def container_tmp_path(self):
-        return self["container_tmp_path"]
+    def container_shm_work_path(self):
+        return self["container_shm_work_path"]
 
     @property
-    def container_tmp_path_trsh_mb(self):
-        return self["container_tmp_path_trsh_mb"]
+    def container_shm_work_limit(self):
+        return self["container_shm_work_limit"]
 
     @property
     def squashfs_image_mountpoints(self):
-        return self["squashfs_image_mountpoints"]
+        return set(self["squashfs_image_mountpoints"] + ["/etc/resolv.conf",
+                                                         "/etc/group",
+                                                         "/etc/passwd"])
 
     @property
     def use_squashfs(self):

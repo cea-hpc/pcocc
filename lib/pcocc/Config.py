@@ -28,7 +28,7 @@ from os.path import expanduser
 from .NetUtils import Tracker
 from pcocc.Error import InvalidConfigurationError
 
-DEFAULT_CONF_DIR = '/etc/pcocc'
+DEFAULT_CONF_DIR = os.environ.get('PCOCC_SYSTEM_CONF_DIR', '/etc/pcocc')
 DEFAULT_RUN_DIR = '/var/run/pcocc'
 DEFAULT_USER_CONF_DIR = os.environ.get('PCOCC_USER_CONF_DIR', '%homedir/.pcocc/')
 PCOCC_DEBUG_FLAG = False

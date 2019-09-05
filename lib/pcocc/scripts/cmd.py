@@ -2399,59 +2399,48 @@ def pcocc_run_internal(jobid,
              context_settings=dict(allow_interspersed_args=False),
              short_help='Run a program in VM or container')
 @click.option('-j', '--jobid', type=int,
-              help='Jobid of the selected cluster')
+              help='Select allocation or cluster by job id')
 @click.option('-J', '--jobname', type=str,
-              help='Job name of the selected cluster')
+              help='Select allocation or cluster by job name')
 @click.option('-u', '--user', type=str, default=None,
-              help='Username to run the command')
+              help='Username to use to run the command')
 @click.option('--script', type=str, default=None,
-              help='Script to run')
+              help='Execute a script stored on the host')
 @click.option('-w', '--nodelist', type=str,
-              help='Where to run the command (Nodelist)')
-@click.option('-t', '--tty', is_flag=True, default=False,
-              help='Wether to launch in a TTY (forces n=1)')
+              help='Nodeset on which to the command')
+@click.option('--pty', is_flag=True, default=False,
+              help='Execute first task in a pseudo terminal')
 @click.option('-I', '--image', type=str,
-              help='Container image to launch')
+              help='Spawn a container to run the command')
 @click.option('-N', '--node', type=int, default=None,
-              help='Number of nodes to launch on')
+              help='Number of nodes to use for running the command ')
 @click.option('-n', '--process', type=int,
-              help='Number of process to launch')
+              help='Number of processes to launch')
 @click.option('-c', '--core', type=int, default=None,
-              help='Number of core(s) per process')
+              help='Number of cores per process')
 @click.option('-s', '--singleton', is_flag=True, default=False,
-              help='Run without batch manager support')
+              help='Run a single task locally')
 @click.option('-p', '--partition', type=str, default=None,
-              help='Partition on which to run (when allocating)')
-@click.option('-m', '--mirror-env', is_flag=True, default=False,
-              help='Propagate local environment variables (default False)')
-@click.option('--no-defaults', is_flag=True,
-              help='Do not mount inside the container')
-@click.option('--no-user', is_flag=True,
-              help='Do not inject the user inside the container')
+              help='Partition on which to run')
+@click.option('--mirror-env', is_flag=True, default=False,
+              help='Propagate local environment variables')
+@click.option('--no-defaults', is_flag=True, default=False,
+              help='Do not apply default container configuration')
+@click.option('--no-user', is_flag=True, default=False,
+              help='Do not inject the user inside the container or VM')
 @click.option('-e', '--env', type=str, multiple=True,
-              help=('Environment variables passed to the target program'
-                    ' (syntax A[=B] or re(REGEXPR))'))
-@click.option('-P', '--path-prefix', type=str, multiple=True,
-              help='Prepend variables in $PATH fashion (syntax A[=B])')
-@click.option('-S', '--path-suffix', type=str, multiple=True,
-              help='Append variables in $PATH fashion (syntax A[=B])')
-@click.option('-v', '--mount', type=str, multiple=True,
-              help=('Mount a directory in target env (vm or cont)'
-                    ' format src=/XX,dest=/XX,type=XX,opt=A,B=X,C'
-                    ' or src:dest'))
-@click.option('--cwd', type=str,
-              help=('Work directory for the target executable,'
-                    ' If not set host PWD is propagated.'
-                    ' If the container defines a workdir'
-                    ' different than "/"'
-                    ' this value supersedes the transparent'
-                    ' propagation. In order to use the'
-                    ' container default you can specify "-"'))
+              help='Environment variables to propagate in the container or VM')
+@click.option('--path-prefix', type=str, multiple=True,
+              help='Prepend values to a PATH type variable')
+@click.option('--path-suffix', type=str, multiple=True,
+              help='Append values to a PATH type variable')
+@click.option('--mount', type=str, multiple=True,
+              help='Mount a host directory in the container')
+@click.option('--cwd', type=str, help='Work directory for the target executable')
 @click.option('-M', '--module', type=str, default=None, multiple=True,
-              help=('Define a list of module configuration to inject'
-                    ' in the container/VM (can be comma separated list)'))
-@click.option('-E', '--entry-point', type=str, default=None,
-              help='Changes container entry point (in docker semantics)')
+              help='Container configuration modules to apply')
+@click.option('--entry-point', type=str, default=None,
+              help='Override entry point of a Docker container')
 @click.argument('cmd', nargs=-1, type=click.UNPROCESSED)
 @per_cluster_cli(False, allow_no_alloc=True)
 def pcocc_run_main(jobid,
@@ -2459,7 +2448,7 @@ def pcocc_run_main(jobid,
                    user,
                    script,
                    nodelist,
-                   tty,
+                   pty,
                    image,
                    node,
                    process,
@@ -2498,11 +2487,11 @@ def pcocc_run_main(jobid,
             # Assume n=1 if not configured otherwise
             process = 1
 
-        if tty:
+        if pty:
             if process > 1:
-                raise PcoccError("Cannot run in a TTY on more than 1 process")
-            if not os.isatty(sys.stdout.fileno()):
-                raise PcoccError("Cannot run in a TTY as stdout is not a TTY")
+                raise PcoccError("Cannot run in a PTY on more than 1 process")
+            if not os.isapty(sys.stdout.fileno()):
+                raise PcoccError("Cannot run in a PTY as stdout is not a PTY")
 
         if cluster:
             # We are inside a pcocc allocation
@@ -2568,7 +2557,7 @@ def pcocc_run_main(jobid,
         else:
             runner.set_argv(cmd)
 
-        if tty:
+        if pty:
             # Also propagate the TERM variable
             if "TERM" in os.environ:
                 Run.Env.append(runner, ["TERM"])

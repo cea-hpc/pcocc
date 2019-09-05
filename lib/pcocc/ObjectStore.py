@@ -213,6 +213,7 @@ class HierarchObjectStore(object):
             except ObjectNotFound:
                 pass
 
+        raise ObjectNotFound(name, repo, revision)
 
     def get_revisions(self, name, repo=None):
         if repo:

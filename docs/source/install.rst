@@ -14,6 +14,7 @@ pcocc makes use of several external components or services among which:
 * Open vSwitch
 * An etcd database and the etcd python bindings
 * Qemu and KVM
+* The gRPC framework
 
 For virtual Infiniband networks:
 
@@ -37,6 +38,7 @@ This guide also assumes that you already have a working Slurm cluster. The follo
    deps/openvswitch
    deps/slurm-spank
    deps/python-etcd
+   deps/grpc
 
 RPM based installation
 **********************

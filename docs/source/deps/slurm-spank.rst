@@ -8,11 +8,13 @@ pcocc uses the Slurm SPANK plugin infrastructure, and in particular, its LUA int
 Installing SPANK
 ****************
 
-You may download the SPANK plugins from their `Github <https://github.com/chaos/slurm-spank-plugins>`_. In this example download the latest tarball from the `releases page <https://github.com/chaos/slurm-spank-plugins/releases>`_ to build a RPM: ::
+You may download the SPANK plugins from their `Github <https://github.com/chaos/slurm-spank-plugins>`_. As of this writing, there is an unresolved bug in this plugin, which we will fix by applying a patch. Download the latest tarball from the `releases page <https://github.com/chaos/slurm-spank-plugins/releases>`_ to build a RPM: ::
 
     wget https://github.com/chaos/slurm-spank-plugins/archive/0.37.tar.gz
+    wget https://storage.googleapis.com/google-code-attachments/slurm-spank-plugins/issue-3/comment-0/slurm-spank-plugins-0.23-get_item.patch
     mkdir -p $HOME/rpmbuild/SOURCES/
     cp 0.37.tar.gz $HOME/rpmbuild/SOURCES/slurm-spank-plugins-0.37.tgz
+    mv slurm-spank-plugins-0.23-get_item.patch $HOME/rpmbuild/SOURCES/
     tar xvf 0.37.tar.gz
 
 In the source directory, edit the RPM specfile as follows (adapt to the current version number):
@@ -23,6 +25,11 @@ In the source directory, edit the RPM specfile as follows (adapt to the current 
     Name:  slurm-spank-plugins
     Version: 0.37
     Release: 1
+    Patch0: slurm-spank-plugins-0.23-get_item.patch
+
+And apply the patch in the `%package lua` section, beetwen `%prep` and `%setup`::
+
+    %patch0 -p1
 
 Proceed to building the RPM after installing required dependencies::
 

@@ -356,12 +356,11 @@ def _cont_get_tmp_directory(layout_path):
 
 
 class ContainerView(object):
-    def __init__(self, image):
-        self.image = image
-        # FIXMEPARA: should this be parsed earlier
-        self.meta, _ = Config().images.get_image(image)
-        repo = self.meta["repo"]
-        self.src_store = Config().images.object_store.get_repo(repo)
+    def __init__(self, image_uri):
+        self.image_uri = image_uri
+        self.meta, _ = Config().images.get_image(image_uri)
+        self.src_store = Config().images.object_store.get_repo(self.meta["repo"])
+        self.atexit_func = None
 
     def prepare(self):
         pass
@@ -1069,9 +1068,6 @@ class ImageMgr(object):
                                           revision=revision,
                                           repo=repo)
 
-        if meta is None:
-            return None, None
-
         return meta, self.object_store.get_repo(meta['repo']).get_obj_path(
             'data',
             meta['data_blobs'][-1])
@@ -1296,7 +1292,6 @@ class ImageMgr(object):
 
         image_blobs = []
         image_custom_meta = {}
-        image_custom_meta["source_format"] = src_fmt
 
         click.secho("Storing image in repository '{0}' as '{1}' ... "
                     .format(dst_store.name,
@@ -1304,10 +1299,6 @@ class ImageMgr(object):
 
         if kind == ImageType.vm:
             tmp_path = dst_store.tmp_file(ext=".qcow2")
-
-            # VM images are stored in QCOW2 in pcocc repo
-            image_custom_meta["target_format"] = "qcow2"
-
             try:
                 VMImage.convert(src_path, tmp_path, src_fmt)
             except PcoccError as e:
@@ -1350,8 +1341,9 @@ class ImageMgr(object):
         if kind == ImageType.cont:
             # We prepare a bundle view that we don't use now to make
             # sure the bundle cache is populated at import time
-            ContainerBundleView(dst_name).prepare()
-            ContainerBundleView(dst_name).cleanup()
+            dst_uri = '{}:{}'.format(dst_store.name, dst_name)
+            ContainerBundleView(dst_uri).prepare()
+            ContainerBundleView(dst_uri).cleanup()
 
         return meta
 
@@ -1387,21 +1379,7 @@ class ImageMgr(object):
                                                  meta['data_blobs'][-1])
             VMImage.export(source_path, dst_fmt, dst_path)
         elif kind == ImageType.cont:
-            # Just in case we store something else than OCI
-            storage_format = meta["custom_meta"]["target_format"]
-
-            if storage_format == "oci":
-                # For OCI we need to rebuild a layout view
-                with ContainerLayoutView(src_uri) as source_path:
-                    ContImage.export(source_path,
-                                     dst_fmt,
-                                     dst_path,
-                                     src_fmt=storage_format)
-            else:
-                # Get the blob directly
-                source_path = src_store.get_obj_path('data',
-                                                     meta['data_blobs'][-1])
-
+            with ContainerLayoutView(src_uri) as source_path:
                 ContImage.export(source_path,
                                  dst_fmt,
                                  dst_path,

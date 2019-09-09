@@ -559,7 +559,8 @@ class ObjectStore(object):
                 target = self.get_meta_path(name, r, check_exists=True)
             except:
                 raise ObjectNotFound(name, self._name, r)
-        if repo_config['version'] < 2:
+
+        if self.version < 2:
             self._unlink_and_cleanup_dir(target)
         else:
             os.unlink(target)

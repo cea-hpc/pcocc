@@ -2251,12 +2251,7 @@ def pcocc_image_cache_list():
 def pcocc_image_cache_rm(image):
     try:
         config = load_config(process_type=ProcessType.OTHER)
-        # First make sure that the image exists
-        meta, _ = config.images.get_image(image)
-        if not meta:
-            raise PcoccError("Image {} could not".format(image) +
-                             " be found in repositories")
-        # And then proceed to clean it from the cache
+        _, _ = config.images.get_image(image)
         for k in CACHEABLE_ITEMS:
             key = config.images.cache_key(image, k)
             del config.images.object_store.cache[key]

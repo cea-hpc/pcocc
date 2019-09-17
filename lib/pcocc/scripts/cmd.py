@@ -252,8 +252,10 @@ def pcocc_display(jobid, jobname, print_opts, vm):
               help='Job name of the selected cluster')
 @click.option('--user',
               help='Select cluster among jobs of the specified user')
+@click.option('-p', '--port', type=int, default=22,
+              help='Port to connect to on the remote host')
 @click.argument('ssh-opts', nargs=-1, type=click.UNPROCESSED)
-def pcocc_ssh(jobid, jobname, user, ssh_opts):
+def pcocc_ssh(jobid, jobname, user, ssh_opts, port):
     """Connect to a VM via ssh
 
     This requires the VM to have its ssh port reverse NAT'ed to the
@@ -277,7 +279,7 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts):
 
         vm_index = int(match.group(2))
         remote_host = cluster.vms[vm_index].get_host()
-        ssh_port = find_vm_rnat_port(cluster, vm_index)
+        ssh_port = find_vm_rnat_port(cluster, vm_index, port=port)
         ssh_opts[arg_index] = ssh_opts[arg_index].replace("vm%d"%vm_index,
                                                           remote_host)
         s_ctl = subprocess.Popen(['ssh', '-p', '%s'%(ssh_port)] +

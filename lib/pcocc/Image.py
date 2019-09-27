@@ -663,7 +663,7 @@ class ContImage(object):
     @staticmethod
     def oci_bundle(oci_image_dir, destination_dir):
         oci = OciImage(oci_image_dir)
-        oci.load(checksig=False)
+        oci.load()
         oci.extract_bundle(destination_dir)
 
     @classmethod
@@ -921,9 +921,8 @@ fi
     def add_oci_image_to_repo(image_name,
                               dst_store,
                               oci_image):
-        # First lets load the image
         oci = OciImage(oci_image)
-        oci.load(checksig=True)
+        oci.load(check_digest=True)
 
         oci_index = oci.index
         all_blobs = oci.blobs_resolve(add_path=True)

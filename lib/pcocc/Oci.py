@@ -398,7 +398,7 @@ class OciManifest(object):
             ret.append(self.data["config"])
         return ret
 
-    def validate(self, oci, checksig=False):
+    def validate(self, oci, check_digest=False):
         for l in self.data["layers"]:
             if "digest" not in l:
                 raise PcoccError("No digest in layer"
@@ -406,7 +406,7 @@ class OciManifest(object):
             esize = None
             if "size" in l:
                 esize = int(l["size"])
-            oci.check_blob(l["digest"], esize=esize, checksig=checksig)
+            oci.check_blob(l["digest"], esize=esize, check_digest=check_digest)
 
     def _get_archive_list(self, oci, output_dir):
         archives = []
@@ -659,14 +659,14 @@ class OciBlobs(object):
         sp = blob_id.split(":")
         if len(sp) != 2:
             raise PcoccError("Bad blob hash expected TYPE:HASH")
-        kind = sp[0]
+        alg = sp[0]
         h = sp[1]
-        return kind, h
+        return alg, h
 
     def get_blob_path(self, blob_id):
         raise NotImplementedError()
 
-    def put_blob(self, kind, digest, path, symlink=False):
+    def put_blob(self, alg, digest, path, symlink=False):
         raise NotImplementedError()
 
     def mirror(self, blob_id, src_path):
@@ -685,7 +685,6 @@ class OciBlobs(object):
         return digest, filelen
 
     def register_blob(self, data):
-        # Hash the data
         d = hashlib.sha256()
         d.update(data)
         digest = d.hexdigest()
@@ -700,11 +699,11 @@ class OciBlobs(object):
 
         return digest, len(data)
 
-    def checksum_file(self, path, kind="sha256"):
-        if kind == "sha256":
+    def checksum_file(self, path, alg="sha256"):
+        if alg == "sha256":
             return self.shasum_file(path)
         else:
-            raise PcoccError("Checksum kind not implemented ", kind)
+            raise PcoccError("Checksum algorithm {} is not implemented".format(alg))
 
     def shasum_file(self, path):
         d = hashlib.sha256()
@@ -725,8 +724,8 @@ class OciBlobs(object):
             ret = json.load(f)
         return ret
 
-    def check_blob(self, blob_id, esize=None, checksig=False):
-        kind, h = self.split_blob_id(blob_id)
+    def check_blob(self, blob_id, esize=None, check_digest=False):
+        alg, h = self.split_blob_id(blob_id)
         bpath = self.get_blob_path(blob_id)
 
         if not os.path.isfile(bpath):
@@ -747,16 +746,16 @@ class OciBlobs(object):
             else:
                 print("\tSize OK ({})".format(human_size(fsize)))
                 up += oneup
-        if checksig:
-            print("\tChecking signature ...")
-            digest, _ = self.checksum_file(bpath, kind=kind)
+        if check_digest:
+            print("\tChecking digest ...")
+            digest, _ = self.checksum_file(bpath, alg=alg)
             if digest != h:
-                raise PcoccError("Signature mismatch"
+                raise PcoccError("Digest mismatch"
                                  " for '{}'({}) had '{}'".format(h,
-                                                                 kind,
+                                                                 alg,
                                                                  digest))
             else:
-                print("\033[2K\033[F\tSignature OK")
+                print("\033[2K\033[F\tDigest OK")
                 up += oneup
         print(up)
         print("\033[F\033[2K\033[F")
@@ -787,8 +786,8 @@ class OciFileBlobs(OciBlobs):
                                  " '{}' expected '1.0.0'".format(layoutv))
 
     def mirror(self, blob_id, src_path):
-        kind, h = self.split_blob_id(blob_id)
-        self.put_blob(kind, h, src_path, symlink=True)
+        alg, h = self.split_blob_id(blob_id)
+        self.put_blob(alg, h, src_path, symlink=True)
 
     def set_index(self, data):
         # Create the OCI layout file
@@ -806,15 +805,15 @@ class OciFileBlobs(OciBlobs):
         return data
 
     def get_blob_path(self, blob_id):
-        kind, h = self.split_blob_id(blob_id)
-        return path_join(self.oci_image, "blobs", kind, h)
+        alg, h = self.split_blob_id(blob_id)
+        return path_join(self.oci_image, "blobs", alg, h)
 
-    def put_blob(self, kind, digest, path, symlink=False):
-        self._try_makedirs(path_join(self.blobdir, kind))
+    def put_blob(self, alg, digest, path, symlink=False):
+        self._try_makedirs(path_join(self.blobdir, alg))
         if symlink:
-            os.symlink(path, path_join(self.blobdir, kind, digest))
+            os.symlink(path, path_join(self.blobdir, alg, digest))
         else:
-            shutil.copy(path, path_join(self.blobdir, kind, digest))
+            shutil.copy(path, path_join(self.blobdir, alg, digest))
 
     def _try_makedirs(self, path):
         try:
@@ -846,7 +845,7 @@ class OciRepoBlobs(OciBlobs):
     def get_blob_path(self, blob_id):
         return self.repo.get_obj_path("data", blob_id, check_exists=True)
 
-    def put_blob(self, kind, digest, path, symlink=False):
+    def put_blob(self, alg, digest, path, symlink=False):
         self.repo.put_data_blob(self, path, known_hash=digest)
 
 
@@ -907,7 +906,7 @@ class OciImage(object):
         raise PcoccError("Could not locate an image "
                          " for os={} and arch={}".format(os, arch))
 
-    def load(self, checksig=False):
+    def load(self, check_digest=False):
         self.data = self.oci.index
         for cont in self.data["manifests"]:
             if cont["mediaType"] != "application/vnd.oci.image.manifest.v1+json":
@@ -922,7 +921,7 @@ class OciImage(object):
                                     os=cont["platform"]["os"],
                                     label=label)
             nc.load(self.oci, cont["digest"])
-            nc.validate(self.oci, checksig=checksig)
+            nc.validate(self.oci, check_digest=check_digest)
 
     def new_container(self, arch="amd64", os="linux", label="latest"):
         nc = OciManifest(arch, os, label)

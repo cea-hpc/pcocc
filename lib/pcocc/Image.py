@@ -43,18 +43,18 @@ from .Oci import OciImage, OciRepoBlobs
 from .Misc import path_join, pcocc_at_exit
 
 class ImageType(Enum):
-    """Enum describing a type of Image (CONT or VM)."""
+    """Enum describing a type of Image (CTR or VM)."""
 
     none = 1
     vm = 2
-    cont = 3
+    ctr = 3
 
     @classmethod
     def from_str(cls, texttype):
         """Convert a str description of a type to an enum of this type.
 
         Arguments:
-            texttype {str} -- "vm" or "cont" depending on type
+            texttype {str} -- "vm" or "ctr" depending on type
 
         Raises:
             PcoccError -- Could not parse input type
@@ -66,8 +66,8 @@ class ImageType(Enum):
         if texttype.lower() == cls.vm.name.lower():
             return cls.vm
 
-        if texttype.lower() == cls.cont.name.lower():
-            return cls.cont
+        if texttype.lower() == cls.ctr.name.lower() or texttype.lower() == "cont"  :
+            return cls.ctr
 
         raise PcoccError("No such image type {}".format(texttype))
 
@@ -85,7 +85,7 @@ class ImageType(Enum):
         if kind == cls.vm:
             return "raw"
 
-        if kind == cls.cont:
+        if kind == cls.ctr:
             return "docker-archive"
 
         return None
@@ -108,7 +108,7 @@ class ImageType(Enum):
             return cls.none
 
         if fmt in ContImage.known_container_image_formats:
-            return cls.cont
+            return cls.ctr
 
         if fmt in VMImage.known_vm_image_formats:
             return cls.vm
@@ -360,6 +360,10 @@ class ContainerView(object):
     def __init__(self, image_uri):
         self.image_uri = image_uri
         self.meta, _ = Config().images.get_image(image_uri)
+        kind = ImageType.from_str(self.meta['kind'])
+        if kind != ImageType.ctr:
+            raise PcoccError("{} is not a container image".format(image_uri))
+
         self.src_store = Config().images.object_store.get_repo(self.meta["repo"])
         self.atexit_func = None
 
@@ -1299,7 +1303,7 @@ class ImageMgr(object):
                                                                      str(e)))
             h = dst_store.put_data_blob(tmp_path)
             image_blobs = [h]
-        elif kind == ImageType.cont:
+        elif kind == ImageType.ctr:
             tmp_oci = dst_store.tmp_dir()
             def remove_tmp_oci():
                 shutil.rmtree(tmp_oci)
@@ -1330,7 +1334,7 @@ class ImageMgr(object):
         meta = dst_store.put_meta(dst_name, 0, kind.name, image_blobs,
                                   image_custom_meta)
 
-        if kind == ImageType.cont:
+        if kind == ImageType.ctr:
             # We prepare a bundle view that we don't use now to make
             # sure the bundle cache is populated at import time
             dst_uri = '{}:{}'.format(dst_store.name, dst_name)
@@ -1358,11 +1362,11 @@ class ImageMgr(object):
                                                             dst_fmt)
 
         if guessed_kind != kind:
-            raise PcoccError("Cannot export image of kind '{}'"
-                             " to format '{}' of kind '{}'"
+            raise PcoccError("Cannot export {} image"
+                             " to {} format '{}'"
                              .format(kind.name,
-                                     dst_fmt,
-                                     guessed_kind.name))
+                                     guessed_kind.name,
+                                     dst_fmt))
 
         src_store = self.object_store.get_repo(meta["repo"])
 
@@ -1370,7 +1374,7 @@ class ImageMgr(object):
             source_path = src_store.get_obj_path('data',
                                                  meta['data_blobs'][-1])
             VMImage.export(source_path, dst_fmt, dst_path)
-        elif kind == ImageType.cont:
+        elif kind == ImageType.ctr:
             with ContainerLayoutView(src_uri) as source_path:
                 ContImage.export(source_path,
                                  dst_fmt,
@@ -1400,7 +1404,7 @@ class ImageMgr(object):
             path = src_store.get_obj_path('data', b)
             dst_store.put_data_blob(path, b)
 
-        return dst_store.put_meta(dst_name, 0, src_meta["kind"],
+        return dst_store.put_meta(dst_name, 0, ImageType.from_str(src_meta["kind"]).name,
                                   src_meta["data_blobs"],
                                   src_meta["custom_meta"])
 
@@ -1460,7 +1464,7 @@ class ImageMgr(object):
         """
         if kind == ImageType.vm:
             VMImage.known_format(fmt)
-        elif kind == ImageType.cont:
+        elif kind == ImageType.ctr:
             ContImage.known_format(fmt)
         else:
             raise PcoccError("Container Image format not supported: " + fmt)

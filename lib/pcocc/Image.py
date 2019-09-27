@@ -29,6 +29,7 @@ import tempfile
 import time
 import hashlib
 import ObjectStore
+import Docker
 
 from enum import Enum
 from os.path import expanduser
@@ -753,21 +754,12 @@ fi
         return temp_oci
 
     @staticmethod
-    def skopeo_parse(path, fmt, docker, prefix='src-'):
+    def skopeo_parse(path, fmt, vm, prefix='src-'):
         args = []
         if fmt == "pcocc-docker-daemon":
+            args += ["--{}daemon-host".format(prefix), Docker.get_docker_uri(vm),
+                     "--{}cert-dir".format(prefix), Docker.certs_dir("client")]
             fmt = "docker-daemon"
-            try:
-                vm_name, path = path.split('/', 1)
-                vm_index = re.match(r'vm(\d+)$', vm_name).group(1)
-            except Exception:
-                raise PcoccError('Unable to parse image location')
-
-            docker_host = docker.get_docker_host()
-            cert = docker.cert_dir()
-
-            args += ["--{}daemon-host".format(prefix), docker_host,
-                     "--{}cert-dir".format(prefix), cert]
 
         if fmt == "docker":
             if Config().containers.config.default_registry and (not '.' in path or ':' in path):
@@ -800,9 +792,9 @@ fi
                        dest_path,
                        src_fmt,
                        dst_format,
-                       docker=None):
+                       vm=None):
 
-        src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, docker, 'src-')
+        src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, vm, 'src-')
 
         cls._skopeo_insecure_arg(args, "src-tls")
 
@@ -840,10 +832,10 @@ fi
                              src_fmt,
                              dst_path,
                              dst_store,
-                             docker=None
+                             vm=None
                          ):
 
-        src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, docker, '')
+        src_path, src_fmt, args = cls.skopeo_parse(src_path, src_fmt, vm, '')
         cls._skopeo_insecure_arg(args, "tls")
 
         cmd = ["skopeo", "inspect" ] + args + [src_fmt + ":" + src_path]
@@ -881,7 +873,7 @@ fi
                 src_fmt,
                 dst_format="oci",
                 dst_store=None,
-                docker=None):
+                vm=None):
         """Convert a container image from one type to the other.
 
         Arguments:
@@ -908,13 +900,13 @@ fi
                                  src_fmt,
                                  dst_path,
                                  dst_store,
-                                 docker)
+                                 vm)
 
         cls.skopeo_convert(src_path,
                            dst_path,
                            src_fmt,
                            dst_format,
-                           docker)
+                           vm)
 
         if did_convert:
             shutil.rmtree(src_path)
@@ -1264,7 +1256,7 @@ class ImageMgr(object):
         h = dst_store.put_data_blob(path)
         return dst_store.put_meta(dst_name, revision, kind, [h], {})
 
-    def import_image(self, src_path, dst_uri, src_fmt=None, docker=None):
+    def import_image(self, src_path, dst_uri, src_fmt=None, vm=None):
         """Import an image in the objectstore.
 
         Arguments:
@@ -1318,7 +1310,7 @@ class ImageMgr(object):
                                   src_fmt,
                                   "oci",
                                   dst_store,
-                                  docker=docker)
+                                  vm=vm)
 
                 # At this point tmp_oci contains an OCI image
                 index, blobs = ContImage.add_oci_image_to_repo(dst_name,

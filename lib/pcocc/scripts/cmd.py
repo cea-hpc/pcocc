@@ -40,7 +40,7 @@ import json
 
 from pcocc.Tbon import UserCA
 from pcocc.scripts import click
-from pcocc import PcoccError, Config, Cluster, Hypervisor
+from pcocc import PcoccError, Config, Cluster, Hypervisor, Docker
 from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads
 from pcocc.scripts.Shine.TextTable import TextTable
@@ -49,7 +49,6 @@ from pcocc.Templates import DRIVE_IMAGE_TYPE
 from pcocc.Image import ImageType
 import pcocc.Container
 import pcocc.Run as Run
-from pcocc.Docker import PcoccDocker
 
 from ClusterShell.NodeSet import NodeSet, RangeSet
 from ClusterShell.NodeSet import RangeSetParseError, NodeSetParseError
@@ -1155,7 +1154,7 @@ def _pcocc_batch(restart_ckpt,
         cluster = Cluster(cluster_definition)
         batch_options = list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
-        docker_opt = ["-d"] if docker else []
+        docker_opt = ["--docker"] if docker else []
         mirror_opt = ["-m"] if mirror_user else []
         user_data_opt = gen_user_data_opt(user_data)
 
@@ -1274,7 +1273,7 @@ def _pcocc_alloc(restart_ckpt,
         cluster = Cluster(cluster_definition)
         batch_options = list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
-        docker_opt = ["-d"] if docker else []
+        docker_opt = ["--docker"] if docker else []
         mirror_opt = ["-m"] if mirror_user else []
         alloc_opt = gen_alloc_script_opt(alloc_script)
         user_data_opt = gen_user_data_opt(user_data)
@@ -1305,8 +1304,8 @@ def _pcocc_alloc(restart_ckpt,
               help='Run a script on the allocation node and exit')
 @click.option('--user-data', type=click.Path(exists=True),
               help='Override the user-data property of the templates')
-@click.option('-d', '--docker', is_flag=True,
-              help='Instruct to setup the docker daemon environment')
+@click.option('--docker', is_flag=True,
+              help='Instruct to setup the Docker daemon environment')
 @click.option('-m', '--mirror-user', is_flag=True,
               help='Mirror user in allocated VMs')
 @click.argument('cluster-definition', nargs=1)
@@ -1338,6 +1337,11 @@ def pcocc_launcher(restart_ckpt,
     else:
         ckpt_opt = []
 
+    if docker:
+        docker_opt = ['--docker']
+    else:
+        docker_opt = []
+
     # TODO: provide a way for the user to plugin his own pre-run scripts here
     os.mkdir(os.path.join(batch.cluster_state_dir, 'slurm'))
     for path in os.listdir(helperdir):
@@ -1351,7 +1355,7 @@ def pcocc_launcher(restart_ckpt,
                        ['-Q', '-X', '--resv-port'],
                        ['pcocc'] +
                        build_verbose_opt() +
-                       ['internal', 'run'] + gen_user_data_opt(user_data) +
+                       ['internal', 'run'] + docker_opt + gen_user_data_opt(user_data) +
                        ckpt_opt)
     try:
         cluster.wait_host_config()
@@ -1369,14 +1373,11 @@ def pcocc_launcher(restart_ckpt,
     batch.write_key("cluster/user", "ca_cert", UserCA.new().dump_yaml())
 
     if docker:
-        print("Waiting for docker VM to start ...")
-        # We do the setup here to avoid any race when launching
-        # a docker shell agains a docker alloc
-        docker = PcoccDocker(cluster.vms[0])
-        docker.apply_mounts(cluster, CLIRangeSet("all", cluster))
-        # Now wait for Docker to start
-        docker.wait_for_docker_start(cluster,
-                                     CLIRangeSet("all", cluster),
+        Docker.init_client_certs()
+        print("Waiting for Docker VM to start ...")
+        Docker.apply_mounts(cluster, CLIRangeSet("0", cluster))
+        Docker.wait_for_docker_start(cluster,
+                                     CLIRangeSet("0", cluster),
                                      timeout=DEFAULT_AGENT_TIMEOUT)
 
     if mirror_user:
@@ -1391,9 +1392,7 @@ def pcocc_launcher(restart_ckpt,
     monitor_list = [s_pjob.pid]
 
     if docker:
-        docker_path = Config().containers.config.docker_path
-        s_exec = docker.shell(cluster,
-                              docker_path,
+        s_exec = Docker.shell(cluster.vms[0],
                               script=alloc_script)
     elif script:
         if restart_ckpt:
@@ -1408,7 +1407,7 @@ def pcocc_launcher(restart_ckpt,
     else:
         shell_env = os.environ
         shell_env['PROMPT_COMMAND'] = 'echo -n "(pcocc/%d) "' % (batch.batchid)
-        shell_env['PCOCC_INSIDE_ALLOC'] = "1"
+        shell_env['PCOCC_ALLOCATION'] = "1"
         shell = os.getenv('SHELL', default='bash')
         s_exec = subprocess.Popen(shell, env=shell_env)
 
@@ -1486,9 +1485,11 @@ def clean_exit(sig, frame):
                   short_help="For internal use")
 @click.option('-r', '--restart-ckpt',
               help='Restart cluster from the specified checkpoint')
+@click.option('--docker', is_flag=True,
+              help='Instruct to setup the Docker daemon environment')
 @click.option('--user-data', type=click.Path(exists=True),
               help='Override the user-data property of the templates')
-def pcocc_internal_run(restart_ckpt, user_data):
+def pcocc_internal_run(restart_ckpt, docker, user_data):
     signal.signal(signal.SIGINT, clean_exit)
     signal.signal(signal.SIGTERM, clean_exit)
 
@@ -1499,9 +1500,9 @@ def pcocc_internal_run(restart_ckpt, user_data):
         cluster.load_node_resources()
 
         if restart_ckpt:
-            cluster.run(ckpt_dir=restart_ckpt)
+            return cluster.run(ckpt_dir=restart_ckpt, docker=docker)
         else:
-            cluster.run(user_data=user_data)
+            return cluster.run(user_data=user_data, docker=docker)
 
     except PcoccError as err:
         handle_error(err)
@@ -1670,7 +1671,7 @@ def per_cluster_cli(allows_user, allow_no_alloc=False):
             if (allow_no_alloc and
                     # Are we in an alloc shell
                     # (set in poccc internal launcher) ?
-                    not os.getenv("PCOCC_INSIDE_ALLOC") and
+                    not os.getenv("PCOCC_ALLOCATION") and
                     # Is a jobid passed in arg ?
                     not kwargs["jobid"] and
                     # Is a jobname passed in arg ?
@@ -2596,7 +2597,7 @@ def pcocc_run_main(jobid,
 
 @cli.group()
 def docker():
-    """ Interact with a docker daemon running in a VM """
+    """ Use a Docker daemon running in a VM """
     pass
 
 
@@ -2614,90 +2615,65 @@ def parse_docker_image(docker_image):
 
 
 @docker.command(name='export',
-                short_help='Export a pcocc image to the docker daemon')
+                short_help='Export a pcocc image to the Docker VM')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--index', type=int, default=0,
-              help='Id of the VM to connect to')
+              help='Index of the VM to connect to')
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 @per_cluster_cli(False)
 def docker_export(jobid, jobname, cluster, index, source, dest):
     try:
-        docker = PcoccDocker(cluster.vms[index])
         dest, tag = parse_docker_image(dest)
-        docker.send_image(cluster, index, source, dest, tag)
+        Docker.send_image(cluster.vms[index], source, dest, tag)
     except PcoccError as err:
         handle_error(err)
 
 
 @docker.command(name='import',
-                short_help='Import a pcocc image from the docker daemon')
+                short_help='Import a pcocc image from the Docker VM')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--index', type=int, default=0,
-              help='Id of the VM to connect to')
+              help='Index of the VM to connect to')
 @click.argument('source', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 @per_cluster_cli(False)
 def docker_import(jobid, jobname, cluster, index, source, dest):
     try:
-        docker = PcoccDocker(cluster.vms[index])
         source, tag = parse_docker_image(source)
-        docker.get_image(cluster, index, dest, source, tag=tag)
-    except PcoccError as err:
-        handle_error(err)
-
-
-@docker.command(name='edit',
-                short_help='Edit a pcocc image inside docker')
-@click.option('-j', '--jobid', type=int,
-              help='Jobid of the selected cluster')
-@click.option('-J', '--jobname',
-              help='Job name of the selected cluster')
-@click.option('-i', '--index', type=int, default=0,
-              help='Id of the VM to connect to')
-@click.argument('source', nargs=1, type=str)
-@click.argument('dest', nargs=1, type=str)
-@click.argument('command', nargs=-1, type=click.UNPROCESSED)
-@per_cluster_cli(False)
-def docker_edit(jobid, jobname, cluster, index, source, dest, command):
-    try:
-        docker = PcoccDocker(cluster.vms[index])
-        command = list(command)
-
-        docker.edit_image(cluster, index, source, dest, command)
+        Docker.get_image(cluster.vms[index], dest, source, tag)
     except PcoccError as err:
         handle_error(err)
 
 
 @docker.command(name='build',
-                short_help='Build a pcocc image inside docker')
+                short_help='Build a Docker image and store it in a pcocc repo')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
 @click.option('-i', '--index', type=int, default=0,
-              help='Id of the VM to connect to')
+              help='Index of the VM to connect to')
 @click.argument('path', nargs=1, type=str)
 @click.argument('dest', nargs=1, type=str)
 @per_cluster_cli(False)
 def docker_build(jobid, jobname, cluster, index, path, dest):
     try:
-        docker = PcoccDocker(cluster.vms[index])
-        docker.build_image(cluster, index, dest, path=path)
+        Config().images.check_overwrite(dest)
+        Docker.build_image(cluster.vms[index], dest, path)
     except PcoccError as err:
         handle_error(err)
 
 
 @docker.command(name='alloc',
                 context_settings=dict(ignore_unknown_options=True),
-                short_help='Allocate a docker Pod and start a'
-                           ' docker shell')
+                short_help='Instantiate a Docker VM (interactive mode)')
 @click.option('-E', '--alloc-script', metavar='SCRIPT',
               help='Execute a script on the allocation node')
 @click.option('-T', '--docker-timeout', type=int,
@@ -2709,8 +2685,6 @@ def docker_alloc(alloc_script, docker_timeout, batch_options):
         pod = config.containers.config.docker_pod
 
         batch_options = list(batch_options)
-
-        click.secho("Starting the docker VM ...")
 
         return _pcocc_alloc(None,
                             alloc_script,
@@ -2726,7 +2700,7 @@ def docker_alloc(alloc_script, docker_timeout, batch_options):
 
 @docker.command(name='batch',
                 context_settings=dict(ignore_unknown_options=True),
-                short_help="Allocate a docker Pod in batch")
+                short_help="Instantiate a Docker VM (batch mode)")
 @click.option('-E', '--host-script', type=click.File('r'),
               help='Launch a batch script on the first host')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
@@ -2751,73 +2725,42 @@ def docker_batch(host_script,
         handle_error(err)
 
 
-@docker.command(name='mount',
-                short_help='Manually mount a path inside'
-                           ' the docker VM to make it'
-                           ' available as volume for docker containers')
-@click.option('-j', '--jobid', type=int,
-              help='Jobid of the selected cluster')
-@click.option('-J', '--jobname',
-              help='Job name of the selected cluster')
-@click.option('-i', '--index', type=str, default="all",
-              help='Id of the VM to connect to')
-@click.argument('src-path', nargs=1, type=click.UNPROCESSED)
-@click.argument('dest-path', nargs=1, type=click.UNPROCESSED)
-@per_cluster_cli(False)
-def docker_mount(jobid, jobname, cluster, index, src_path, dest_path):
-    try:
-        rangeset = CLIRangeSet(index, cluster)
-        s = PcoccDocker(cluster.vms[index])
-        s.mount(cluster, rangeset, src_path, dest_path)
-    except PcoccError as err:
-        handle_error(err)
-
-
 @docker.command(name='shell',
-                short_help='Start a docker shell')
+                short_help='Launch a shell for interacting with a Docker VM')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
-@click.option('-i', '--index', type=str, default="0",
-              help='Id of the VM to connect to')
 @click.option('-E', '--script', metavar='SCRIPT',
               help='Execute a script inside the docker shell')
+@click.option('-i', '--index', type=int, default=0,
+              help='Index of the VM to connect to')
 @click.option('-T', '--docker-timeout', type=int, default=200,
               help='Time in seconds to wait for docker to start in the VM')
 @per_cluster_cli(False)
-def docker_shell(jobid, jobname, cluster, index, script, docker_timeout):
+def docker_shell(jobid, index, jobname, cluster, script, docker_timeout):
     try:
-        s = PcoccDocker(index)
-        print("Waiting for docker VM to start ...")
-        rangeset = CLIRangeSet("all", cluster)
-        # At this point we wait for the Docker container to start
-        # by watching one of its runtime file which file to watch
-        # is configurable in containers.yaml config.docker_test_path
-        s.wait_for_docker_start(cluster, rangeset, timeout=docker_timeout)
-        docker_path = Config().containers.config.docker_path
-        print("Starting the docker shell ...")
-        shell = s.shell(cluster, docker_path, index, script)
+        Config().batch.populate_env()
+        print("Waiting for the Docker VM to start ...")
+        Docker.wait_for_docker_start(cluster, CLIRangeSet("0", cluster),
+                                     timeout=docker_timeout)
+        shell = Docker.shell(cluster.vms[index], script)
         sys.exit(shell.wait())
     except PcoccError as err:
         handle_error(err)
 
 
 @docker.command(name='env',
-                short_help='Retrieve the docker configuration from pcocc '
-                           ' you can do "eval $(pcocc docker env)" to start'
-                           ' a valid docker shell in pcocc')
+                short_help='Display variables for interacting with a Docker VM')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
+@click.option('-i', '--index', type=int, default=0,
+              help='Index of the VM to connect to')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
-@click.option('-i', '--index', type=int, default=0,
-              help='Id of the VM to connect to')
 @per_cluster_cli(False)
-def docker_env(jobid, jobname, cluster, index):
+def docker_env(jobid, jobname, index, cluster):
     try:
-        s = PcoccDocker(cluster.vms[index])
-        docker_path =  Config().containers.config.docker_path
-        s.env(cluster, index, docker_path)
+        Docker.env(cluster.vms[index])
     except PcoccError as err:
         handle_error(err)

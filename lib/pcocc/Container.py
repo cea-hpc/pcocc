@@ -427,8 +427,6 @@ class OciConfig(object):
         with open(path, 'w') as outfile:
             json.dump(self.config, outfile, indent=4)
 
-        # print(json.dumps(self.config, outfile, indent=4))
-
         # Restore the previous args af if nothing happened
         proc_conf["args"] = original_args
 

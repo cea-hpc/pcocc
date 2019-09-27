@@ -1955,5 +1955,11 @@ class SlurmManager(EtcdManager):
 
     def populate_env(self):
         """ Populate environment variables with batch related info to propagate """
-        os.putenv('PCOCC_JOB_ID', str(self.batchid))
-        os.putenv('PCOCC_JOB_NAME', os.environ.get('SLURM_JOB_NAME', ''))
+        os.environ['PCOCC_JOB_ID'] = str(self.batchid)
+        try:
+            os.environ.get('SLURM_JOB_ID')
+        except:
+            os.environ['SLURM_JOB_ID'] =  self.batchid
+
+        os.environ['PCOCC_JOB_NAME'] =  os.environ.get('SLURM_JOB_NAME', '')
+        os.environ['PCOCC_ALLOCATION'] =  '1'

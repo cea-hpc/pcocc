@@ -40,6 +40,7 @@ import binascii
 import uuid
 import Queue
 import agent_pb2
+import Docker
 
 from abc import ABCMeta
 from ClusterShell.NodeSet  import RangeSet
@@ -50,7 +51,7 @@ from .Config import Config
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import stop_threads, systemd_notify
 from .Templates import DRIVE_IMAGE_TYPE
-from pcocc.VMCerts import VMCerts
+
 
 lock = threading.Lock()
 
@@ -1226,7 +1227,7 @@ username={3}@pcocc
                 '-device', 'virtserialport,chardev=spicechannel0,name=com.redhat.spice.0',
                 '-chardev', 'spicevmc,id=spicechannel0,name=vdagent']
 
-    def run(self, vm, ckpt_dir=None, user_data=None):
+    def run(self, vm, ckpt_dir=None, user_data=None, docker=False):
         batch = Config().batch
 
         self._set_vm_state('topology',
@@ -1501,17 +1502,14 @@ username={3}@pcocc
             cmdline += ['-device',
                         'vfio-pci,host=%s' % (vfio_name)]
 
-        #
-        # We now deploy per VM certificates
-        #
-        certs = VMCerts(vm.rank)
 
-        # Install certs for this VM
-        certs.deploy_server_cert()
 
-        if not 'pcocc_vm_certs' in vm.mount_points:
-            vm.mount_points['pcocc_vm_certs'] = {'path': certs.server_cert_dir,
+        if docker:
+            cert_dir = Docker.init_server_certs(vm)
+            vm.mount_points['pcocc_vm_certs'] = {'path': cert_dir,
                                                  'readonly':True}
+            vm.mount_points['host_rootfs_'] = {'path': "/"}
+            logging.info("Added mount points for Docker VM")
 
         # Mount points
         for mount in vm.mount_points:

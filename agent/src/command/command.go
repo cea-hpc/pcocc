@@ -4,7 +4,6 @@ import (
 	"agent_protocol"
 	"errors"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/user"
@@ -115,7 +114,6 @@ func MakeDispatch(inc chan *agent_protocol.AgentMessage, outc chan *agent_protoc
 		"kill":      ret.handleKillMessage,
 		"writefile": ret.handleWriteFileMessage,
 		"listexec":  ret.handleListExecMessage,
-		"useradd":   ret.handleUserAddMessage,
 		"mount":     ret.handleMountMessage,
 		"userinfo":  ret.handleUserInfoMessage,
 		"corecount": ret.handleCoreCountMessage,
@@ -443,244 +441,6 @@ func runCommand(args ...string) (output string, err error) {
 	out, err := cmd.CombinedOutput()
 
 	return string(out), err
-}
-
-func readUserFile(file string) (string, error) {
-	c, err := ioutil.ReadFile(file)
-	if err != nil {
-		return "", err
-	}
-
-	return string(c), nil
-}
-
-func writeInFile(content string, f *os.File) error {
-	_, err := f.WriteString(content)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func replaceUserFile(file string, content string ) error {
-	log.Debug("AGENT overwriting file ", file)
-	f, err := os.OpenFile(file, os.O_TRUNC|os.O_WRONLY, 0600)
-
-	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-
-	return writeInFile(content, f)
-}
-
-func appendUserFile(file string, content string) error {
-	log.Debug("AGENT appending to file ", file)
-	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0600)
-
-	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-
-	_, err = f.WriteString(content)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func foundInFile(file string, needle string) (bool, error) {
-	s, err := readUserFile(file)
-
-	if err != nil {
-		return false, err
-	}
-
-	lines := strings.Split(s, "\n")
-
-	for i := 0; i < len(lines); i++ {
-		if strings.Index(lines[i], needle) != -1 {
-			return true, nil
-		}
-
-	}
-
-	return false, nil
-}
-
-func userExists(user string) bool {
-	ret, _ := foundInFile("/etc/passwd", user)
-	return ret
-}
-
-func groupExists(group string) bool {
-	ret, _ := foundInFile("/etc/group", group)
-	return ret
-}
-
-func joinGroupManual(group string, user string) error {
-	s, err := readUserFile("/etc/group")
-
-	if err != nil {
-		return err
-	}
-
-	log.Info("Attempting to add ", user, " to group ", group)
-
-	add := false
-
-	newFile := ""
-
-	lines := strings.Split(s, "\n")
-
-	for i := 0; i < len(lines); i++ {
-		data := strings.Split(lines[i], ":")
-
-		if len(data) == 4 {
-			members := strings.Split(data[3], ",")
-
-			// Do we need to join this group ? */
-			if data[0] == group {
-				// We filter the empty string
-				filt_members := make([]string, 1)
-
-				for _, member := range members {
-					if member == user {
-						// User is already in the group
-						log.Info(user, " already in ", group)
-						return nil
-					}
-
-					if member == "" {
-						continue
-					} else {
-						filt_members = append(filt_members, member)
-					}
-				}
-
-				/* Not seen in group add */
-				members = append(filt_members, user)
-				add = true
-			}
-
-			/* Generate the line */
-			newLine := data[0] + ":" + data[1] + ":" + data[2] +
-			           ":" + strings.Join(members, ",") + "\n"
-			newFile += newLine
-		}
-	}
-
-	if !add {
-		return errors.New("No such group to join " + group + " for " + user)
-	}
-
-	replaceUserFile("/etc/group", newFile)
-
-	return nil
-}
-
-func addGroupManual(group string, gid int64) error {
-	newGroup := group + ":x:" + strconv.FormatInt(gid,10) + ":\n"
-	return appendUserFile("/etc/group", newGroup)
-}
-
-func addGroup(group string, gid int64) error {
-	_, err := runCommand("groupadd", "-g", strconv.FormatInt(gid, 10), group)
-
-	if err != nil {
-		/* groupadd is not here
-		   attemp to add manually */
-		err = addGroupManual(group, gid)
-	}
-
-	return err
-}
-
-func addUserManual(user string,uid int64, gid int64, groups map[string]int64) error {
-	newUser :=  user + ":x:" + strconv.FormatInt(uid,10) + ":" + strconv.FormatInt(gid,10) + ":Pcocc Generated User:/home/" + user + ":/bin/bash\n"
-	err := appendUserFile("/etc/passwd", newUser)
-
-	if err != nil {
-		return err
-	}
-
-	for memberof, _ := range groups {
-		err = joinGroupManual(memberof, user)
-
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func addUser(user string, uid int64, gid int64, groups map[string]int64) error {
-	var grouplist []string
-
-	for group := range groups {
-		grouplist = append(grouplist, group)
-	}
-
-	sgrp := strings.Join(grouplist, ",")
-
-	_, err := runCommand("useradd",
-		"-M",
-		"-g", strconv.FormatInt(gid, 10),
-		"-u", strconv.FormatInt(uid, 10),
-		"-G", sgrp, user)
-
-	if err != nil {
-		/* If the useradd command is not here
-		   we manually edit the files */
-		err = addUserManual(user, uid, gid, groups)
-	}
-
-	return err
-}
-
-func addUserAndGroups(user string, uid int64, gid int64, groups map[string]int64) (err error) {
-
-	for group, gid := range groups {
-		if !groupExists(group) {
-			err = addGroup(group, gid)
-
-			if err != nil {
-				return
-			}
-		}
-	}
-
-	if !userExists(user) {
-		err = addUser(user, uid, gid, groups)
-
-		if err != nil {
-			return
-		}
-	}
-
-	return
-}
-
-func (cmd *Dispatch) handleUserAddMessage(data proto.Message) proto.Message {
-	var err error
-
-	msg := data.(*agent_protocol.UserAddMessage)
-
-	err = addUserAndGroups(msg.User, msg.Uid, msg.Gid, msg.Groups)
-
-	if err != nil {
-		return errorMessage(err)
-	}
-
-	return new(agent_protocol.UserAddResult)
 }
 
 func (cmd *Dispatch) handleMountMessage(data proto.Message) proto.Message {
@@ -1026,9 +786,21 @@ func (em *ExecManager) registerExec(id int64,
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
 
+	goSgids, err := u.GroupIds()
+	if err != nil {
+		return err
+	}
+
+	unixSgids := make([]uint32, len(goSgids))
+
+	for i, sgid := range goSgids {
+	        unixSgid, _ := strconv.Atoi(sgid)
+		unixSgids[i] = uint32(unixSgid)
+	}
 	newExec.cmd.SysProcAttr.Credential = &syscall.Credential{
 		Uid: uint32(uid),
-		Gid: uint32(gid)}
+		Gid: uint32(gid),
+		Groups: unixSgids}
 
 	if len(env) > 0 {
 		newExec.cmd.Env = env

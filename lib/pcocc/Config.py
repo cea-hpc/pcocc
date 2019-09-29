@@ -68,7 +68,7 @@ class Config(object):
         self.rsets  = pcocc.Resources.ResSetConfig()
         self.tpls   = pcocc.Templates.TemplateConfig()
         self.images = pcocc.Image.ImageMgr()
-        self.containers = pcocc.Container.container_config
+        self.containers = pcocc.Container.ContainerConfig()
 
         # Initalize later depending on what's provided in the config files
         self.batch = None

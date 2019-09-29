@@ -19,7 +19,6 @@
 import jsonschema
 import os
 import time
-import getpass
 import glob
 import yaml
 import re
@@ -34,8 +33,9 @@ from .Error import InvalidConfigurationError, PcoccError
 from .Config import Config
 from .Backports import OrderedDict
 from .Cache import Cache
+from .Misc import get_current_user
 
-metadata_schema = yaml.safe_load("""
+metadata_schema = yaml.load("""
 type: object
 properties:
   name:
@@ -64,9 +64,9 @@ required:
   - owner
   - timestamp
 additionalProperties: false
-""")
+""", Loader=yaml.CLoader)
 
-repo_config_schema = yaml.safe_load("""
+repo_config_schema = yaml.load("""
 type: object
 properties:
   version:
@@ -74,9 +74,9 @@ properties:
 required:
   - version
 additionalProperties: false
-""")
+""", Loader=yaml.CLoader)
 
-repo_definition_schema = yaml.safe_load("""
+repo_definition_schema = yaml.load("""
 type: object
 properties:
   repos:
@@ -103,7 +103,7 @@ properties:
 required:
   - repos
 additionalProperties: false
-""")
+""", Loader=yaml.CLoader)
 
 
 class ObjectNotFound(PcoccError):
@@ -149,7 +149,7 @@ class HierarchObjectStore(object):
     def load_repos(self, repo_config_file, tag):
         try:
             stream = file(repo_config_file, 'r')
-            repo_config = yaml.safe_load(stream)
+            repo_config = yaml.load(stream, Loader=yaml.CSafeLoader)
         except (yaml.YAMLError, IOError) as err:
             raise InvalidConfigurationError(str(err))
 
@@ -452,8 +452,8 @@ class ObjectStore(object):
         meta['name'] = name
         meta['revision'] = revision
         meta['kind'] = kind
-        meta['owner'] = user or getpass.getuser()
-        meta['timestamp'] = timestamp or time.time()
+        meta['owner'] = (user or get_current_user().pw_name)
+        meta['timestamp'] = (timestamp or time.time())
         meta['data_blobs'] = data_blobs
         meta['custom_meta'] = custom_meta
 
@@ -483,7 +483,7 @@ class ObjectStore(object):
 
         try:
             if self.version < 2:
-                meta = yaml.safe_load(raw_meta)
+                meta = yaml.load(raw_meta, Loader=yaml.CSafeLoader)
             else:
                 meta = json.loads(raw_meta)
         except (yaml.YAMLError, json.JSONDecodeError) as e:
@@ -568,7 +568,7 @@ class ObjectStore(object):
     def _validate_repo_config(self):
         try:
             with open(self._config_path) as f:
-                repo_config = yaml.safe_load(f)
+                repo_config = yaml.load(f, Loader=yaml.CSafeLoader)
                 jsonschema.validate(repo_config, repo_config_schema)
         except (yaml.YAMLError,
                 IOError,

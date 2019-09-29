@@ -24,8 +24,10 @@ import os
 import stat
 import shlex
 import jsonschema
-from distutils import spawn
 import subprocess
+from distutils import spawn
+from copy import deepcopy
+
 
 from .Error import InvalidConfigurationError, PcoccError
 from .Misc import path_join
@@ -346,45 +348,27 @@ OCI_CONTAINER_ROOTLESS_CONFIG = """
 """
 
 
-class OciConfig(object):
-    """Load update and save OCI configurations from containers.
-    """
-    def __init__(self, path=None, rootless=True):
-        """Initialize an OCI configuration.
-
-        Keyword Arguments:
-            path {string} -- path to load (default: {None})
-            rootless {bool} -- is rootless (default: {True})
-        """
-        self.config = None
+class OciRuntimeConfig(object):
+    def __init__(self, rootless=True):
         self.rootless = rootless
 
-        if path is None:
-            if rootless:
-                # Get the generic rootless config
-                initial_config = OCI_CONTAINER_ROOTLESS_CONFIG
-            else:
-                # This is the non-rootless case
-                initial_config = OCI_CONTAINER_CONFIG
-            self.config = json.loads(initial_config)
+        if rootless:
+            self.config = json.loads(OCI_CONTAINER_ROOTLESS_CONFIG)
         else:
-            #
-            # Here we load the config.json
-            #
-            with open(path) as config_file:
-                self.config = json.load(config_file)
+            self.config = json.loads(OCI_CONTAINER_ROOTLESS_CONFIG)
+
+        self.transposed_mounts = []
 
     @property
     def mounts(self):
-        return self.config.setdefault("mounts", [])
+        return self.config["mounts"]
 
     def _check_ipc_mounts(self):
-        linux = self.config.setdefault("linux", {})
-        # Make sure that the userns is present
-        ns = linux.setdefault("namespaces", [])
+        ns = self.config["linux"]["namespaces"]
+
         nsl = [e["type"] for e in ns if "type" in e]
 
-        mounts = self.config.setdefault("mounts", [])
+        mounts = self.config["mounts"]
 
         # If the IPC namespace is not present remove the mqueue mount
         nml = []
@@ -400,58 +384,41 @@ class OciConfig(object):
                 nml.append(m)
             self.config["mounts"] = nml
 
-    def save(self, path):
-        """Save OCI configuration file.
-
-        Arguments:
-            path {string} -- path to config.json
-        """
+    def save(self, path, transpose_prefix=None):
+        #FIXME: This should be done earlier
         self._check_ipc_mounts()
-        # As entrypoint is not standard if it is present
-        # we need to concatenate it to the command just before saving
-        # so that it yields the same behavior
-        proc_conf = self.config.setdefault("process", {})
 
-        if "args" in proc_conf:
-            original_args = proc_conf["args"]
-        else:
-            original_args = []
+        new_cmd = list(self.config["process"].get("args", []))
+        if "entrypoint" in self.config["process"]:
+            new_cmd = self.config["process"]["entrypoint"] + new_cmd
 
-        new_cmd = list(original_args)
+        final_config = deepcopy(self.config)
+        final_config["process"]["args"] = new_cmd
 
-        if "entrypoint" in proc_conf:
-            new_cmd = proc_conf["entrypoint"] + new_cmd
-
-        proc_conf["args"] = new_cmd
+        if transpose_prefix:
+            for m in self.config["mounts"]:
+                if m in self.transposed_mounts:
+                    for nm in final_config["mounts"]:
+                        if nm["source"] == m["source"] and nm["destination"] == m["destination"]:
+                            nm["source"] = path_join("/rootfs", nm["source"])
 
         with open(path, 'w') as outfile:
-            json.dump(self.config, outfile, indent=4)
-
-        # Restore the previous args af if nothing happened
-        proc_conf["args"] = original_args
+            json.dump(final_config, outfile, indent=4)
 
     def readonly(self, value=True):
-        """Mark the container FS as writable.
-        """
         self.config.setdefault("root", {})["readonly"] = value
 
     def set_gid(self, gid):
-        """Set GID for running the container.
-
-        Arguments:
-            gid {int} -- GID to use for running
-        """
         self.config.setdefault("process", {})\
                    .setdefault("user", {})["gid"] = gid
 
     def set_uid(self, uid):
-        """Set the UID for running the container.
-
-        Arguments:
-            uid {int} -- UID to use for running
-        """
         self.config.setdefault("process", {})\
                    .setdefault("user", {})["uid"] = uid
+
+    def set_additional_gids(self, gids):
+        self.config.setdefault("process", {})\
+                   .setdefault("user", {})["additionalGids"] = gids
 
     def append_uid_mapping(self, hostid, contid, size=1):
         linux = self.config.setdefault("linux", {})
@@ -466,11 +433,6 @@ class OciConfig(object):
         uidmap.append(mp)
 
     def set_hostname(self, hostname):
-        """Set hostname in container.
-
-        Arguments:
-            hostname {string} -- container hostname
-        """
         self.config.setdefault("linux", {})\
                    .setdefault("namespaces", {})\
                    .setdefault("uts", {})["hostname"] = hostname
@@ -536,7 +498,7 @@ class OciConfig(object):
                 if filt:
                     if not k.startswith(filt):
                         continue
-                self.config["process"]["env"].append(k + "=\"" + v + "\"")
+                self.config["process"]["env"].append(k + "=" + v )
 
     def cwd(self):
         proc = self.config.setdefault("process", {})
@@ -579,112 +541,46 @@ class OciConfig(object):
         """
         self.config.setdefault("process", {})["terminal"] = bool(isterminal)
 
-    def apply_container_config(self,
-                               container,
-                               config_path=None,
-                               rootfs_path=None):
-        """Merge Container configuration inside OCI image.
-
-        Arguments:
-            container {Container} -- configuration to apply
-        """
-        # We check the container config only when
-        # actually using it
-        container.check(config_path, rootfs_path)
-
-        self.config.setdefault("linux", {})
-
+    def merge_template(self, template):
         # Handle namespaces
-        ns = container.ns_list()
+        ns = template.ns_list()
         self.config["linux"]["namespaces"] = ns
 
-        # Handle hooks
-        oci_hooks = self.config.setdefault("hooks", {})
-        for k, v in container.hooks().items():
-            array = oci_hooks.setdefault(k, [])
-            array += v
-
         # Handle mounts
-        if self.rootless:
-            mounts = container.mount_list(transpose=False)
-        else:
-            mounts = container.mount_list(transpose=True)
+        for m in template.mount_list():
+            self.add_mount(m['source'], m['destination'], m['type'],
+                           m['transpose'], m['options'])
 
-        self.config["mounts"] = self.config["mounts"] + mounts
+        # XXX: environment variables are handled separately
 
-    def _import_from_process(self, original_config, key):
-        conf = original_config.config
+    def import_config(self, conf, field):
+        if field in conf:
+            self.config[field] = conf[field]
 
-        self.config.setdefault("process", {})
+    @property
+    def namespaces(self):
+        r = []
+        for n in self.config["linux"]["namespaces"]:
+            r.append(n["type"])
 
-        if "process" in conf:
-            if key in conf["process"]:
-                print("IMPORT " + key)
-                self.config["process"][key] = conf["process"][key]
+        return r
 
-    def import_process(self, original_config):
-        """Import process config from another OCI configuration.
-
-        Arguments:
-            original_config {OciConfig} -- OCI conf from which to import
-        """
-        conf = original_config.config
-
-        self.config.setdefault("process", {})
-
-        if "process" in conf:
-            self.config["process"] = conf["process"]
-
-    def import_cwd(self, original_config):
-        """Import cwd from another OCI configuration.
-
-        Arguments:
-            original_config {OciConfig} -- OCI conf from which to import
-        """
-        self._import_from_process(original_config, "cwd")
-
-    def import_env(self, original_config):
-        """Import env from another OCI configuration.
-
-        Arguments:
-            original_config {OciConfig} -- OCI conf from which to import
-        """
-        self._import_from_process(original_config, "env")
-
-    def is_mounted(self, src, dest=None):
-        if not dest:
-            dest = src
-
-        # Make sure path is not manually mounted
-        mounted_path = False
-
+    def is_mounted(self, dest):
         for m in self.mounts:
             mdest = m["destination"]
-            # print("dest {} {}  == {} {}".format(dest,
-            #                                     os.path.realpath(dest),
-            #                                     mdest,
-            #                                     os.path.realpath(mdest)))
-            if dest.startswith(mdest):
-                mounted_path = True
-                break
+            if mdest[-1] != os.sep:
+                mdest += os.sep
 
-        return mounted_path
-
-    def add_mount_if_needed(self,
-                            src,
-                            dest=None,
-                            mount_type="bind",
-                            options=None,
-                            transpose=False):
-        if not self.is_mounted(src, dest):
-            self.add_mount(src, dest, mount_type, options,  transpose)
+            if (dest + os.sep).startswith(mdest):
+                return True
+        return False
 
     def add_mount(self,
                   src,
                   dest=None,
                   mount_type='bind',
+                  transpose=True,
                   options=None,
-                  transpose=False,
                   prepend=False):
         if not options:
             if mount_type == "tmpfs":
@@ -703,9 +599,6 @@ class OciConfig(object):
             src = os.path.normpath(src)
             # Only resolve bindmounts
             src = os.path.realpath(src)
-            # Now append
-            if transpose:
-                src = path_join("/rootfs/", src)
         dest = Config().resolve_path(dest)
 
         new_mount = {'source': src,
@@ -720,43 +613,45 @@ class OciConfig(object):
         else:
             self.mounts.append(new_mount)
 
+        if transpose:
+            self.transposed_mounts.append(new_mount)
+
     def mirror_mount(self, path, transpose=True):
-        """Add a mountpoint in config (replacing previous).
-
-        Arguments:
-            path {string} -- path to mount
-
-        Keyword Arguments:
-            transpose {bool} -- prefix for VM (default: {True})
-        """
-        mounts = self.mounts
-        # First remove from current image
-        mounts = [m
-                  for m in mounts
-                  if (os.path.normpath(m["destination"]) !=
-                      os.path.normpath(path))]
+        mounts = self.mounts[:]
+        self.config["mounts"] = [m
+                                 for m in mounts
+                                 if (os.path.normpath(m["destination"]) !=
+                                     os.path.normpath(path))]
 
         # As no path matching home was specified
         # in mounts we inject the User's one
         self.add_mount(path, path, transpose=transpose)
 
 
-class Container(dict):
-    """Define a container and its attached configuration.
-
-    Raises:
-        InvalidConfigurationError -- Bad parameters were passed as config
+class ContainerTemplate(dict):
+    """Holds all the settings for a single container template
     """
 
     def __init__(self, name, settings):
-        """Intialize a container instance.
-
-        Arguments:
-            name {string} -- container name
-            settings {dict} -- key-value list of settings
-        """
         self["name"] = name
-        self.append(settings)
+        self.merge_settings(settings)
+
+    def apply_generator_config(self, cmd, config_path=None, rootfs_path=None):
+        logging.info("Running configuration generator %s", cmd)
+
+        argv = shlex.split(cmd) + [config_path, rootfs_path]
+
+        try:
+            output = subprocess.check_output(argv)
+        except (subprocess.CalledProcessError, OSError) as e:
+            raise PcoccError("Could not run configuration "
+                             "generator '{}': {}\n".format(" ".join(argv), e))
+
+        self._expand_command_based_mounts(output)
+        self._expand_command_based_env(output)
+        self._expand_command_based_modules(output)
+
+
 
     def _extract_command_lines(self, program_output, flag):
         mlist = program_output.split("\n")
@@ -771,53 +666,28 @@ class Container(dict):
     def _expand_command_based_mounts(self, program_output):
         mlist = self._extract_command_lines(program_output, "MOUNT ")
 
-        new_mounts = []
+        for p in mlist:
+            sp = p.split(":")
+            src = sp[0]
+            dest = sp[-1]
 
-        def handle_mount(path):
-            src = path
-            dest = path
-            if ":" in path:
-                # Path has a dest
-                sp = path.split(":")
-                src = sp[0]
-                dest = sp[1]
+            src = os.path.realpath(src)
 
             try:
                 mode = os.stat(src).st_mode
             except os.error:
-                logging.warning("Could not locate '{}' ".format(path) +
-                                "generated from mountpoint")
+                logging.warning("Skipping mount command of non-existing path '{}' ".format(p))
                 return
 
-            if (stat.S_ISDIR(mode) or
-                    stat.S_ISREG(mode) or
-                    stat.S_ISFIFO(mode) or
-                    stat.S_ISSOCK(mode)):
-                # Regular mount
-                new_mounts.append({"source": src,
-                                   "destination": dest})
-            elif stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+            if stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
                 # Devices
-                new_mounts.append({"source": src,
-                                   "destination": dest,
-                                   "options": ["dev"]})
-            elif stat.S_ISLNK(mode):
-                # Link we need to resolve to the real path
-                src = os.readlink(src)
-                handle_mount(src + ":" + dest)
+                options=['dev']
+            else:
+                options=[]
 
-        for p in mlist:
-            handle_mount(p)
-
-        # Convert to a dict
-        cnt = 0
-        to_add = {}
-        for e in new_mounts:
-            to_add["mount_" + str(cnt)] = e
-            cnt = cnt + 1
-
-        # Now update mounts with new mounts
-        self["mounts"].update(to_add)
+            self["mounts"]['_gen_{}'.format(dest)]={"source": src, "destination": dest,
+                                                    "options": options, "type": "bind",
+                                                    "transpose": True}
 
     def _expand_command_based_env(self, program_output):
         elist = self._extract_command_lines(program_output, "ENV ")
@@ -838,133 +708,46 @@ class Container(dict):
 
     def _expand_command_based_modules(self, program_output):
         mlist = self._extract_command_lines(program_output, "MODULE ")
-
+        # FIXME: generators for such modules will not be applied
         for m in mlist:
-            if m in container_config.module_cont:
-                mc = container_config.module_cont
-                module_conf = mc.build_for_container(m,
-                                                     required=True)
-                self.append(module_conf)
-            else:
-                logging.warning("Could not locate '{}' ".format(m) +
-                                "generated from modules")
-
-    def apply_generator_config(self, cmd, config_path=None, rootfs_path=None):
-        # Apply command-based configurations
-
-        logging.info("Expanding configuration generator"
-                     " from '%s'" % (cmd))
-
-        # Now run the command
-        argv = shlex.split(cmd) + [config_path, rootfs_path]
-        output = ""
-
-        try:
-            output = subprocess.check_output(argv)
-        except (subprocess.CalledProcessError, OSError) as e:
-            raise PcoccError("Could not run "
-                             "generator '{}': {}\n".format(" ".join(argv),
-                                                           output)
-                             + str(e))
-
-        # And parse it for the various elems
-        self._expand_command_based_mounts(output)
-        self._expand_command_based_env(output)
-        self._expand_command_based_modules(output)
+            module_template = Config().container.modules.get_template(m,
+                                                                      required=True)
+            self.merge_settings(module_template)
 
     def sanitize_mounts(self):
-        """Walk the container list to ensure that mounts are correct.
-        """
-        for n, m in self["mounts"].items():
-            if "source" not in m:
+        for name, opt in self["mounts"].items():
+            if "source" not in opt:
                 raise InvalidConfigurationError(
-                    ("Container [{0}] mountpoint {1} should"
-                     " have a least a 'source'").format(self["name"], n))
+                    ("Container {} mountpoint {} should"
+                     " have a least a 'source'").format(self["name"], name))
             else:
-                m["source"] = Config().resolve_path(m["source"])
-                m["source"] = os.path.realpath(m["source"])
+                opt["source"] = Config().resolve_path(opt["source"])
+                opt["source"] = os.path.realpath(opt["source"])
 
-            if "type" not in m:
-                m["type"] = "bind"
-                logging.info(("Container [%s] Assuming"
-                              " 'bind' type for mountpoint %s")
-                             % (self["name"], n))
+            if "type" not in opt:
+                opt["type"] = "bind"
+                logging.debug("Assuming 'bind' type for mountpoint %s", name)
 
-            if "options" not in m:
-                if m["type"] == "bind":
-                    m["options"] = ["rbind", "rw"]
-                    logging.info(("Container [%s] Default bind"
-                                  " options for mountpoint %s")
-                                 % (self["name"], n))
 
-            if "destination" not in m:
-                m["destination"] = m["source"]
-                logging.info(("Container [%s] Assuming 'destination' "
-                              "is same as 'source' for mountpoint %s")
-                             % (self["name"], n))
+            if not 'transpose' in opt:
+                opt['transpose'] = True
 
-            m["destination"] = Config().resolve_path(m["destination"])
+            if "options" not in opt:
+                if opt["type"] == "bind":
+                    opt["options"] = ["rbind", "rw"]
+                    logging.debug("Using default bind options for mountpoint %s", name)
 
-    def unfold_device_mounts(self):
-        """ Make sure no directory is mounted with
-        device permisions by unfolding such mounts
-        """
-        to_remove = []
-        to_add = {}
+            if "destination" not in opt:
+                opt["destination"] = opt["source"]
+            else:
+                opt["destination"] = Config().resolve_path(opt["destination"])
 
-        for n, m in self["mounts"].items():
-            if "options" not in m:
-                continue
-            opt = m["options"]
-            if "dev" not in opt:
-                continue
-            # If we are here we have a mountpoint
-            # which is flagged as device
-            src = os.path.normpath(m["source"])
-            is_dir = os.path.isdir(src)
-
-            if not is_dir:
-                # Nothing to do
-                continue
-
-            to_remove.append(n)
-
-            dest = src
-
-            cnt = 0
-
-            if "destination" in m:
-                dest = os.path.normpath(m["destination"])
-
-            for root, _, files in os.walk(src):
-                for f in files:
-                    target = path_join(root, f)
-                    cnt = cnt + 1
-
-                    reloc = os.path.normpath(target).replace(src, dest)
-
-                    logging.debug("Expanding device"
-                                  " dir %s --> %s" % (target, reloc))
-
-                    to_add[n + "_" + str(cnt)] = {"source": target,
-                                                  "destination": reloc,
-                                                  "options": m["options"]}
-
-        for e in to_remove:
-            del self["mounts"][e]
-
-        # And add the new ones
-        self["mounts"].update(to_add)
-
-    def check(self, config_path=None, rootfs_path=None):
-        """Validate container configuration.
-        """
-        # Apply the command list just before running
+    def instanciate(self, config_path=None, rootfs_path=None):
+        """Polpulate dynamic configurations based on container instance and host node"""
         if "generator" in self:
             for cmd in self["generator"]:
                 self.apply_generator_config(cmd, config_path, rootfs_path)
 
-        self.unfold_device_mounts()
         self.sanitize_mounts()
 
     def _insert_unique_array(self, key, settings):
@@ -985,63 +768,36 @@ class Container(dict):
             # Remove duplicates
             self[key] = list(set(self[key]))
 
-    def append(self, settings):
-        """Append a configuration to the container.
+    def merge_settings(self, settings):
+        if "inherits" in settings:
+            self.setdefault("inherits", settings["inherits"])
 
-        Arguments:
-            settings {dict} -- configuration object
-        """
-        # Handle command note that we gather the various
-        # commands in a list as we want to be able to handle
-        # multiple commands when several modules are used
+        self.setdefault("mounts", {})
+
+        if "mounts" in settings:
+            new_mounts = deepcopy(settings["mounts"])
+            new_mounts.update(deepcopy(self["mounts"]))
+            self["mounts"] = new_mounts
+
         if "generator" in settings:
             generators = self.setdefault("generator", [])
             self["generator"] = settings["generator"] + generators
 
-        # Handle Mounts
-        self.setdefault("mounts", {})
-        if "mounts" in settings:
-            self["mounts"].update(settings["mounts"])
-
-        if "inherits" in settings:
-            self.setdefault("inherits", [])
-            self["inherits"] = settings["inherits"]
-
-        # Handle Namespaces
-        self._insert_unique_array("ns", settings)
-
-        # Handle hooks
-        if "hooks" in settings:
-            self["hooks"] = settings["hooks"]
-
-        # Handle environment variables
         if "pathprefix" in settings:
             self.setdefault("pathprefix", []).extend(settings["pathprefix"])
+
         if "pathsuffix" in settings:
             self.setdefault("pathsuffix", []).extend(settings["pathsuffix"])
+
+        self._insert_unique_array("ns", settings)
+
         self._insert_unique_array("env", settings)
 
-    def hooks(self):
-        return self.setdefault("hooks", {})
-
-    def mount_list(self, transpose=True):
-        """Generate mount list.
-
-        Keyword Arguments:
-            transpose {bool} -- Prefix with 9P mountpoint (default: {True})
-
-        Returns:
-            array -- array of mounts
-
-        """
+    def mount_list(self):
         ret = []
         self.setdefault("mounts", {})
         for _, v in self["mounts"].items():
             tmp = dict(v)
-            if "source" in v:
-                if transpose:
-                    # Transpose to the 9P mountpoint
-                    tmp["source"] = path_join("/rootfs/", tmp["source"])
             ret.append(tmp)
 
         return ret
@@ -1075,7 +831,7 @@ class Container(dict):
 def load_yaml(filename, required=False):
     try:
         with open(filename, 'r') as stream:
-            res_config = yaml.safe_load(stream)
+            res_config = yaml.load(stream, Loader=yaml.CSafeLoader)
             return res_config
     except yaml.YAMLError as err:
         # Failed to parse and validate
@@ -1088,12 +844,8 @@ def load_yaml(filename, required=False):
             return None
 
 
-class ContainerConfig(dict):
-    """Load container configuration file.
-
-    Raises:
-        InvalidConfigurationError -- Failed to parse and validate YAML
-        InvalidConfigurationError -- Required configuration file not found
+class ContainerTemplateConfig(dict):
+    """Holds template configurations that can be applied to pcocc container images
     """
     container_config_schema = """
     type: object
@@ -1125,27 +877,7 @@ class ContainerConfig(dict):
                             type : array
                             items:
                                 type: string
-            hooks:
-                type: object
-                additionalProperties:
-                    type: array
-                    items:
-                        type: object
-                        properties:
-                            path:
-                                type: string
-                            args:
-                                type: array
-                                items:
-                                    type: string
-                            env:
-                                type: array
-                                items:
-                                    type: string
-                            timeout:
-                                type: integer
-                        required:
-                            - path
+
             ns:
                 type: array
                 items:
@@ -1199,7 +931,7 @@ class ContainerConfig(dict):
             return
 
     def _rec_inherit(self, cont, current_cont):
-        cont.append(current_cont)
+        cont.merge_settings(current_cont)
         if "inherits" in current_cont:
             for c in current_cont["inherits"]:
                 self._rec_inherit(cont, self[c])
@@ -1213,89 +945,52 @@ class ContainerConfig(dict):
                 for c in cont["inherits"]:
                     self._rec_inherit(cont, self[c])
 
-    def load(self, filename, required=False):
-        """Load a containers.yaml configuration file.
-
-        Arguments:
-            filename {string} -- path to the configuration file to load
-
-        Keyword Arguments:
-            required {bool} -- raise an erorr if not found (default: {False})
-
-        Raises:
-            InvalidConfigurationError -- required and not found
-            InvalidConfigurationError -- failed to parse and validate
-        """
-        res_config = load_yaml(filename, required=required)
-        if res_config is None:
-            # We will error when loading the file if it is required
-            return
-        self.load_obj(res_config)
-
-    def load_obj(self, res_config):
+    def load_obj(self, tpl_config):
         try:
-            # Load and validate the configuration file
-            schema = yaml.safe_load(self.container_config_schema)
-            jsonschema.validate(res_config,
+            schema = yaml.load(self.container_config_schema, Loader=yaml.CSafeLoader)
+            jsonschema.validate(tpl_config,
                                 schema)
         except jsonschema.exceptions.ValidationError as err:
-            # Failed to parse and validate
             raise InvalidConfigurationError(str(err))
 
-        # If the config contains string inheritance
-        # convert them to list inheritance to handle a single case later on
-        for _, res_attr in res_config.iteritems():
+        # Make sure inheritance configurations are defined as lists
+        for _, res_attr in tpl_config.iteritems():
             if "inherits" in res_attr:
                 if isinstance(res_attr["inherits"], str):
                     res_attr["inherits"] = [res_attr["inherits"]]
 
-        # We now register each entry as a container in
-        # local dict (this class inherits from dict)
-        for name, res_attr in res_config.iteritems():
+        for name, tpl_attrs in tpl_config.iteritems():
+            # Update existing template or create a new one
             if name in self:
-                # Already here append params
-                self[name].append(res_attr)
+                self[name].merge_settings(tpl_attrs)
             else:
-                # New configuration just create
-                self[name] = Container(name, res_attr)
-        # Now that all configs are loaded we need to
-        # linearize them by following potential
-        # inheritance links
+                self[name] = ContainerTemplate(name, tpl_attrs)
+
+        # Resolve inheritance links after all template are loadeds
         self._apply_inheritance()
 
-    def build_for_container(self, name, required=False, no_defaults=False):
-        """Retrieve configuration for a given container.
-
-        Arguments:
-            name {string} -- container to configure
-
-        Returns:
-            Container -- container specifically configured
-
-        """
-        # Build a new container
-        ret = Container(name, {})
-        if not no_defaults:
-            # Apply the 'default' configuration
-            if "default" in self:
-                ret.append(self["default"])
+    def get_template(self, name, required=False, no_defaults=False):
+        ret = ContainerTemplate(name, {})
+        if no_defaults or not "default" in self:
+            # We always need mount namespaces so include
+            # them in the no-defaults mode
+            ret.merge_settings({"ns": ["mount"]})
         else:
-            # Here we use the empty default
-            # with basic namespaces
-            ret.append({"ns": ["mount"]})
+            ret.merge_settings(self["default"])
+
         # Override with the container specific conf
         if name in self:
-            ret.append(self[name])
+            ret.merge_settings(self[name])
         else:
             if required:
                 raise PcoccError("No such container "
-                                 "configuration {}".format(name))
+                                 "configuration: {}".format(name))
         # Return the new container
         return ret
 
 
-class ContainerOptions(dict):
-
+class ContainerRuntimeConfig(dict):
+    """ Holds global runtime options for handling containers """
     pcocc_container_option_schema = """
     type: object
     properties:
@@ -1305,52 +1000,47 @@ class ContainerOptions(dict):
             type: array
             items:
                  type: string
-        container_shm_work_path:
+        tmp_mem_path:
             type: string
-        container_shm_work_limit:
+        tmp_mem_limit:
             type: integer
-        use_squashfs:
-            type: boolean
-        squashfs_image_mountpoints:
+        image_driver:
+            enum:
+                - flat
+                - squashfs
+        image_mountpoints:
             type: array
             items:
                 type: string
-        enable_oci_hooks:
-            type: boolean
         docker_path:
             type: string
-        docker_use_ip_address:
+        docker_resolve_address:
             type: boolean
-        docker_pod:
+        docker_template:
             type: string
-        use_runc:
-            type: boolean
         docker_mounts:
             type: array
             items:
                 type: object
                 properties:
-                    src:
+                    source:
                         type: string
                     dest:
                         type: string
                 required:
-                    - src
+                    - source
     additionalProperties: false
     """
 
     def __init__(self):
         self["docker_path"] = None
-        self["docker_use_ip_address"] = False
-        self["docker_pod"] = None
+        self["docker_resolve_address"] = False
+        self["docker_template"] = None
         self["docker_mounts"] = []
-        self["docker_test_path"] = "/var/run/docker/metrics.sock"
-        self["enable_oci_hooks"] = False
-        self["use_squashfs"] = False
-        self["squashfs_image_mountpoints"] = []
-        self["container_shm_work_path"] = "/dev/shm"
-        self["container_shm_work_limit"] = 250
-        self["use_runc"] = False
+        self["image_driver"] = "flat"
+        self["image_mountpoints"] = []
+        self["tmp_mem_path"] = "/dev/shm"
+        self["tmp_mem_limit"] = 250
         self["default_registry"] = None
         self["insecure_registries"] = []
 
@@ -1364,34 +1054,26 @@ class ContainerOptions(dict):
         return self["insecure_registries"]
 
     @property
-    def use_runc(self):
-        return self["use_runc"]
-
-    @property
     def container_shm_work_path(self):
-        return self["container_shm_work_path"]
+        return self["tmp_mem_path"]
 
     @property
     def container_shm_work_limit(self):
-        return self["container_shm_work_limit"]
+        return self["tmp_mem_limit"]
 
     @property
-    def squashfs_image_mountpoints(self):
-        return set(self["squashfs_image_mountpoints"] + ["/etc/resolv.conf",
-                                                         "/etc/group",
-                                                         "/etc/passwd"])
+    def img_mountpoints(self):
+        return set(self["image_mountpoints"] + ["/etc/resolv.conf",
+                                                "/etc/group",
+                                                "/etc/passwd"])
 
     @property
     def use_squashfs(self):
-        return self["use_squashfs"]
+        return self["image_driver"] == "squashfs"
 
     @property
     def docker_test_path(self):
-        return self["docker_test_path"]
-
-    @property
-    def enable_oci_hooks(self):
-        return self["enable_oci_hooks"]
+        return "/var/run/docker/metrics.sock"
 
     @property
     def docker_mounts(self):
@@ -1402,43 +1084,34 @@ class ContainerOptions(dict):
         if self["docker_path"] is None:
             # Try to locate in env
             if not spawn.find_executable("docker"):
-                raise PcoccError("You did not specify a 'docker_path' in "
-                                 "the 'containers.yaml' configuration file "
-                                 "and 'docker' is not in your path."
-                                 " Cannot pursue.")
+                raise PcoccError("docker_path is not set in containers.yaml "
+                                 "and 'docker' is not in your path.")
         else:
             return self["docker_path"]
 
     @property
     def docker_pod(self):
-        if self["docker_pod"] is None:
-            raise PcoccError("Could not resolve the Docker pod, make sure"
-                             " the 'docker_pod' variable is configured in"
-                             " the containers.yaml file. Cannot pursue.")
-        return self["docker_pod"]
+        if self["docker_template"] is None:
+            raise PcoccError("docker_template is not defined in containers.yaml")
+        return self["docker_template"]
 
     @property
     def docker_use_ip(self):
-        return self["docker_use_ip_address"]
+        return self["docker_resolve_address"]
 
     def load_obj(self, config):
-        # Validate its structure
         try:
-            # Load and validate the configuration file
-            schema = yaml.safe_load(self.pcocc_container_option_schema)
+            schema = yaml.load(self.pcocc_container_option_schema, Loader=yaml.CSafeLoader)
             jsonschema.validate(config,
                                 schema)
         except jsonschema.exceptions.ValidationError as err:
-            # Failed to parse and validate
             raise InvalidConfigurationError(str(err))
 
-        # Load the config
         for k, v in config.items():
             self[k] = v
 
 
-class PcoccContainerConf(object):
-
+class ContainerConfig(object):
     pcocc_global_cont_schema = """
     type: object
     properties:
@@ -1446,64 +1119,51 @@ class PcoccContainerConf(object):
             type: object
         modules:
             type: object
-        config:
+        runtime:
             type: object
     additionalProperties: false
-    required:
-        - containers
-        - modules
-        - config
     """
 
     def __init__(self):
-        self._per_cont = ContainerConfig()
-        self._module_cont = ContainerConfig()
-        self._config = ContainerOptions()
+        self._templates = ContainerTemplateConfig()
+        self._modules = ContainerTemplateConfig()
+        self._runtime_config = ContainerRuntimeConfig()
 
     @property
-    def per_cont(self):
-        return self._per_cont
+    def templates(self):
+        return self._templates
 
     @property
-    def module_cont(self):
-        return self._module_cont
+    def modules(self):
+        return self._modules
 
     @property
     def config(self):
-        return self._config
+        return self._runtime_config
+
+    def get(self, image, modules, config_path, rootfs_path, no_defaults):
+        tpl = self.templates.get_template(image, False, no_defaults)
+        for m in modules:
+            tpl.merge_settings(self.modules.get_template(m, required=True))
+
+        tpl.instanciate(config_path, rootfs_path)
+
+        return tpl
 
     def load(self, config_file, required=False):
-        # Load the config object
         yaml_data = load_yaml(config_file, required=required)
         if yaml_data is None:
-            # No config provided skip note that load_yaml
-            # raises an Exception if it was required
             return
 
-        # Validate its structure
+        # Validate the top level schema
         try:
-            # Load and validate the configuration file
-            schema = yaml.safe_load(self.pcocc_global_cont_schema)
+            schema = yaml.load(self.pcocc_global_cont_schema, Loader=yaml.CSafeLoader)
             jsonschema.validate(yaml_data,
                                 schema)
         except jsonschema.exceptions.ValidationError as err:
-            # Failed to parse and validate
             raise InvalidConfigurationError(str(err))
 
-        # At this point the config is valid now forward
-        # to subparts of the config
-        if "containers" in yaml_data:
-            self._per_cont.load_obj(yaml_data["containers"])
-
-        if "modules" in yaml_data:
-            self._module_cont.load_obj(yaml_data["modules"])
-
-        if "config" in yaml_data:
-            self._config.load_obj(yaml_data["config"])
-
-
-#
-# We instanciate the container config locally
-# as we may need to access it to apply modules
-#
-container_config = PcoccContainerConf()
+        # Load and validate sub schemas
+        self._templates.load_obj(yaml_data.get("containers", {}))
+        self._modules.load_obj(yaml_data.get("modules", {}))
+        self._runtime_config.load_obj(yaml_data.get("runtime", {}))

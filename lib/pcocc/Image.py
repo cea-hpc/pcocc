@@ -367,7 +367,7 @@ class ContainerView(object):
         self.src_store = Config().images.object_store.get_repo(self.meta["repo"])
         self.atexit_func = None
 
-    def prepare(self):
+    def prepare_cache(self):
         pass
 
     def get(self):
@@ -384,12 +384,12 @@ class ContainerView(object):
 
     def _register_cleanup_func(self, func):
         self.atexit_func = func
-        pcocc_at_exit.register(func)
+        pcocc_at_exit.register(self._call_cleanup_func)
 
     def _call_cleanup_func(self):
         if self.atexit_func is not None:
             self.atexit_func()
-            pcocc_at_exit.deregister(self.atexit_func)
+            pcocc_at_exit.deregister(self._call_cleanup_func)
             self.atexit_func = None
 
 
@@ -414,12 +414,12 @@ class ContainerBundleView(ContainerView):
         ContainerView.__init__(self, image)
         self.bundle_path = None
 
-    def prepare(self):
+    def prepare_cache(self):
         self.bundle_path = self._get_bundle_from_cache()
 
     def get(self):
         if not self.bundle_path:
-            self.prepare()
+            self.prepare_cache()
 
         if Config().containers.config.use_squashfs:
             self.path = self._mount_squashfs()
@@ -461,6 +461,9 @@ class ContainerBundleView(ContainerView):
     def _umount_squashfs(self, directory):
         if spawn.find_executable("fusermount"):
             try:
+                logging.debug("unmounting squashfs image"
+                              "  at %s", directory)
+
                 with open("/dev/null", "w") as devnull:
                     subprocess.check_call(["fusermount",
                                            "-uz",
@@ -483,9 +486,6 @@ class ContainerBundleView(ContainerView):
             except subprocess.CalledProcessError:
                 raise PcoccError("Failed to mount squashfs image")
 
-            # If mount succeeded register unmount atexit
-            self._register_cleanup_func(lambda : self._squashfs_cleanup(target_dir))
-
             # Wait for the mount to be complete by checking the directory
             # and contents as squashfuse may return early
             def local_check_mounted():
@@ -500,6 +500,8 @@ class ContainerBundleView(ContainerView):
             else:
                 raise PcoccError("Squashfs mount did not complete properly")
 
+            # If mount succeeded register unmount atexit
+            self._register_cleanup_func(lambda : self._squashfs_cleanup(target_dir))
         else:
             raise PcoccError("Could not locate the 'squashfuse' binary which is required"
                              " when the squashfs container format is enabled")
@@ -536,8 +538,7 @@ class ContainerBundleView(ContainerView):
                 self._generate_squashfs_image(self.image_uri, oci_image, cache_file)
             else:
                 with img.cache_add_dir(self.image_uri, cache_key + "_tmp") as cache_dir:
-                    self._extract_oci_bundle(self.image_uri, oci_image, cache_dir)
-
+                    ContImage.extract_oci_bundle(oci_image, cache_dir.path)
 
             # If we are done we can rename the resulting blob
             # Make sure we have no conflict
@@ -550,7 +551,7 @@ class ContainerBundleView(ContainerView):
             return oci_bundle_dir
 
     def _cont_squashfs_populate_systematic_mounts(self, rootfs):
-        mountpoints = Config().containers.config.squashfs_image_mountpoints
+        mountpoints = Config().containers.config.img_mountpoints
         mountpoints = set(mountpoints)
         for m in mountpoints:
             target = path_join(rootfs, m)
@@ -588,7 +589,7 @@ class ContainerBundleView(ContainerView):
         pcocc_at_exit.register(cleanup_func)
 
         try:
-            ContImage.oci_bundle(oci_image, tmp_bundle)
+            ContImage.extract_oci_bundle(oci_image, tmp_bundle)
 
             if not spawn.find_executable("mksquashfs"):
                 raise PcoccError("Could not locate 'mksquashfs'"
@@ -597,8 +598,6 @@ class ContainerBundleView(ContainerView):
             print("Generating squashfs image ...")
 
             rootfs = path_join(tmp_bundle, "rootfs")
-            # FIXMEPARA
-            # if os.path.exists(rootfs):
             self._cont_squashfs_populate_systematic_mounts(rootfs)
 
             base_cmd = ["mksquashfs",
@@ -634,10 +633,6 @@ class ContainerBundleView(ContainerView):
             cleanup_func()
             pcocc_at_exit.deregister(cleanup_func)
 
-    def _extract_oci_bundle(self, image, oci_image, cache_dir):
-        ContImage.oci_bundle(oci_image, cache_dir.path)
-
-
 class ContImage(object):
     """Container Images manipulation routines."""
 
@@ -661,7 +656,7 @@ class ContImage(object):
             raise PcoccError("Container Image format not supported: " + ext)
 
     @staticmethod
-    def oci_bundle(oci_image_dir, destination_dir):
+    def extract_oci_bundle(oci_image_dir, destination_dir):
         oci = OciImage(oci_image_dir)
         oci.load()
         oci.extract_bundle(destination_dir)
@@ -1132,7 +1127,7 @@ class ImageMgr(object):
 
         if not os.path.samefile(cur_backing_file, tgt_backing_file):
             print 'Rebasing snapshot to preserve chaining...'
-            self.rebase(path, tgt_backing_file, False)
+            VMImage.rebase(path, tgt_backing_file, False)
 
         rel_backing_file = dst_store.get_obj_path('data',
                                                   tgt_backing_blob,
@@ -1337,7 +1332,7 @@ class ImageMgr(object):
             # We prepare a bundle view that we don't use now to make
             # sure the bundle cache is populated at import time
             dst_uri = '{}:{}'.format(dst_store.name, dst_name)
-            ContainerBundleView(dst_uri).prepare()
+            ContainerBundleView(dst_uri).prepare_cache()
             ContainerBundleView(dst_uri).cleanup()
 
         return meta

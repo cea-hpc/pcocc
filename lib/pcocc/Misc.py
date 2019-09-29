@@ -28,13 +28,18 @@ import datetime
 import jsonschema
 import yaml
 import atexit
-
+import time
+import grp
+import pwd
 from Queue import Queue
 from threading import Thread
+from ctypes import *
+from ctypes.util import find_library
 
 from pcocc.Backports import  enum
 from pcocc.Config import Config
 from pcocc.Error import PcoccError
+
 
 
 class runAtExit(object):
@@ -396,3 +401,35 @@ class ThreadPool(object):
 
         if self.exception is not None:
             raise self.exception # pylint: disable-msg=E0702
+
+
+libc = cdll.LoadLibrary(find_library('libc'))
+libc_getgrouplist = libc.getgrouplist
+
+def get_current_user():
+    return pwd.getpwuid(os.getuid())
+
+def getgrouplist(user, gid):
+    # FROM https://stackoverflow.com/a/49775683
+    max_groups = 50
+    libc_getgrouplist.argtypes = [c_char_p, c_uint, POINTER(c_uint * max_groups), POINTER(c_int)]
+    libc_getgrouplist.restype = c_int32
+
+    grouplist = (c_uint * max_groups)()
+    ngrouplist = c_int(max_groups)
+
+    u = pwd.getpwnam(user)
+    ct = libc_getgrouplist(u.pw_name, u.pw_gid, byref(grouplist), byref(ngrouplist))
+
+    # if 50 groups was not enough this will be -1, try again
+    # luckily the last call put the correct number of groups in ngrouplist
+    if ct < 0:
+        libc_getgrouplist.argtypes = [c_char_p, c_uint, POINTER(c_uint *int(ngrouplist.value)), POINTER(c_int)]
+        grouplist = (c_uint * int(ngrouplist.value))()
+        ct = libc_getgrouplist(u.pw_name, u.pw_gid, byref(grouplist), byref(ngrouplist))
+
+    r = grouplist[:ct]
+    if  gid not in r:
+        return [gid] + r
+    else:
+        return r

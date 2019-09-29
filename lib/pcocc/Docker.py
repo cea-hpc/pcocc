@@ -40,8 +40,8 @@ from .EthNetwork import VEthNetwork
 def apply_mounts(cluster, rangeset):
     for mnt in Config().containers.config.docker_mounts:
         if "dest" not in mnt:
-            mnt["dest"] = mnt["src"]
-        _mount(cluster, rangeset, mnt["src"], mnt["dest"])
+            mnt["dest"] = mnt["source"]
+        _mount(cluster, rangeset, mnt["source"], mnt["dest"])
 
 def wait_for_docker_start(cluster, rangeset, timeout=300):
     target_path = Config().containers.config.docker_test_path
@@ -69,7 +69,7 @@ def build_image(vm, dest_image, path=None):
     subprocess.check_call(build_command)
 
     try:
-        get_image(dest_image, docker_image_name)
+        get_image(vm, dest_image, docker_image_name)
     finally:
         _delete_image(docker_image_name)
 
@@ -119,7 +119,6 @@ def _mount(cluster, rangeset, src_path, dest_path):
     enter_docker_ctr = ["ctr", "-n", "services.linuxkit", "tasks",
                         "exec", "--exec-id", "mount", "docker"]
 
-    #FIXMEPARA: check call, supprimer exec_output
     mkdirp_command = ["mkdir", "-p", dest_path]
     AgentCommand.exec_output(cluster,
                              rangeset,

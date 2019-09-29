@@ -369,7 +369,8 @@ class AgentCommand(object):
         # Launch tasks on rangeset
         if not exec_id:
             exec_id = random.randint(0, 2**63-1)
-        logging.debug(cmd)
+
+        logging.debug('Running in parallel: %s, with env %s', cmd, env)
 
         ret = cls.execve(cluster,
                          indices,
@@ -724,12 +725,6 @@ class SaveDriveCmd(AgentCommand):
     _stream_name = "save"
     _request_pb = agent_pb2.SaveDriveMessage
     _reply_pb = agent_pb2.SaveDriveResult
-
-
-class UserAdd(AgentCommand):
-    _name = "useradd"
-    _request_pb = agent_pb2.UserAddMessage
-    _reply_pb = agent_pb2.UserAddResult
 
 class Mount(AgentCommand):
     _name = "mount"

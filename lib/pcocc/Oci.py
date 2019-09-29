@@ -30,10 +30,16 @@ import threading
 import re
 import tarfile
 import logging
+import sys
+import time
+import six
 
 from .Error import PcoccError
 from .Misc import path_join
 
+
+if six.PY2:
+    import xtarfile
 
 def human_size(size):
     for u in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
@@ -43,84 +49,27 @@ def human_size(size):
     return "{} EB".format(size)
 
 
-def interleaved_unpack_archive(params):
-    myid = params["id"]
-    output_path = params["output_path"]
-    worker_count = params["worker_count"]
-    tarfile_path = params["tarfile_path"]
-
-    tar = tarfile.open(tarfile_path)
-    current_file = 0
-
-    for elem in tar:
-        if(current_file % worker_count) == myid:
-            # This file is for this worker
-            CompressedArchive.extract_tar_elem_no_right(tar,
-                                                        elem,
-                                                        output_path)
-    tar.close()
-
-
 class CompressedArchive(object):
 
-    known_types = ["bzip", "gzip"]
-
-    def __init__(self, path, output_dir, layer_id=-1):
+    def __init__(self, path, output_dir, atype, size, layer_id):
         self.path = path
         self.layer_id = layer_id
         self.output_dir = output_dir
+        self.atype = atype
+        self.size = size
         if not os.path.isfile(self.path):
             raise PcoccError("Could not locate archive " + self.path)
-        self._size_bytes = os.stat(self.path).st_size
-        self._number_of_files = None
-        self._guess_format()
-        self._detect_parallel_comp()
-
-    def size(self):
-        return self._size_bytes
-
-    def count(self):
-        if self._number_of_files is None:
-            return -1
-        return self._number_of_files
-
-    def _detect_parallel_comp(self):
-        if spawn.find_executable("pbzip2"):
-            self.has_pbzip2 = True
-        else:
-            self.has_pbzip2 = False
-
-        if spawn.find_executable("pigz"):
-            self.has_pigz = True
-        else:
-            self.has_pigz = False
-
-    def _guess_format(self):
-        with open(self.path, 'rb') as f:
-            header = binascii.hexlify(f.read(2))
-            if header[:4] == b'1f8b':
-                self.format = "gzip"
-            elif header[:4] == b'425a':
-                self.format = "bzip"
-            else:
-                # Let TAR decide for us
-                self.format = "unkown"
 
     def _get_compress_program(self):
-        compress_program = None
-        if (self.format == "bzip") and (self.has_pbzip2):
-            compress_program = "pbzip2"
-        elif (self.format == "gzip") and (self.has_pigz):
-            compress_program = "pigz"
-        return compress_program
-
-    def _get_seq_compress_program(self):
-        compress_program = None
-        if (self.format == "bzip"):
-            compress_program = "bunzip2"
-        elif (self.format == "gzip"):
-            compress_program = "gunzip"
-        return compress_program
+        if self.atype == 'tar':
+            return None
+        elif self.atype == 'tar+gzip':
+            if spawn.find_executable("pigz"):
+                return "pigz"
+            else:
+                return "gzip"
+        else:
+            raise PcoccError('Unsupported layer archive format')
 
     def _get_file_set(self, compress_program=None):
         cmd = ["tar"]
@@ -147,30 +96,6 @@ class CompressedArchive(object):
     def file_set(self):
         compress_program = self._get_compress_program()
         return self._get_file_set(compress_program=compress_program)
-
-    def unpack_fd(self):
-        # Attempt to get the parallel unpacker
-        compress_program = self._get_compress_program()
-        if not compress_program:
-            # Failed attempt to get the sequential unpacker
-            compress_program = self._get_seq_compress_program()
-        if compress_program is None:
-            # Could not locate unpacker use seq
-            raise PcoccError("No unpacker found")
-
-        cmd = [compress_program, "-cdf", self.path]
-
-        ret = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=65536)
-
-        return ret.stdout
-
-    def unpack(self):
-        out_tar = tempfile.mktemp(suffix=".tar")
-        r = self.unpack_fd()
-        with open(out_tar, 'wb') as tarf:
-            for l in r:
-                tarf.write(l)
-        return out_tar
 
     @staticmethod
     def extract_tar_elem_no_right(tar, elem, output_dir):
@@ -201,73 +126,27 @@ class CompressedArchive(object):
             logging.warning("Warning: could not extract "
                             "file '{}': {}".format(str(elem.name), str(e)))
 
-    def _extract_no_right_inplace(self):
-        try:
-            r = self.unpack_fd()
-        except (OSError, IOError):
-            # Failed to open extraction stream
-            # Fallback to seq
-            return self._extract_no_right_seq()
-        # And now untar from the parallel stream
-        tar = tarfile.open(mode="r|", fileobj=r)
-
-        for elem in tar:
-            CompressedArchive.extract_tar_elem_no_right(tar,
-                                                        elem,
-                                                        self.output_dir)
-        tar.close()
-
-    def _extract_no_right_seq(self):
-        tar = tarfile.open(self.path)
-
-        for elem in tar:
-            CompressedArchive.extract_tar_elem_no_right(tar,
-                                                        elem,
-                                                        self.output_dir)
-        tar.close()
-
-    def _extract_no_right_par(self):
-
-        tarfile_path = self.path
-        tarfile_path = self.unpack()
-
-        if tarfile_path is None:
-            # Failed to unpack go sequential
-            return self._extract_no_right_seq()
-
-        output_path = self.output_dir
-        worker_count = mproc.cpu_count()
-
-        param_array = [{"id": i,
-                        "tarfile_path": tarfile_path,
-                        "output_path": output_path,
-                        "worker_count": worker_count}
-                       for i in range(0, worker_count)]
-
-        p = mproc.Pool(processes=worker_count)
-        p.map(interleaved_unpack_archive, param_array)
-        p.terminate()
-
-        os.unlink(tarfile_path)
-
     def extract_no_right(self):
-        # Here we use combinations of python tarfile
-        # as we need to alter directory
-        # rights as we extract to avoid loosing
-        # +w rights for next layers
-        # perms are then restored at once on at the end
-        size_mb = self.size() / (1024.0 * 1024.0)
-        if size_mb > 1:
-            if size_mb < 100 and self.count() > 10000:
-                # It is small with many files we can first unpack in /tmp
-                self._extract_no_right_par()
-            else:
-                self._extract_no_right_inplace()
+        compress_program = self._get_compress_program()
+
+        if compress_program:
+            cmd = [compress_program, "-cdf", self.path]
+            tar = tarfile.open(mode = "r|",
+                               fileobj = subprocess.Popen(cmd,
+                                                          stdout=subprocess.PIPE,
+                                                          bufsize=65536).stdout)
         else:
-            self._extract_no_right_seq()
+            tar = tarfile.open(self.path)
 
 
-class OciConfig(object):
+        for elem in tar:
+            self.extract_tar_elem_no_right(tar,
+                                           elem,
+                                           self.output_dir)
+        tar.close()
+
+
+class OciImageConfig(object):
 
     def __init__(self, arch="amd64", os="linux"):
         self.data = {"os": os, "architecture": arch}
@@ -276,12 +155,6 @@ class OciConfig(object):
 
     def load(self, oci, config_blob):
         self.data = oci.load_json_blob(config_blob)
-
-    def _config_get(self, key):
-        if key in self.data["config"]:
-            return self.data["config"][key]
-        else:
-            return None
 
     def gen_runtime_config(self):
         minimal_configjson = {"ociVersion": "0.1.0",
@@ -311,6 +184,12 @@ class OciConfig(object):
 
     def _config_set(self, key, val):
         self.data["config"][key] = val
+
+    def _config_get(self, key):
+        if key in self.data["config"]:
+            return self.data["config"][key]
+        else:
+            return None
 
     def cwd(self):
         return self._config_get("WorkingDir")
@@ -385,7 +264,7 @@ class OciManifest(object):
         self.arch = arch
         self.os = os
         self.label = label
-        self.config = OciConfig(arch, os)
+        self.config = OciImageConfig(arch, os)
         self.data = {"schemaVersion": 2,
                      "config": {},
                      "layers": []}
@@ -413,12 +292,14 @@ class OciManifest(object):
         for i in range(0, len(self.data["layers"])):
             layer = self.data["layers"][i]
             path = oci.get_blob_path(layer["digest"])
-            archives.append(CompressedArchive(path, output_dir, layer_id=i))
+            atype = layer["mediaType"].split('.')[-1]
+            size = layer["size"]
+            archives.append(CompressedArchive(path, output_dir, atype, size, i))
         return archives
 
     def _get_file_sets(self, archives):
         # Handle interrupt with pools
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
         cpucount = mproc.cpu_count()
         worker = cpucount if cpucount < len(archives) else len(archives)
         log = ["Listing files in layer {}/{} ...".format(i, len(archives))
@@ -426,13 +307,23 @@ class OciManifest(object):
         log = "\n".join(log)
         print(log)
         print("\033[F" * (len(archives) + 1))
+
+        original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
         p = mproc.Pool(processes=worker)
-        result = p.map(call_flist, archives)
-        p.terminate()
+        signal.signal(signal.SIGINT, original_sigint_handler)
+        try:
+            result = p.map_async(call_flist, archives)
+            result = result.get(timeout=1000000)
+        except KeyboardInterrupt:
+            p.terminate()
+            raise PcoccError("Interrupted")
+
+        p.close()
+        p.join()
+
         print("\033[F\033[2K" * len(archives))
         print("Listed files for {} layers".format(len(archives)))
-        # Rearm signal in main prog
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
+
         return result
 
     @classmethod
@@ -444,7 +335,6 @@ class OciManifest(object):
     @classmethod
     def _set_file_state(cls, path, state_dict, visible=False):
         state_dict[cls._normalize_path(path)] = visible
-        logging.debug("file %s visible state %s", path, visible)
 
     @classmethod
     def _is_in_dir(cls, path, directory):
@@ -472,11 +362,9 @@ class OciManifest(object):
 
                 if basename.startswith(".wh."):
                     if basename in opaque_wh_list:
-                        logging.debug("processing opaque directory %s", dirname)
                         self._set_dir_state(dirname, state_dict, visible=False)
                     else:
                         target_file = os.path.join(dirname, basename[4:])
-                        logging.debug("processing whiteout for file %s", target_file)
                         self._set_file_state(target_file, state_dict, visible=False)
 
                 dirname = os.path.dirname(f)
@@ -571,17 +459,24 @@ class OciManifest(object):
         if not os.path.isdir(output_dir):
             os.mkdir(output_dir)
 
+        original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
         # Start parallel extraction
-        p = mproc.pool.ThreadPool(processes=mproc.cpu_count())
+        p = mproc.pool.ThreadPool(processes=4)
+        signal.signal(signal.SIGINT, original_sigint_handler)
 
         for i in range(0, len(group_list)):
             group = group_list[i]
-            total_size = sum([a.size() for a in group])
+            total_size = sum([a.size for a in group])
             print("Extracting layer group {}/{} "
-                  "(archived size {}) ...".format(i + 1,
-                                                  len(group_list),
-                                                  human_size(total_size)))
-            p.map(call_extract, group)
+                  "(size {}) ...".format(i + 1,
+                                         len(group_list),
+                                         human_size(total_size)))
+            try:
+                r = p.map_async(call_extract, group)
+                r.wait(timeout=1000000)
+            except KeyboardInterrupt:
+                p.terminate()
+                raise PcoccError("Interrupted")
 
         # Make mode path absolute and parse them
         new_rights = []
@@ -591,13 +486,25 @@ class OciManifest(object):
             new_rights.append({"path": abs_path,
                                "rights": self._parse_right(txt_rights)})
 
-        p.map(set_file_rights, new_rights, chunksize=128)
+        try:
+            r = p.map_async(set_file_rights, new_rights, chunksize=128)
+            r.wait(timeout=1000000)
+        except KeyboardInterrupt:
+            p.terminate()
+            raise PcoccError("Interrupted")
+
 
         # We now process whiteout files
         wh = self._compute_whiteouts(file_sets, output_dir)
-        p.map(rm_wh_file, wh)
+        try:
+            r = p.map_async(rm_wh_file, wh)
+            r.wait(timeout=1000000)
+        except KeyboardInterrupt:
+            p.terminate()
+            raise PcoccError("Interrupted")
 
-        p.terminate()
+        p.close()
+        p.join()
 
     def extract_bundle(self, oci, output_dir, no_strict_ts=True):
         print("Generating OCI bundle ... ")

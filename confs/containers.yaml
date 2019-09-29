@@ -1,226 +1,31 @@
-config:
-    # Path to a docker-cli as imported for example from static
-    # binaries https://download.docker.com/linux/static/stable/
-    docker_path: /opt/docker-cli/
-    # If the connection to Docker should us an IP instead of a hostname
-    docker_use_ip_address: true
-    # Name of the docker VM pod image
-    docker_pod: docker-pod
-    # List of mountpoints to expose inside the Docker environment
-    # they SHOULD not conflict with existing directories or files
+runtime:
+    # Template to instanciate docker VMs
+    docker_template: docker-vm
+    # Host directories made available to the docker daemon
     docker_mounts:
-        # A mountpoint is {src: XX, dest: XX} and dest can
-        # be ommited it then implies src=dest
-        - src: /usr/
-          dest: /test/usr
-        - src: /mydir
-    # Define if pcocc has to interpret OCI hooks in container configuration files
-    # see https://github.com/opencontainers/runtime-spec/blob/master/config.md#posix-platform-hooks
-    enable_oci_hooks: false
-    # Define if pcocc has to use squashfs images or rootfs images
-    use_squashfs: true
-    # Some files are known to be systematically mounted in containers
-    # in order to speedup launch time it is possible to pre-populate them
-    # when generating the squashfs images. In this case, empty files / dirs
-    # are created, avoiding possibly expensive mounts later on
-    # NOTE : if the path ends with a "/" it will create a directory
-    squashfs_image_mountpoints:
-        - "/ect/passwd"
-        - "/etc/resolv.conf"
-        # - "/sharedworkspace/"
-    # Where to temporarilly extract container images
-    # this value can be overriden manually with the "PCOCC_CONT_TMP_DIR"
-    # environment variable
-    container_tmp_path: /dev/shm
-    # What is the maximum **estimated** size in MB of a container using *container_tmp_path*
-    # if the container to be extracted is larger it will head to /tmp
-    # as the exact size cannot be known before actually extracting the image prefer
-    # conservative values
-    container_tmp_path_trsh_mb: 100
+         - source: /home
+    # How images are stored at runtime
+    image_driver: flat
+    # Automatically create empty files or directories in containers
+    # for more efficient bind-mounts over read-only images
+    # image_mountpoints:
+    #    - "/scratch"
+    # List of registries authorized over insecure HTTP
+    # insecure_registries:
+    #    - 'registry.mydomain.com:5000'
+    # Replace DockerHub with a custom registry
+    # default_registry: 'registry.mydomain.com:5000'
 
-
-# Per container environment (when being run by pcocc)
 containers:
-    # The "default" key applies to all containers
+    # Default configuration applies to all containers
     default:
+        # Bind mounts
         mounts:
-            # Mount user's home by default in containers
-            home:
-                source: "%{homedir}"
-    example:
-        mounts: # What is mounted inside the container
-            example: # Follows OCI mountpoint semantics
-                source: "/example"
-                destination: "/example"
-                type: "bind"
-        ns: # Which namespaces to activate
-            - "uts"
-            - "mount"
-        env:
-            - EXPORT_THIS_VARIABLE=1
-            - PWD
-        hooks:
-            # OCI hooks
-            # see https://github.com/opencontainers/runtime-spec/blob/master/config.md#posix-platform-hooks
-            prestart:
-                # Before starting the command
-                - path: /usr/bin/ls
-                env:
-                    - AA=8
-                    - BB=azery
-                args:
-                    - -la
-                timeout: 120
-            #poststart:
-                # Same layout
-            #poststop:
-                # Same layout
+           home:
+               source: "%{env:HOME}"
 
-# Configuration for modules (-M flag of pcocc run)
-# content is similar to container config and overlap
-# with the initial container config except that inheritance is supported
-# -M flags can be put multiple times or comma separated
-# for example -M nvidia,pmi is equivalent to -M nvidia -M pmi
+# Modules definition (-M flag of pcocc run).
 modules:
-    pmienv:
-        # What is needed to inject the host PMI from SLURM
-        env:
-            - 're(SLURM*)'
-            - 're(PMI*)'
-        mounts:
-            libpmi2:
-                source: /usr/lib64/libpmi2.so.0
-                destination: /pcocc/lib/pmi/libpmi2.so.0
-            libpmi:
-                source: /usr/lib64/libpmi.so.0
-                destination: /pcocc/lib/pmi/libpmi.so.0
-            libslurm:
-                source: /usr/lib64/libslurm.so.32
-                destination: /pcocc/lib/pmi/libslurm.so.32
-        pathprefix:
-            - LD_LIBRARY_PATH=/pcocc/lib/pmi/
-
-    verbs:
-        # What is needed to inject host IB configuration
-        mounts:
-            verbsconfdir:
-                source: "/etc/libibverbs.d"
-            verbs_rdmacm:
-                source: "/usr/lib64/librdmacm.so.1.0.0"
-                destination: "/pcocc/lib/verbs/librdmacm.so.1"
-            verbs_mlx5:
-                source: "/usr/lib64/libmlx5.so.1.0.0"
-                destination: "/pcocc/lib/verbs/libmlx5-rdmav2.so"
-            verbs_mlx4:
-                source: "/usr/lib64/libmlx4-rdmav2.so"
-                destination: "/pcocc/lib/verbs/libmlx4-rdmav2.so"
-            verbs:
-                source: "/usr/lib64/libibverbs.so.1.0.0"
-                destination: "/pcocc/lib/verbs/libibverbs.so.1"
-            libnl:
-                # This is a dependency lib to IBVERBS
-                source: "/lib64/libnl.so.1"
-                destination: "/pcocc/lib/verbs/libnl.so.1"
-            devices:
-                source: /dev/infiniband/
-                options: ["dev"]
-        pathprefix:
-            - LD_LIBRARY_PATH=/pcocc/lib/verbs/
-
-    pmi:
-        inherits:
-            - "pmienv"
-            - "verbs"
-        env:
-            - "OMPI_MCA_btl_openib_allow_ib=1"
-
-#
-# In this last example we present command-based configurations
-#
-# pcocc can process the output of a program to generate a configuration
-# on the fly with a line-based syntax:
-#
-# MOUNT [SRC](:[DEST])
-# ENV [VAR] or [VAR=B] or re(XX.*)
-# PATHPREFIX [VAR] or [VAR=X]
-# PATHSUFFIX [VAR] or [VAR=X]
-# MODULE [MOD]
-#
-# Each command is passed the following extra arguments:
-# [PATH TO config.json] [PATH to rootfs]
-#
-# Below is an example of 'nvidia_container_list' command using
-# the nvidia-container-cli command from Nvidia
-# =================================================
-# #!/bin/bash
-
-# PCOCC_NVIDIA_DIR=/pcocc/nvidia/
-
-# mount()
-# {
-#     echo "MOUNT ${1}:${PCOCC_NVIDIA_DIR}/${1}"
-# }
-
-# prefix()
-# {
-#     echo "PATHPREFIX ${1}"
-# }
-
-# for e in `nvidia-container-cli list -l -b`
-# do
-#     if test ! -e $e
-#     then
-#         # We only deal with existing files
-#         continue
-#     fi
-
-#     if echo "$e" | grep ".so"
-#     then
-#         # Make sure to include all libs
-#         # with this name not only the one with version
-#         PRE=$(echo $e | cut -d "." -f 1)
-#         for e in $(find ${PRE}*)
-#         do
-#             mount $e
-#         done
-#     else
-#         mount $e
-#     fi
-# done
-
-# # Now add the correct prefixes
-# prefix PATH="${PCOCC_NVIDIA_DIR}/usr/bin/"
-# prefix LD_LIBRARY_PATH="${PCOCC_NVIDIA_DIR}/usr/lib/"
-# prefix LD_LIBRARY_PATH="${PCOCC_NVIDIA_DIR}/usr/lib64/"
-
-# DEV=${NVIDIA_VISIBLE_DEVICES:=all}
-
-# if test ! "x"${DEV}"" = "xnone"
-# then
-#     for e in `nvidia-container-cli list -d ${DEV}`
-#     do
-#         if test ! -e $e
-#         then
-#             # We only deal with existing files
-#             continue
-#         fi
-
-#         # We must put devices in /dev/
-#         echo "MOUNT $e"
-#     done
-# fi
-
-# # Import cuda environment module if loaded
-# if test ! -z ${CUDA_ROOT}
-# then
-#     echo "MOUNT ${CUDA_ROOT}"
-
-#     for e in $(env | grep "^CUDA")
-#     do
-#         echo "ENV $e"
-#     done
-# fi
-# ====================================================
     nvidia:
         generator:
-            - nvidia_container_list
+            - nvidia-container-list

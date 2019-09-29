@@ -1166,8 +1166,7 @@ def _pcocc_batch(restart_ckpt,
         else:
             launcher_opt = ['-w']
 
-        wrpfile.write("""
-#!/bin/bash
+        wrpfile.write("""#!/bin/bash
 #SBATCH -o pcocc_%j.out
 #SBATCH -e pcocc_%j.err
 """)
@@ -1200,7 +1199,9 @@ PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s %s %s &
 wait
 rm "$TEMP_BATCH_SCRIPT" 2>/dev/null
 rm "$TEMP_HOST_SCRIPT" 2>/dev/null
-""" % (' '.join(build_verbose_opt()),
+
+exit $RET
+""" % (' '.join(Config().verbose_opt),
             ' '.join(launcher_opt),
             ' '.join(ckpt_opt),
             ' '.join(docker_opt),
@@ -1218,14 +1219,6 @@ rm "$TEMP_HOST_SCRIPT" 2>/dev/null
 
     except PcoccError as err:
         handle_error(err)
-
-
-def build_verbose_opt():
-    if Config().verbose > 0:
-        return ['-' + 'v' * Config().verbose]
-    else:
-        return []
-
 
 @cli.command(name='alloc',
              context_settings=dict(ignore_unknown_options=True),
@@ -1280,7 +1273,7 @@ def _pcocc_alloc(restart_ckpt,
         ret = config.batch.alloc(cluster,
                                  batch_options + get_license_opts(cluster) +
                                  ['-n', '%d' % (len(cluster.vms))],
-                                 ['pcocc'] + build_verbose_opt() +
+                                 ['pcocc'] + Config().verbose_opt +
                                  ['internal', 'launcher'] + docker_opt +
                                  mirror_opt + alloc_opt + user_data_opt +
                                  ckpt_opt + [cluster_definition])
@@ -1354,7 +1347,7 @@ def pcocc_launcher(restart_ckpt,
     s_pjob = batch.run(cluster,
                        ['-Q', '-X', '--resv-port'],
                        ['pcocc'] +
-                       build_verbose_opt() +
+                       Config().verbose_opt +
                        ['internal', 'run'] + docker_opt + gen_user_data_opt(user_data) +
                        ckpt_opt)
     try:
@@ -1383,9 +1376,7 @@ def pcocc_launcher(restart_ckpt,
     if mirror_user:
         runner = Run.VirtualMachine(cluster)
         # We only insert the user and groups
-        runner.mirror(adduser=True,
-                      mounthome=False,
-                      rootfs=False)
+        runner.mirror()
 
     term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
 
@@ -1733,16 +1724,16 @@ def agent():
               help='Run the command in a PTY')
 @click.argument('cmd', nargs=-1, required=True, type=click.UNPROCESSED)
 @per_cluster_cli(False)
-def pcocc_run(jobid,
-              jobname,
-              user,
-              indices,
-              script,
-              mirror_env,
-              cmd,
-              timeout,
-              pty,
-              cluster):
+def pcocc_agent_run(jobid,
+                    jobname,
+                    user,
+                    indices,
+                    script,
+                    mirror_env,
+                    cmd,
+                    timeout,
+                    pty,
+                    cluster):
     try:
         rangeset = CLIRangeSet(indices, cluster)
         # This is where we pass the launch config
@@ -1919,24 +1910,6 @@ def pcocc_ping(jobid, jobname, indices, timeout, cluster):
 
     # Return -1 if there is any error
     sys.exit(-int(bool(ret.errors)))
-
-@cli.command(name='mirror',
-             short_help="Insert user and groups in VM")
-@click.option('-j', '--jobid', type=int,
-              help='Jobid of the selected cluster')
-@click.option('-J', '--jobname',
-              help='Job name of the selected cluster')
-@click.option('-i', '--indices', default="all", type=str,
-              help='Rangeset of VM indices on'
-                   ' which the command should be executed')
-@per_cluster_cli(False)
-def pcocc_mirror(jobid, jobname, indices, cluster):
-    try:
-        rangeset = CLIRangeSet(indices, cluster)
-        runner = Run.VirtualMachine(cluster)
-        runner.mirror(rangeset=rangeset)
-    except PcoccError as err:
-        handle_error(err)
 
 
 @cli.group()
@@ -2361,7 +2334,7 @@ def pcocc_ps(user, allusers):
         handle_error(err)
 
 
-@internal.command(name='runnativecont',
+@internal.command(name='run-ctr',
                   short_help='Run a native container')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
@@ -2369,24 +2342,18 @@ def pcocc_ps(user, allusers):
               help='Job name of the selected cluster')
 @click.argument('args', nargs=-1, type=click.UNPROCESSED)
 @per_cluster_cli(False, allow_no_alloc=True)
-def pcocc_run_internal(jobid,
-                       jobname,
-                       args,
-                       cluster):
+def pcocc_internal_run_ctr(jobid,
+                           jobname,
+                           args,
+                           cluster):
     try:
         runner = Run.Native()
 
         if not len(args):
             raise PcoccError("A configuration object must be passed")
 
-        cont_conf = json.loads(args[0])
-
-        # Force singleton RUN
-        cont_conf["singleton"] = True
-
-        runner = Run.Container(runner,
-                               cont_conf=cont_conf)
-        runner.run()
+        runner = Run.Container(runner, conf=json.loads(args[0]))
+        sys.exit(runner.run())
     except PcoccError as err:
         handle_error(err)
 
@@ -2425,7 +2392,7 @@ def pcocc_run_internal(jobid,
 @click.option('--no-user', is_flag=True, default=False,
               help='Do not inject the user inside the container or VM')
 @click.option('-e', '--env', type=str, multiple=True,
-              help='Environment variables to propagate in the container or VM')
+              help='Environment variables to propagate')
 @click.option('--path-prefix', type=str, multiple=True,
               help='Prepend values to a PATH type variable')
 @click.option('--path-suffix', type=str, multiple=True,
@@ -2439,34 +2406,34 @@ def pcocc_run_internal(jobid,
               help='Override entry point of a Docker container')
 @click.argument('cmd', nargs=-1, type=click.UNPROCESSED)
 @per_cluster_cli(False, allow_no_alloc=True)
-def pcocc_run_main(jobid,
-                   jobname,
-                   user,
-                   script,
-                   nodelist,
-                   pty,
-                   image,
-                   node,
-                   process,
-                   core,
-                   singleton,
-                   partition,
-                   mirror_env,
-                   no_defaults,
-                   no_user,
-                   env,
-                   path_prefix,
-                   path_suffix,
-                   mount,
-                   cwd,
-                   module,
-                   cmd,
-                   entry_point,
-                   cluster):
+def pcocc_run(jobid,
+              jobname,
+              user,
+              script,
+              nodelist,
+              pty,
+              image,
+              node,
+              process,
+              core,
+              singleton,
+              partition,
+              mirror_env,
+              no_defaults,
+              no_user,
+              env,
+              path_prefix,
+              path_suffix,
+              mount,
+              cwd,
+              module,
+              cmd,
+              entry_point,
+              cluster):
     try:
         cmd = list(cmd)
 
-        if len(cmd) == 0 and not image and not script:
+        if not cmd and not image and not script:
             raise PcoccError("You must specify a command, an image name "
                              "or a script")
 
@@ -2486,27 +2453,15 @@ def pcocc_run_main(jobid,
         if pty:
             if process > 1:
                 raise PcoccError("Cannot run in a PTY on more than 1 process")
-            if not os.isapty(sys.stdout.fileno()):
-                raise PcoccError("Cannot run in a PTY as stdout is not a PTY")
-
-        if cluster:
-            # We are inside a pcocc allocation
-            inside_pcocc_allocation = 1
-        else:
-            # We are outside of a pcocc allocation
-            inside_pcocc_allocation = 0
-
-        runner = None
+            if not sys.stdout.isatty():
+                raise PcoccError("Cannot run in a PTY as stdout is not a TTY")
 
         if singleton:
-            # No batch run natively
             runner = Run.Native()
-        elif not inside_pcocc_allocation:
-            # Wrap the command with slurm
-            runner = Run.Slurm()
-        else:
-            # Run inside a PCOCC alloc and VMs
+        elif cluster:
             runner = Run.VirtualMachine(cluster)
+        else:
+            runner = Run.Slurm()
 
         # Propagate and validate run config to runner
         runner.set_configuration(process,
@@ -2518,39 +2473,31 @@ def pcocc_run_main(jobid,
         if user:
             runner.set_user(user)
 
-        if module:
-            # First expand the set and potential
-            # comma separated values
-            module_set = set()
-            for e in module:
-                module_set.update(e.split(","))
-
-            for m in module_set:
-                # Set the runtimes
-                # we do it before wrapping for containers
-                # as this information changes the config
-                runner.set_module(m)
-
         if image:
-            # Wrap the current runner with
-            # the Native container runner
-            # Container OCI env is loaded first
-            # and then the containers.yaml part is applied
+            if module:
+                module_set = set()
+                for e in module:
+                    module_set.update(e.split(","))
+
+            else:
+                module_set = ()
+
             runner = Run.Container(runner,
-                                   image,
-                                   singleton,
+                                   image=image,
+                                   modules=list(module_set),
                                    no_user=no_user,
                                    no_defaults=no_defaults,
                                    command=cmd)
 
-            # Entry point is only meaningful for containers
-            if entry_point:
-                # Note that entrypoint is an array
+        if entry_point:
+            if image:
                 runner.set_entrypoint(shlex.split(entry_point))
+            else:
+                raise PcoccError("Entrypoint can only be defined for container images")
 
         if script:
             runner.set_script(script)
-        else:
+        elif cmd:
             runner.set_argv(cmd)
 
         if pty:
@@ -2568,7 +2515,10 @@ def pcocc_run_main(jobid,
             # a value "-" forces the use of the OCI value
             runner.set_cwd(cwd, forced=True)
         else:
-            runner.set_cwd(os.getcwd())
+            if os.getcwd() == os.path.realpath(os.environ['PWD']):
+                runner.set_cwd(os.environ['PWD'])
+            else:
+                runner.set_cwd(os.getcwd())
 
         # It is important to set mirror before manipulating
         # the env variables as it defines if current vars
@@ -2581,14 +2531,15 @@ def pcocc_run_main(jobid,
         Run.Env.path_prefix(runner, path_prefix)
         Run.Env.path_suffix(runner, path_suffix)
 
-        # Add command-line mountpoints (only meaninful for containers)
+        # Add command-line mountpoints (only meaningful for containers)
         Run.Mount.add(runner, mount)
 
         # Run the program
-        runner.run()
+        sys.exit(runner.run())
+
     except subprocess.CalledProcessError as e:
         # Here we catch the error from the native
-        # exec when running in singleton (runner is not wrapped)
+        # exec when running locally (runner is not wrapped)
         click.secho("Could not execute program", fg='red', err=True)
         sys.exit(e.returncode)
     except PcoccError as err:

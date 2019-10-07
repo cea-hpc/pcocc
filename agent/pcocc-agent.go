@@ -4,44 +4,43 @@ import (
 	"os"
 	"io/ioutil"
 	"flag"
+	"path"
 	log "github.com/sirupsen/logrus"
 	"github.com/onrik/logrus/filename"
 )
 
 func locate_serial_port() string {
-	// In some lightweight image virt-io ports
-	// may not be mapped in /dev/ as done by systemd
-	def := "/dev/virtio-ports/pcocc_agent"
+	// Since we may run on minimal systems where udev might not be
+	// used, we detect virtio-ports ourselves
 	virtiodir := "/sys/class/virtio-ports/"
 	if _, err := os.Stat(virtiodir); os.IsNotExist(err) {
-		log.Info("Pcocc cannot stat " + virtiodir)
-		log.Info("Ignoring serial port detection")
-		// Could not scan virt-io ports just asume default
-		return def
+		log.Fatal("Cannot stat " + virtiodir)
+		os.Exit(1)
 	}
 
-    files, err := ioutil.ReadDir(virtiodir)
-    if err != nil {
-		log.Info("Pcocc cannot list :" + virtiodir)
-        return def
-    }
+	files, err := ioutil.ReadDir(virtiodir)
+	if err != nil {
+		log.Fatal("Failed to read directory " + virtiodir)
+		os.Exit(1)
+	}
 
-    for _, file := range files {
-		to_check := virtiodir + "/" + file.Name() + "/name"
-        dat, err := ioutil.ReadFile(to_check)
+	for _, file := range files {
+		to_check := path.Join(virtiodir, file.Name(), "name")
+		dat, err := ioutil.ReadFile(to_check)
 		if err != nil {
 			continue
 		}
-		log.Info("Testing " + to_check + " name " + string(dat))
-		if string(dat) == "pcocc_agent\n" {
-			log.Info("Pcocc serial port found in " + to_check)
-			return "/dev/" + file.Name()
-		}
-    }
 
-	log.Info("No virtio port found resorting to default")
-	// Not found
-	return def
+		if string(dat) == "pcocc_agent\n" {
+			log.Info("pcocc serial port found in " + to_check)
+			return path.Join("/dev", file.Name())
+		}
+	}
+
+	log.Fatal("pcocc agent virtio port not found")
+	os.Exit(1)
+
+	return "unreachable code"
 }
 
 

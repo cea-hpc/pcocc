@@ -1,4 +1,4 @@
-package serial
+package main
 
 import (
 	"os"
@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 	"encoding/base64"
-	"agent_protocol"
-	"command"
 	"strconv"
+	"github.com/cea-hpc/pcocc/agent/agent_protocol"
 	proto "github.com/golang/protobuf/proto"
 	log "github.com/sirupsen/logrus"
 )
@@ -132,7 +131,7 @@ func (sr *Reader) ListenLoop() {
 
 		go sr.handleClientInput(f, inchan, thawchan)
 
-		var disp = command.MakeDispatch(inchan, outchan)
+		var disp = MakeDispatch(inchan, outchan)
 		go disp.Run()
 
 		select_outchan := outchan

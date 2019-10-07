@@ -350,17 +350,6 @@ message WriteFileResult {
    int64  written = 1;
 }
 
-message UserAddMessage
-{
-  int64  uid = 1;
-  int64  gid = 2;
-  string user = 3;
-  map<string, int64> groups = 4;
-}
-
-message UserAddResult {
-}
-
 message MountMessage
 {
   string path = 1;

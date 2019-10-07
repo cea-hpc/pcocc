@@ -1,7 +1,6 @@
 package main
 
 import (
-	"serial"
 	"os"
 	"io/ioutil"
 	"flag"
@@ -56,7 +55,7 @@ func main() {
 	log.AddHook(filename.NewHook())
 
 	port := locate_serial_port()
-	ser := serial.ReaderMake(port)
+	ser := ReaderMake(port)
 	ser.ListenLoop()
 	return
 }

@@ -1,11 +1,11 @@
 [Unit]
-Description=pcoccagent
+Description=pcocc guest agent
 After=syslog.target network.target
 
 [Service]
 Type=simple
 PIDFile=/var/pcocc-agent.pid
-ExecStart=/sbin/pcocc-agent
+ExecStart=/usr/sbin/pcocc-agent
 Restart=on-failure
 
 [Install]

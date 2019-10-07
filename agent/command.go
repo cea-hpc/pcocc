@@ -1,7 +1,7 @@
-package command
+package main
 
 import (
-	"agent_protocol"
+	"github.com/cea-hpc/pcocc/agent/agent_protocol"
 	"errors"
 	"io"
 	"os"

@@ -651,8 +651,8 @@ class VirtualMachine(Runner):
 
         ret.raise_errors()
 
-    def get_core_count(self):
-        ret = AgentCommand.corecount(self.cluster, self.target_rangeset)
+    def get_core_count(self, timeout=DEFAULT_AGENT_TIMEOUT):
+        ret = AgentCommand.corecount(self.cluster, self.target_rangeset, timeout)
         vm_cores = [-1 for _ in range(0, self.cluster.vm_count())]
 
         for k, e in ret.iterate(yield_results=True):

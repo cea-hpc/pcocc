@@ -486,7 +486,7 @@ class ObjectStore(object):
                 meta = yaml.load(raw_meta, Loader=yaml.CSafeLoader)
             else:
                 meta = json.loads(raw_meta)
-        except (yaml.YAMLError, json.JSONDecodeError) as e:
+        except (yaml.YAMLError, ValueError) as e:
             raise PcoccError('Bad metadata for {0}: {1}'.format(name, e))
 
         try:

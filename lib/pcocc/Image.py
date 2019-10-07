@@ -283,14 +283,20 @@ class VMImage(object):
             operation {str} -- for logging (default: {"Importing"})
 
         """
-        click.secho(operation + " image... ")
-        sys.stdout.flush()
+        if not os.path.isfile(source_path):
+            raise PcoccError("not an image file".format(source_path))
+
+        if src_format != dst_format:
+            print("Converting image...")
+        else:
+            print("Copying image...")
+
         try:
             subprocess.check_output(
                 ["qemu-img", "convert",
                  "-f", src_format,
                  "-O", dst_format,
-                 source_path, dst_path])
+                 source_path, dst_path], stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             raise PcoccError("Unable to convert image. "
                              "The qemu-img command failed with: " +
@@ -1252,7 +1258,7 @@ class ImageMgr(object):
                         meta['kind']))
 
         h = dst_store.put_data_blob(path)
-        return dst_store.put_meta(dst_name, revision, kind, [h], {})
+        return dst_store.put_meta(dst_name, revision, kind.name, [h], {})
 
     def import_image(self, src_path, dst_uri, src_fmt=None, vm=None):
         """Import an image in the objectstore.

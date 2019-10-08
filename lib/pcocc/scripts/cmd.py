@@ -2351,7 +2351,7 @@ def pcocc_ps(user, allusers):
 
         tbl = TextTable("%id %name %user %partition"
                         " %nodes %duration %timelimit")
-        for j in joblist:
+        for j in sorted(joblist, key=lambda x: x['jobname']):
             tbl.append({'id': str(j["batchid"]),
                         'user': j["user"],
                         'partition': j["partition"],

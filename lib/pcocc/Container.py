@@ -676,7 +676,7 @@ class ContainerTemplate(dict):
             try:
                 mode = os.stat(src).st_mode
             except os.error:
-                logging.warning("Skipping mount command of non-existing path '{}' ".format(p))
+                logging.warning("Skipping mount command of non-existing path '%s' ", p)
                 return
 
             if stat.S_ISCHR(mode) or stat.S_ISBLK(mode):

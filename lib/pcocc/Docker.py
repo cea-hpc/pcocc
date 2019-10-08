@@ -18,16 +18,10 @@
 
 import subprocess
 import os
-import tempfile
-import shutil
 import uuid
 import socket
 import logging
 import shlex
-from distutils import spawn
-
-
-from pcocc import agent_pb2
 
 from .Agent import AgentCommand
 from .Error import PcoccError

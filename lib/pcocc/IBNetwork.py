@@ -8,7 +8,6 @@ import tempfile
 import shutil
 import stat
 import signal
-import yaml
 
 from .Config import Config
 from .NetUtils import VFIOInfinibandVF

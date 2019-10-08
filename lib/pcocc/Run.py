@@ -27,13 +27,11 @@ import subprocess
 import shutil
 import pty
 import random
-import threading
 import tempfile
 import grp
 import shlex
 import json
 import logging
-import signal
 import pipes
 from distutils import spawn
 from pwd import getpwnam
@@ -549,23 +547,6 @@ class VirtualMachine(Runner):
     def set_env_var(self, key, value, prefixexpand=None):
         self.env.append("{}={}".format(key, value))
 
-    def add_current_user_in_vm(self, rangeset):
-        u = pwd.getpwuid(os.getuid())
-
-        user = u.pw_name
-        uid = u.pw_uid
-        gid = u.pw_gid
-        groups = gen_user_group_list(user, gid)
-
-        ret = AgentCommand.useradd(self.cluster, rangeset,
-                                   uid=uid, gid=gid,
-                                   user=user, groups=groups)
-
-        for k, message in ret.iterate():
-            click.secho("vm{}: {}".format(k, message), fg='red', err=True)
-
-        if ret.errors:
-            raise PcoccError("Failed to insert user {0}".format(user))
 
     def mount_rootfs(self, rangeset):
         # Check if the mount point is defined in all VM templates
@@ -994,7 +975,7 @@ class Native(Runner):
             Native -- runner to chain commands
 
         """
-        raise Exception
+
         self.env[key] = value
         return self
 
@@ -1136,7 +1117,7 @@ class ContainerFs(object):
     def __init__(self,
                  runner,
                  image,
-                 modules=[],
+                 modules=None,
                  no_defaults=False,
                  no_user=False,
                  command=None):
@@ -1257,7 +1238,7 @@ class ContainerFs(object):
                                   mount_type=mnt.get("type", "bind"),
                                   options=mnt.get("opt", None))
 
-    def set_env_var(self, key, value):
+    def set_env_var(self, key, value, prefixexpand=None):
         # FIXME: the bwrap-oci launch method doesn't properly escape
         # environment variables
         if '\n' in value:

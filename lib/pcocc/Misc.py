@@ -28,12 +28,10 @@ import datetime
 import jsonschema
 import yaml
 import atexit
-import time
-import grp
 import pwd
 from Queue import Queue
 from threading import Thread
-from ctypes import *
+from ctypes import c_uint, c_char_p, c_int, POINTER, cdll, c_int32, byref
 from ctypes.util import find_library
 
 from pcocc.Backports import  enum
@@ -189,7 +187,6 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout, name=""):
                     os.kill(child_proc.pid, sig)
             except:
                 logging.info("Wait/Term child: Failed to kill process")
-                pass
 
             # Next time force kill
             next_sig = datetime_to_epoch(datetime.datetime.utcnow()) + timeout
@@ -442,7 +439,10 @@ def getgrouplist(user, gid):
     # if 50 groups was not enough this will be -1, try again
     # luckily the last call put the correct number of groups in ngrouplist
     if ct < 0:
-        libc_getgrouplist.argtypes = [c_char_p, c_uint, POINTER(c_uint *int(ngrouplist.value)), POINTER(c_int)]
+        libc_getgrouplist.argtypes = [c_char_p,
+                                      c_uint,
+                                      POINTER(c_uint * int(ngrouplist.value)),
+                                      POINTER(c_int)]
         grouplist = (c_uint * int(ngrouplist.value))()
         ct = libc_getgrouplist(u.pw_name, u.pw_gid, byref(grouplist), byref(ngrouplist))
 

@@ -375,11 +375,11 @@ class ObjectStore(object):
 
                 with open(self._config_path, 'w') as f:
                     yaml.safe_dump({'version': 2}, f)
-            except Exception as e:
+            except Exception:
                 logging.error("Failed to upgrade repository")
                 self.version = 1
                 try:
-                    shutils.rmtree(self._meta_path, ignore_errors=True)
+                    shutil.rmtree(self._meta_path, ignore_errors=True)
                 except Exception:
                     pass
                 shutil.move(self._meta_path + '.old', self._meta_path)
@@ -444,7 +444,8 @@ class ObjectStore(object):
 
         return h
 
-    def put_meta(self, name, revision, kind, data_blobs, custom_meta=None, user=None, timestamp=None):
+    def put_meta(self, name, revision, kind, data_blobs, custom_meta=None, user=None,
+                 timestamp=None):
         self._validate_name(name)
         target = self.get_meta_path(name, revision)
 
@@ -581,7 +582,8 @@ class ObjectStore(object):
         if repo_config['version'] < 2:
             logging.info('Please upgrade your %s repository', self.name)
         elif repo_config['version'] != 2:
-            raise InvalidConfigurationError('Unsupported version for repository "{}"'.format(self.name))
+            raise InvalidConfigurationError('Unsupported version for repository "{}"'.format(
+                self.name))
 
     def _init_repodir(self):
         if os.path.isdir(self._path):

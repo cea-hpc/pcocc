@@ -276,7 +276,7 @@ class VMImage(object):
 
         """
         if not os.path.isfile(source_path):
-            raise PcoccError("not an image file".format(source_path))
+            raise PcoccError("not an image file")
 
         if src_format != dst_format:
             print("Converting image...")
@@ -347,10 +347,12 @@ def _cont_get_tmp_directory(layout_path):
     size = _layout_size(layout_path)
 
     if size <= Config().containers.config.container_shm_work_limit * 1024 * 1024:
-        logging.info("Container fits under memory extraction threshold (%d MB)", size // (1024 * 1024))
+        logging.info("Container fits under memory extraction threshold (%d MB)",
+                     size // (1024 * 1024))
         return tempfile.mkdtemp(dir=Config().containers.config.container_shm_work_path)
     else:
-        logging.info("Container exceeds memory extraction threshold  (%d MB)", size // (1024 * 1024))
+        logging.info("Container exceeds memory extraction threshold  (%d MB)",
+                     size // (1024 * 1024))
         return tempfile.mkdtemp()
 
 
@@ -446,7 +448,7 @@ class ContainerBundleView(ContainerView):
             try:
                 func()
                 break
-            except Exception as e:
+            except Exception:
                 time.sleep(wait)
                 logging.debug('Retrying %s', func.__name__)
         return True

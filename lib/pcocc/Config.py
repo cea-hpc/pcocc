@@ -26,7 +26,6 @@ import pcocc
 from pcocc.Singleton import Singleton
 from os.path import expanduser
 from .NetUtils import Tracker
-from pcocc.Error import InvalidConfigurationError
 
 DEFAULT_CONF_DIR = os.environ.get('PCOCC_SYSTEM_CONF_DIR', '/etc/pcocc')
 DEFAULT_RUN_DIR = '/var/run/pcocc'

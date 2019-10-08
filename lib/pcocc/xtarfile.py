@@ -1,3 +1,4 @@
+# pylint: skip-file
 """
 This is a monkey patching for Python 2 that is required to handle PAX headers
 in TAR files that are not decodable to UTF8. It leaves it undecoded and when

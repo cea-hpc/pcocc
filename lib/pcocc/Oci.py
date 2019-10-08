@@ -22,7 +22,6 @@ import shutil
 import tempfile
 import subprocess
 import json
-import binascii
 import signal
 import multiprocessing as mproc
 from distutils import spawn
@@ -30,8 +29,6 @@ import threading
 import re
 import tarfile
 import logging
-import sys
-import time
 import six
 
 from .Error import PcoccError
@@ -39,6 +36,7 @@ from .Misc import path_join
 
 
 if six.PY2:
+    # pylint: disable=W0611
     import xtarfile
 
 def human_size(size):
@@ -124,7 +122,7 @@ class CompressedArchive(object):
                 os.chmod(elem_path, 0o700)
         except (OSError, IOError,) as e:
             logging.warning("Warning: could not extract "
-                            "file '{}': {}".format(str(elem.name), str(e)))
+                            "file '%s': %s", str(elem.name), str(e))
 
     def extract_no_right(self):
         compress_program = self._get_compress_program()

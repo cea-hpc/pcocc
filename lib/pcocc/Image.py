@@ -104,27 +104,19 @@ class ImageType(Enum):
             Enum Imagetype -- the corresponding image kind
 
         """
-        if not fmt:
-            return cls.none
-
-        if fmt in ContImage.known_container_image_formats:
+        if fmt in ContImage.known_img_formats:
             return cls.ctr
 
-        if fmt in VMImage.known_vm_image_formats:
+        if fmt in VMImage.known_img_formats:
             return cls.vm
 
-        if fmt:
-            raise PcoccError("Could not infer image kind "
-                             "from '{}' image format".format(fmt))
-        else:
-            raise PcoccError("Failed to detect image kind "
-                             "you may provide it with the -t option")
+        raise PcoccError('{} is not a valid image format'.format(fmt))
 
 
 class VMImage(object):
     """VMImage manipulation routines."""
 
-    known_vm_image_formats = ["raw", "qcow2", "qed", "vdi", "vpc", "vmdk"]
+    known_img_formats = ["raw", "qcow2", "qed", "vdi", "vpc", "vmdk"]
 
     @staticmethod
     def image_type(path):
@@ -245,7 +237,7 @@ class VMImage(object):
             PcoccError -- ext is not a VM image format
 
         """
-        if ext not in cls.known_vm_image_formats:
+        if ext not in cls.known_img_formats:
             raise PcoccError("VM image format {} not supported".format(ext))
 
     @staticmethod
@@ -642,10 +634,9 @@ class ContainerBundleView(ContainerView):
 class ContImage(object):
     """Container Images manipulation routines."""
 
-    known_container_image_formats = ["containers-storage", "dir", "docker",
-                                     "docker-archive", "docker-daemon", "oci",
-                                     "oci-archive", "ostree", "tarball",
-                                     "simg", "pcocc-docker-daemon"]
+    known_img_formats = ["containers-storage", "dir", "docker",
+                         "docker-archive", "docker-daemon", "oci",
+                         "ostree", "pcocc-docker-daemon"]
 
     @classmethod
     def known_format(cls, ext):
@@ -658,7 +649,7 @@ class ContImage(object):
             PcoccError -- image type is not a container type
 
         """
-        if ext not in cls.known_container_image_formats:
+        if ext not in cls.known_img_formats:
             raise PcoccError("Container Image format not supported: " + ext)
 
     @staticmethod
@@ -682,81 +673,6 @@ class ContImage(object):
                     dst_path,
                     src_fmt,
                     dst_fmt)
-
-    @staticmethod
-    def convert_singularity_to_oci(src_path):
-        if not spawn.find_executable("unsquashfs"):
-            # Stop early is squashfs-tools is not installed
-            raise PcoccError("The 'unsquashfs' tool is required to extract "
-                             " Singularity images")
-
-        bundle_dest = tempfile.mkdtemp()
-
-        if not os.path.isfile(src_path):
-            raise PcoccError("Cannot access image file")
-
-        # First check input type
-        with open(src_path, 'rb') as f:
-            magic = "#!/usr/bin/env run-singularity\nhsqs"
-            header = f.read(len(magic))
-            if header != magic:
-                raise PcoccError("Unsuported Singularity image format")
-            no_header_file = path_join(bundle_dest, "simg")
-            with open(no_header_file, 'wb') as out:
-                # Do not leave out the squashfs magic
-                out.write("hsqs")
-                while True:
-                    buf = f.read(4096)
-                    if buf:
-                        out.write(buf)
-                    else:
-                        break
-
-        # Now proceed to unsquashs the headerless image
-        unsquash_cmd = ["unsquashfs", "-d", "rootfs", no_header_file]
-        oldpwd = os.getcwd()
-        os.chdir(bundle_dest)
-
-        try:
-            out = subprocess.check_output(unsquash_cmd)
-        except subprocess.CalledProcessError:
-            os.unlink(no_header_file)
-
-        os.chdir(oldpwd)
-        os.unlink(no_header_file)
-
-        # Insert the "run" command
-        singularity_run = """
-#!/bin/sh
-
-if test -f /environment
-then
-    . /environment
-fi
-
-if test -f /singularity
-then
-    /singularity
-fi
-"""
-        sing_run_script = path_join(bundle_dest, "rootfs/singularity_run")
-        with open(sing_run_script, 'w') as f:
-            f.write(singularity_run)
-        os.chmod(sing_run_script, 0o755)
-
-        # Is now time to convert this to an OCI image
-        temp_oci = tempfile.mkdtemp()
-        oci = OciImage(temp_oci)
-
-        cont = oci.new_container()
-        cont.set_cmd(["/bin/sh", "/singularity_run"])
-        oci.add_layer(cont, path_join(bundle_dest, "rootfs/"))
-        oci.save()
-
-        # We can now remove the bundle
-        shutil.rmtree(bundle_dest)
-
-        return temp_oci
 
     @staticmethod
     def skopeo_parse(path, fmt, vm, prefix='src-'):
@@ -804,32 +720,14 @@ fi
         cls._skopeo_insecure_arg(args, "src-tls")
 
         cmd = (["skopeo", "copy" ] + args +
-               [src_fmt + ":" + src_path ] +
-               [dst_format + ":" + dest_path + ":latest"])
+               [":".join([src_fmt, src_path]) ] +
+               [":".join([dst_format, dest_path, "latest"])])
 
         try:
             subprocess.call(cmd)
         except subprocess.CalledProcessError:
             os.unlink(dest_path)
             raise PcoccError("An error occured during container conversion")
-
-    @classmethod
-    def pre_convert(cls,
-                    src_path,
-                    src_fmt,
-                    tmp_path):
-
-        did_convert = False
-        dst_path = src_path
-        if src_fmt == "simg":
-            # Extract singularity images to an OCI bundle first so that OCI
-            # compliant tools may manage it
-            dst_path = os.path.join(tmp_path, 'simg')
-            cls.convert_singularity_to_oci(src_path)
-            src_fmt = "oci"
-            did_convert = True
-
-        return did_convert, dst_path, src_fmt
 
     @classmethod
     def prepare_skopeo_cache(cls,
@@ -897,24 +795,18 @@ fi
             str -- output image format
 
         """
-        did_convert, src_path, src_fmt = cls.pre_convert(src_path,
-                                                         src_fmt,
-                                                         dst_path)
-
-        cls.prepare_skopeo_cache(src_path,
-                                 src_fmt,
-                                 dst_path,
-                                 dst_store,
-                                 vm)
+        if dst_store:
+            cls.prepare_skopeo_cache(src_path,
+                                     src_fmt,
+                                     dst_path,
+                                     dst_store,
+                                     vm)
 
         cls.skopeo_convert(src_path,
                            dst_path,
                            src_fmt,
                            dst_format,
                            vm)
-
-        if did_convert:
-            shutil.rmtree(src_path)
 
         return dst_format
 
@@ -1281,8 +1173,7 @@ class ImageMgr(object):
         dst_store = self.object_store.get_repo(dst_repo)
 
         src_path, src_fmt, kind = self.guess_format(src_path,
-                                                    src_fmt,
-                                                    True)
+                                                    src_fmt)
 
         self.check_overwrite(dst_uri)
 
@@ -1358,15 +1249,9 @@ class ImageMgr(object):
         meta, _ = self.get_image(src_uri)
         kind = ImageType.from_str(meta['kind'])
 
-        dst_path, dst_fmt, guessed_kind = self.guess_format(dst,
-                                                            dst_fmt)
-
-        if guessed_kind != kind:
-            raise PcoccError("Cannot export {} image"
-                             " to {} format '{}'"
-                             .format(kind.name,
-                                     guessed_kind.name,
-                                     dst_fmt))
+        dst_path, dst_fmt, _ = self.guess_format(dst,
+                                                 dst_fmt,
+                                                 kind)
 
         src_store = self.object_store.get_repo(meta["repo"])
 
@@ -1379,7 +1264,7 @@ class ImageMgr(object):
                 ContImage.export(source_path,
                                  dst_fmt,
                                  dst_path,
-                                 src_fmt=storage_format)
+                                 src_fmt='oci')
 
     def copy_image(self, src_uri, dst_uri):
         """Copy an image from a repository to another.
@@ -1469,7 +1354,7 @@ class ImageMgr(object):
         else:
             raise PcoccError("Container Image format not supported: " + fmt)
 
-    def guess_format(self, path, fmt=None, allow_default=False):
+    def guess_format(self, path, fmt=None, kind=None):
         """Guess format from filename and arguments.
 
         Arguments:
@@ -1489,45 +1374,68 @@ class ImageMgr(object):
             ImageType enum -- infered kind of the image
 
         """
-        kind = ImageType.none
 
         if fmt:
             fmt = fmt.lower()
-        else:
-            # Check if the format was prefixed
-            spl = path.split(":")
-            if len(spl) >= 2:
-                fmt = spl[0].lower()
-                path = ":".join(spl[1:])
-            else:
-                # Or Suffixed
-                fmt = os.path.splitext(path)[-1].lower().replace(".", "")
 
-        kind = ImageType.infer_from_format(fmt)
+        # Parse prefixes such as oci:path
+        # If we recognize a prefix we update the path to remove it
+        spl = path.split(":")
+        if len(spl) >= 2:
+            prefix = spl[0].lower()
+            if (prefix in ContImage.known_img_formats or
+                prefix in VMImage.known_img_formats):
+                if fmt and prefix != fmt:
+                    raise PcoccError("Mismatch between specified image "
+                                     "format {} and import URI prefix {}".format(fmt, prefix))
+                else:
+                    fmt = prefix
+                    path = ':'.join(spl[1:])
 
-        # For VMs we can detect the input file type
-        # and validate the input arguments
-        if os.path.exists(path) and kind == ImageType.vm:
-            detect = VMImage.image_type(path)
-            if fmt and fmt != detect:
-                raise PcoccError("Mismatch between specified format {} "
-                                 "and detected format {}"
-                                 .format(fmt, detect))
-            fmt = detect
-            kind = ImageType.infer_from_format(fmt)
-
-        # Default type fallback if allowed (only export)
-        if not fmt:
-            if allow_default and kind != ImageType.none:
-                fmt = ImageType.default_format(kind)
-            else:
-                raise PcoccError("Could not infer format or image type for {} "
-                                 "you may specify it with the '-t' option."
-                                 .format(path))
-
-        self.check_supported_format(kind, fmt)
-
-        # Make sure to expand ~
         path = expanduser(path)
+
+        # Parse file extensions such as .qcow2
+        # If we already have a format we ignore the suffix
+        if not fmt:
+            suffix = os.path.basename(path).split('.')[-1]
+            if (suffix in VMImage.known_img_formats or
+                suffix in ContImage.known_img_formats):
+                fmt = suffix
+
+        # Check if we can guess a format from the file content
+        detect_fmt = None
+        if os.path.exists(path) and os.path.isfile(path):
+            try:
+                detect_fmt = VMImage.image_type(path)
+            except PcoccError:
+                detect_fmt = None
+
+            if detect_fmt == 'raw':
+                detect_fmt = None
+
+        elif (os.path.isdir(path) and
+              os.path.isfile(os.path.join(path, 'oci-layout'))):
+            detect_fmt = 'oci'
+
+        # Check overall coherency between format and image kind
+        if fmt:
+            if detect_fmt and fmt != detect_fmt:
+                raise PcoccError("Mismatch between specified format {} and "
+                                 "detected image type {}".format(fmt, detect_fmt))
+        else:
+            if detect_fmt:
+                fmt = detect_fmt
+            elif kind:
+                fmt = ImageType.default_format(kind)
+            elif os.path.isfile(path):
+                logging.warning("Could not detect image format, assuming raw VM")
+                fmt = "raw"
+            else:
+                raise PcoccError("Could not detect image format")
+
+        if kind and kind != ImageType.infer_from_format(fmt):
+            raise PcoccError("{} is not a valid {} format".format(fmt, kind.name))
+        else:
+            kind = ImageType.infer_from_format(fmt)
 
         return path, fmt, kind

@@ -459,22 +459,19 @@ class ContainerBundleView(ContainerView):
             return re.search(r'[ \t]{0}[ \t]'.format(directory), mounts) != None
 
     def _umount_squashfs(self, directory):
-        if spawn.find_executable("fusermount"):
-            try:
-                logging.debug("unmounting squashfs image"
-                              "  at %s", directory)
+        try:
+            logging.debug("unmounting squashfs image"
+                          " at %s", directory)
 
-                with open("/dev/null", "w") as devnull:
-                    subprocess.check_call(["fusermount",
-                                           "-uz",
-                                           directory],
-                                          stdout=devnull,
-                                          stderr=devnull)
-            except subprocess.CalledProcessError:
-                raise PcoccError("Failed to unmount {}".format(directory))
-        else:
-            raise PcoccError("Could not locate the 'fusermount' binary which is required"
-                             " when the squashfs container format is enabled")
+            with open("/dev/null", "w") as devnull:
+                subprocess.check_call(["fusermount",
+                                       "-u",
+                                       directory],
+                                      stdout=devnull,
+                                      stderr=devnull)
+
+        except subprocess.CalledProcessError:
+            raise PcoccError("Failed to unmount {}".format(directory))
 
     def _mount_squashfs(self):
         target_dir = tempfile.mkdtemp()

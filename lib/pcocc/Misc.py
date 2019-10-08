@@ -48,10 +48,12 @@ class runAtExit(object):
         atexit.register(self.run_exit)
 
     def run_exit(self):
-        for e in self.to_run:
+        # Iterate on a copy as some callbacks may deregister
+        # themselves
+        to_run = self.to_run[:]
+        for e in to_run:
+            logging.debug("Running exit callback %s", e)
             try:
-                # We ignore errors
-                # as we are already exitting
                 e()
             except:
                 pass
@@ -61,6 +63,7 @@ class runAtExit(object):
         self.to_run.append(callback)
 
     def deregister(self, callback):
+        logging.debug("Unregistering exit callback %s", callback)
         if callback in self.to_run:
             del self.to_run[self.to_run.index(callback)]
 

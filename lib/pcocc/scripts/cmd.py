@@ -2117,7 +2117,7 @@ def pcocc_image_show(image):
         print("------------------------------")
         print("%5s %24s" % ("Repo:", meta["repo"]))
         print("%5s %24s" % ("Name:", meta["name"]))
-        print("%s %24s" % ("Type:", "Virtual Machine (qcow2)"))
+        print("%s %24s" % ("Type:",  meta["kind"]))
         print("------------------------------")
         print("%5s %24s" % ("URI: ", meta["repo"] + ":" +
                             meta["name"] + "@" + str(meta["revision"])))

@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-TEMPLATES.YAML" "5" "Apr 23, 2019" "0.6.0" "pcocc"
+.TH "PCOCC-TEMPLATES.YAML" "5" "Oct 10, 2019" "0.6.1" "pcocc"
 .SH NAME
 pcocc-templates.yaml \- VM templates definition file
 .
@@ -122,6 +122,9 @@ Model of Qemu virtual drive to provide to VMs. Valid parameters are \fIvirtio\fP
 .TP
 \fBemulator\-cores\fP
 Number of cores to reserve for Qemu threads. These cores are deducted from the cores allocated for each VM (defaults to 0).
+.TP
+\fBbind\-vcpus\fP
+Controls whether pcocc attempts to bind vCPUS and memory to underlying cores and NUMA nodes (defaults to True).
 .UNINDENT
 .SH SAMPLE CONFIGURATION FILE
 .sp

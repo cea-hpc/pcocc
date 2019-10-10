@@ -1,6 +1,6 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC" "1" "Apr 23, 2019" "0.6.0" "pcocc"
+.TH "PCOCC" "1" "Oct 10, 2019" "0.6.1" "pcocc"
 .SH NAME
 pcocc \- Private Cloud on a Compute Cluster
 .
@@ -86,7 +86,10 @@ Instantiate or restore a virtual cluster (batch mode)
 List and manage VM templates
 .TP
 .B image
-List and manage VM images
+List and manage VM and Container images
+.TP
+.B docker
+Access a docker daemon
 .UNINDENT
 .UNINDENT
 .UNINDENT
@@ -108,8 +111,8 @@ Transfer files to a VM via scp
 .B ssh
 Connect to a VM via ssh
 .TP
-.B exec
-Execute commands through the pcocc guest agent
+.B run
+Execute commands in VMs and containers
 .TP
 .B display
 Display the graphical output of a VM
@@ -177,10 +180,10 @@ VM templates definition file
 .UNINDENT
 .SS See also
 .sp
-pcocc\-alloc(1), pcocc\-batch(1), pcocc\-ckpt(1), pcocc\-console(1), pcocc\-display(1), pcocc\-dump(1), pcocc\-exec(1), pcocc\-monitor\-cmd(1), pcocc\-image(1), pcocc\-nc(1), pcocc\-reset(1), pcocc\-save(1), pcocc\-scp(1), pcocc\-ssh(1), pcocc\-template(1), pcocc\-batch.yaml(5), pcocc\-networks.yaml(5), pcocc\-resources.yaml(5), pcocc\-repos.yaml(5), pcocc\-templates.yaml(5), pcocc\-9pmount\-tutorial(7), pcocc\-cloudconfig\-tutorial(7), pcocc\-newvm\-tutorial(7)
+pcocc\-alloc(1), pcocc\-batch(1), pcocc\-ckpt(1), pcocc\-console(1), pcocc\-display(1), pcocc\-dump(1), pcocc\-run(1), pcocc\-monitor\-cmd(1), pcocc\-image(1), pcocc\-docker(1), pcocc\-nc(1), pcocc\-reset(1), pcocc\-save(1), pcocc\-scp(1), pcocc\-ssh(1), pcocc\-template(1), pcocc\-batch.yaml(5), pcocc\-networks.yaml(5), pcocc\-resources.yaml(5), pcocc\-repos.yaml(5), pcocc\-templates.yaml(5), pcocc\-9pmount\-tutorial(7), pcocc\-cloudconfig\-tutorial(7), pcocc\-newvm\-tutorial(7)
 .SH FOOTNOTES
 .IP [1] 5
-Local installation guide: /usr/share/doc/pcocc\-0.6.0/install.html
+Local installation guide: /usr/share/doc/pcocc\-0.6.1/install.html
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

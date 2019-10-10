@@ -61,4 +61,4 @@ This produces a paged output of vm0 logs.
 See also
 ********
 
-:ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-scp(1)<scp>`, :ref:`pcocc-exec(1)<exec>`, :ref:`pcocc-nc(1)<nc>`, :ref:`pcocc-reset(1)<reset>`
+:ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-scp(1)<scp>`, :ref:`pcocc-run(1)<run>`, :ref:`pcocc-nc(1)<nc>`, :ref:`pcocc-reset(1)<reset>`

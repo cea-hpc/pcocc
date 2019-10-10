@@ -12,7 +12,6 @@ pcocc provides the following commands:
     manpages/man1/console
     manpages/man1/dump
     manpages/man1/display
-    manpages/man1/exec
     manpages/man1/run
     manpages/man1/docker
     manpages/man1/image

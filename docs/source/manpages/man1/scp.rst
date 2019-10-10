@@ -52,4 +52,4 @@ To copy a file from vm2 of the default job as root::
 See also
 ********
 
-scp(1), :ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-nc(1)<nc>`, :ref:`pcocc-exec(1)<exec>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`, :ref:`pcocc-9pmount-tutorial.yaml(7)<9pmount>`
+scp(1), :ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-nc(1)<nc>`, :ref:`pcocc-run(1)<run>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`, :ref:`pcocc-9pmount-tutorial.yaml(7)<9pmount>`

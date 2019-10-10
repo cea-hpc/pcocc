@@ -50,5 +50,5 @@ It is possible to connect to the first VM of the job named *ubuntu* without rely
 See also
 ********
 
-:ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-scp(1)<scp>`, :ref:`pcocc-exec(1)<exec>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`
+:ref:`pcocc-ssh(1)<ssh>`, :ref:`pcocc-scp(1)<scp>`, :ref:`pcocc-run(1)<run>`, :ref:`pcocc-networks.yaml(5)<networks.yaml>`
 

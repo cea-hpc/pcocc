@@ -73,6 +73,10 @@ The kvm module must be loaded on all compute nodes and accessible (rw permission
 
 Adjust the **GROUP** and **MODE** permissions to fit your needs. If virtualization extensions are not enabled or access to kvm is not provided, pcocc will run Qemu in emulation mode which will be slow.
 
+.. warning::
+ Due to a security bug in Intel processors affecting most models until the Skylake generation (included), either hyperthreading or EPT should be disabled on such processors if untrusted users are authorized to create VMs.
+
+ For more information on the issue and available mitigations, see: https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/l1tf.html
 
 Slurm setup
 -----------

@@ -69,7 +69,15 @@ def build_image(vm, dest_image, path=None):
 
     os.environ = env
 
-def send_image(vm, src_image, dest_image, dest_tag="latest", silent=False):
+def add_default_tag(ref):
+    if not ':' in ref:
+        return ref + ':latest'
+    else:
+        return ref
+
+def send_image(vm, src_image, dest_image):
+    dest_image = add_default_tag(dest_image)
+
     env = os.environ.copy()
     _setup_docker_env(vm)
     try:
@@ -80,17 +88,19 @@ def send_image(vm, src_image, dest_image, dest_tag="latest", silent=False):
                    "--dest-daemon-host", get_docker_uri(vm),
                    "--dest-cert-dir", certs_dir("client"),
                    "oci:" + oci_view,
-                   "docker-daemon:"+ dest_image + ":" + dest_tag ]
+                   "docker-daemon:"+ dest_image ]
 
             subprocess.check_call(cmd)
     except subprocess.CalledProcessError:
         raise PcoccError("Could not send image to docker daemon")
     os.environ = env
 
-def get_image(vm, dest_image, src_image, src_tag="latest"):
+def get_image(vm, dest_image, src_image):
+    src_image = add_default_tag(src_image)
+
     env = os.environ.copy()
     _setup_docker_env(vm)
-    Config().images.import_image("{}:{}".format(src_image, src_tag),
+    Config().images.import_image(src_image,
                                  dest_image, "pcocc-docker-daemon", vm=vm)
     os.environ = env
 

@@ -32,7 +32,6 @@
 # ones.
 extensions = ['sphinx.ext.autodoc',
     'sphinx.ext.doctest',
-    'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
     'sphinx.ext.mathjax',
@@ -62,7 +61,7 @@ titles = {
 'image': 'List and manage VM and Container images',
 'ps': 'List current pcocc jobs',
 'run': 'Execute commands in VMs and containers',
-'docker': 'Access a docker daemon'
+'docker': 'Access a docker daemon',
 'display': 'Display the graphical output of a VM',
 'reset': 'Reset a VM',
 'ckpt': 'Checkpoint a virtual cluster',

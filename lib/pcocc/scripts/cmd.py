@@ -2399,14 +2399,14 @@ def pcocc_internal_run_ctr(jobid,
               help='Select allocation or cluster by job name')
 @click.option('-u', '--user', type=str, default=None,
               help='Username to use to run the command')
+@click.option('-I', '--image', type=str,
+              help='Spawn a container to run the command')
 @click.option('--script', type=str, default=None,
               help='Execute a script stored on the host')
 @click.option('-w', '--nodelist', type=str,
-              help='Nodeset on which to the command')
+              help='Nodeset on which to run the command')
 @click.option('--pty', is_flag=True, default=False,
               help='Execute first task in a pseudo terminal')
-@click.option('-I', '--image', type=str,
-              help='Spawn a container to run the command')
 @click.option('-N', '--node', type=int, default=None,
               help='Number of nodes to use for running the command ')
 @click.option('-n', '--process', type=int,
@@ -2584,40 +2584,9 @@ def docker():
     pass
 
 
-def parse_docker_image(docker_image):
-    tag = "latest"
-    if ":" in docker_image:
-        sp = docker_image.split(":")
-        if len(sp) != 2:
-            raise PcoccError("Could not parse"
-                             " revision 'NAME:REV'"
-                             " in '{}'".format(docker_image))
-        tag = sp[1]
-        docker_image = sp[0]
-    return docker_image, tag
-
-
-@docker.command(name='export',
-                short_help='Export a pcocc image to the Docker VM')
-@click.option('-j', '--jobid', type=int,
-              help='Jobid of the selected cluster')
-@click.option('-J', '--jobname',
-              help='Job name of the selected cluster')
-@click.option('-i', '--index', type=int, default=0,
-              help='Index of the VM to connect to')
-@click.argument('source', nargs=1, type=str)
-@click.argument('dest', nargs=1, type=str)
-@per_cluster_cli(False)
-def docker_export(jobid, jobname, cluster, index, source, dest):
-    try:
-        dest, tag = parse_docker_image(dest)
-        Docker.send_image(cluster.vms[index], source, dest, tag)
-    except PcoccError as err:
-        handle_error(err)
-
 
 @docker.command(name='import',
-                short_help='Import a pcocc image from the Docker VM')
+                short_help='Import an image from a pcocc repository')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -2629,14 +2598,31 @@ def docker_export(jobid, jobname, cluster, index, source, dest):
 @per_cluster_cli(False)
 def docker_import(jobid, jobname, cluster, index, source, dest):
     try:
-        source, tag = parse_docker_image(source)
-        Docker.get_image(cluster.vms[index], dest, source, tag)
+        Docker.send_image(cluster.vms[index], source, dest)
+    except PcoccError as err:
+        handle_error(err)
+
+
+@docker.command(name='export',
+                short_help='Export an image to a pcocc repository')
+@click.option('-j', '--jobid', type=int,
+              help='Jobid of the selected cluster')
+@click.option('-J', '--jobname',
+              help='Job name of the selected cluster')
+@click.option('-i', '--index', type=int, default=0,
+              help='Index of the VM to connect to')
+@click.argument('source', nargs=1, type=str)
+@click.argument('dest', nargs=1, type=str)
+@per_cluster_cli(False)
+def docker_export(jobid, jobname, cluster, index, source, dest):
+    try:
+        Docker.get_image(cluster.vms[index], dest, source)
     except PcoccError as err:
         handle_error(err)
 
 
 @docker.command(name='build',
-                short_help='Build a Docker image and store it in a pcocc repo')
+                short_help='Build a pcocc image from a Dockerfile')
 @click.option('-j', '--jobid', type=int,
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
@@ -2656,7 +2642,7 @@ def docker_build(jobid, jobname, cluster, index, path, dest):
 
 @docker.command(name='alloc',
                 context_settings=dict(ignore_unknown_options=True),
-                short_help='Instantiate a Docker VM (interactive mode)')
+                short_help='Spawn a Docker VM (interactive mode)')
 @click.option('-E', '--alloc-script', metavar='SCRIPT',
               help='Execute a script on the allocation node')
 @click.option('-T', '--docker-timeout', type=int,
@@ -2683,7 +2669,7 @@ def docker_alloc(alloc_script, docker_timeout, batch_options):
 
 @docker.command(name='batch',
                 context_settings=dict(ignore_unknown_options=True),
-                short_help="Instantiate a Docker VM (batch mode)")
+                short_help="Spawn a Docker VM (batch mode)")
 @click.option('-E', '--host-script', type=click.File('r'),
               help='Launch a batch script on the first host')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)

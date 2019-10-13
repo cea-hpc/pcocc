@@ -561,10 +561,10 @@ class ObjectStore(object):
             except:
                 raise ObjectNotFound(name, self._name, r)
 
-        if self.version < 2:
-            self._unlink_and_cleanup_dir(target)
-        else:
-            os.unlink(target)
+            if self.version < 2:
+                self._unlink_and_cleanup_dir(target)
+            else:
+                os.unlink(target)
 
     def _validate_repo_config(self):
         try:

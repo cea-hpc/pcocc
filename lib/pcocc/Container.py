@@ -594,11 +594,12 @@ class OciRuntimeConfig(object):
 
         # Apply pcocc substitutions
         src = Config().resolve_path(src)
+        # Normalize source path
+        src = os.path.normpath(src)
         if mount_type == 'bind':
-            # Normalize source path
-            src = os.path.normpath(src)
             # Only resolve bindmounts
             src = os.path.realpath(src)
+
         dest = Config().resolve_path(dest)
 
         new_mount = {'source': src,
@@ -720,9 +721,6 @@ class ContainerTemplate(dict):
                 raise InvalidConfigurationError(
                     ("Container {} mountpoint {} should"
                      " have a least a 'source'").format(self["name"], name))
-            else:
-                opt["source"] = Config().resolve_path(opt["source"])
-                opt["source"] = os.path.realpath(opt["source"])
 
             if "type" not in opt:
                 opt["type"] = "bind"
@@ -739,8 +737,6 @@ class ContainerTemplate(dict):
 
             if "destination" not in opt:
                 opt["destination"] = opt["source"]
-            else:
-                opt["destination"] = Config().resolve_path(opt["destination"])
 
     def instanciate(self, config_path=None, rootfs_path=None):
         """Polpulate dynamic configurations based on container instance and host node"""

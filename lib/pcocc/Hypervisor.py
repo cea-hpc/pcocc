@@ -35,7 +35,6 @@ import shutil
 import yaml
 import logging
 import signal
-import datetime
 import random
 import binascii
 import uuid
@@ -1142,13 +1141,15 @@ class Qemu(object):
     def _unlock_image(self, path):
         batch = Config().batch
 
-        ret = batch.atom_update_key('global/user',
-                                    'mmp/' + path,
-                                    self._do_unlock_image)
-        if ret:
-            batch.delete_key('global/user',
-                             'mmp/' + path)
-
+        try:
+            ret = batch.atom_update_key('global/user',
+                                        'mmp/' + path,
+                                        self._do_unlock_image)
+            if ret:
+                batch.delete_key('global/user',
+                                 'mmp/' + path)
+        except Exception:
+            logging.exception("Failed to unlock image")
 
     def _setup_spice(self, vm):
         batch = Config().batch
@@ -1690,14 +1691,11 @@ username={3}@pcocc
         else:
             qemu_mon.cont()
 
-        if vm.wait_for_poweroff:
-            term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
-        else:
-            term_sigfd = None
+        term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGINT])
 
         if systemd_notify('VM is booting...', ready=True):
-            watchdog = threading.Thread(None, self.watchdog, args=[vm])
-            watchdog.start()
+            heartbeat = threading.Thread(None, self.heartbeat, args=[vm])
+            heartbeat.start()
 
         vm.enable_agent_server(HostAgent(vm))
 
@@ -1719,10 +1717,7 @@ username={3}@pcocc
 
         t = None
         shutdown_attempts = 0
-        if term_sigfd is None:
-            base_list = [qemu_console_sock]
-        else:
-            base_list = [term_sigfd, qemu_console_sock]
+        base_list = [term_sigfd, qemu_console_sock]
 
         try:
             qemu_console_sock.settimeout(30)
@@ -1811,15 +1806,23 @@ username={3}@pcocc
                             pass
                         client_sock = None
                 elif s is term_sigfd:
+                    logging.debug('Received SIGTERM')
                     os.read(term_sigfd, 1024)
-                    if shutdown_attempts >= 5:
+
+                    if not vm.wait_for_poweroff:
+                        logging.debug('Sending quit to Qemu monitor')
+                        qemu_mon.quit()
+                        break
+
+                    if shutdown_attempts >= 3:
                         logging.info('Timed out waiting for VM to poweroff')
                         # Exit loops
                         qemu_console_sock = None
                         break
 
+                    logging.debug('Sending powerdown to Qemu monitor')
                     qemu_mon.system_powerdown()
-                    logging.debug('Waiting for VM to poweroff')
+                    logging.info('Waiting for VM to poweroff')
                     # Wait 10s for Qemu to exit and resend signal
                     if t:
                         t.cancel()
@@ -1838,32 +1841,37 @@ username={3}@pcocc
         stop_threads.set()
         os.kill(os.getpid(), signal.SIGTERM)
         status, pid, _ = wait_or_term_child(qemu_pid, signal.SIGTERM,
-                                            term_sigfd, 5)
+                                            term_sigfd, 5, "qemu cleanup")
         ret = status >> 8
         if ret != 0:
-            raise HypervisorError("qemu exited with status %d" % ret)
+            raise HypervisorError("Qemu exited with status %d" % ret)
 
         return ret
 
-    def watchdog(self, vm):
-        while not stop_threads.wait(30):
+    def heartbeat(self, vm):
+        logging.debug("Starting VM heartbeat thread")
+        batch = Config().batch
+        while not stop_threads.wait(10):
             try:
                 s_ctl = self._get_agent_ctl_safe(vm, QEMU_GUEST_AGENT_PORT, 5,
                                                  False)
-                systemd_notify('Watchdog successful at {0}'.format(
-                    datetime.datetime.now()), watchdog=True)
-
             except Exception:
-                systemd_notify('Watchdog could not query guest at {0}'.format(
-                    datetime.datetime.now()))
+                logging.warning("Failed to query guest")
+            else:
+                try:
+                    _ = batch.write_ttl('global/user',
+                                        'batch-local/heartbeat.vm/{0}.{1}'.format(batch.batchid,
+                                                                                  vm.rank),
+                                        '',
+                                        30)
+                except Exception:
+                    logging.exception('Failed to update VM heartbeat')
 
             try:
                 s_ctl.terminate()
                 s_ctl.communicate()
             except Exception:
                 pass
-
-        logging.info('Got thread termination event')
 
     def _get_agent_ctl_safe(self, vm, port='taskcontrolport', timeout=0, kill_atexit=True):
         # We need to make several tries because nc and qemu may drop or

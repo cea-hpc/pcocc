@@ -1188,10 +1188,12 @@ def pcocc_alloc(restart_ckpt, alloc_script, user_data, batch_options, cluster_de
                                  [ 'internal', 'launcher'] + alloc_opt + user_data_opt +
                                  ckpt_opt + [cluster_definition])
 
-        sys.exit(ret)
-
     except PcoccError as err:
         handle_error(err)
+
+    logging.debug("All done")
+    sys.exit(ret)
+
 
 @internal.command(name='launcher',
              context_settings=dict(ignore_unknown_options=True),
@@ -1212,6 +1214,11 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_
     batch = config.batch
 
     logging.debug("Starting pcocc launcher")
+
+    if sys.stdin.isatty():
+        oldterm = termios.tcgetattr(sys.stdin.fileno())
+    else:
+        oldterm = None
 
     cluster_definition = ascii(cluster_definition)
     cluster = Cluster(cluster_definition)
@@ -1278,22 +1285,30 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_
 
     while True:
         status, pid, _ = wait_or_term_child(monitor_list,
-                                            signal.SIGTERM, term_sigfd, 40)
+                                            signal.SIGTERM, term_sigfd, 40, "launcher")
         if pid == s_pjob.pid:
             if status != 0:
                 sys.stderr.write("The cluster terminated unexpectedly\n")
             else:
                 sys.stderr.write("The cluster has shut down\n")
 
-            # This is racy but helps
             if s_exec.poll() is None:
-                s_exec.terminate()
+                if script or alloc_script:
+                    logging.debug("Sending SIGTERM to alloc command")
+                    s_exec.terminate()
+                else:
+                    logging.debug("Sending SIGHUP to alloc shell")
+                    os.kill(s_exec.pid, signal.SIGHUP)
 
-            time.sleep(1)
-            if s_exec.poll() is None:
-                s_exec.kill()
+                time.sleep(1)
 
-            sys.exit(status >> 8)
+                if s_exec.poll() is None:
+                    logging.debug("Sending SIGKILL to alloc shell/script")
+                    s_exec.kill()
+
+                s_exec.wait()
+            break
+
         elif pid == s_exec.pid and not wait:
             sys.stderr.write("Terminating the cluster...\n")
             t = threading.Timer(40, wait_timeout, [s_pjob])
@@ -1301,8 +1316,14 @@ def pcocc_launcher(restart_ckpt, wait, script, alloc_script, user_data, cluster_
             s_pjob.send_signal(signal.SIGINT)
             s_pjob.wait()
             t.cancel()
-            sys.exit(status >> 8)
+            break
 
+    # XXX: For some reason the terminal is sometimes broken when we shutdown a shell
+    # running in a subprocess so restore previous settings to be sure
+    if oldterm:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, oldterm)
+
+    sys.exit(status>>8)
 
 def wait_timeout(s_proc):
     try:

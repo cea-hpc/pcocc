@@ -48,7 +48,7 @@ from .Config import Config
 from .Backports import subprocess_check_output
 from .Error import PcoccError, InvalidConfigurationError
 from .Misc import fake_signalfd, wait_or_term_child
-from .Misc import CHILD_EXIT, datetime_to_epoch, stop_threads
+from .Misc import CHILD_EXIT, datetime_to_epoch, stop_threads, systemd_notify
 
 
 
@@ -172,7 +172,6 @@ class BatchManager(object):
             raise InvalidConfigurationError(str(err))
 
         settings = batch_config['settings']
-
         if batch_config['type'] == 'slurm':
             return SlurmManager(
                 batchid, batchname, default_batchname,
@@ -199,7 +198,7 @@ class BatchManager(object):
         self.vm_state_dir_prefix = None
         self.pcocc_state_dir = None
 
-    def find_job_by_name(self, user, batchname, host=None):
+    def find_job_by_name(self, user, batchname, host=None, include_expired=False):
         """Return a jobid matching a user and batchname
 
         There must be one and only one job matching the specified criteria
@@ -1019,11 +1018,13 @@ class LocalManager(EtcdManager):
         # Make sure we don't get spuriously interrupted
         # once we start allocating host resources
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGABRT])
+        term_sigfd = fake_signalfd([signal.SIGTERM, signal.SIGABRT, signal.SIGHUP])
 
         subprocess.check_call(['sudo',
                                'pcocc'] + Config().verbose_opt +
                                ['internal', 'setup', 'init'])
+
+        atexit.register(self._kill_tasks, os.getpid())
         atexit.register(self._run_resource_cleanup)
 
         subprocess.check_call(['sudo',
@@ -1033,28 +1034,79 @@ class LocalManager(EtcdManager):
         self.batchid = self._uuid_to_batchid(self.batchuser, self._req_uuid)
         os.environ['PCOCC_LOCAL_JOB_ID'] = str(self.batchid )
 
-        heartbeat = threading.Thread(None, self._hearbeat_thread)
+        systemd = False
+        if systemd_notify('Initializing...'):
+            systemd = True
+
+        heartbeat = threading.Thread(None, self._heartbeat_thread, args=[systemd])
         heartbeat.start()
 
         # We expect to be given 60s to shutdown so give 50s to
         # our child process
         r, _, s = wait_or_term_child(subprocess.Popen(cmd),
-                                     signal.SIGTERM, term_sigfd, 50)
+                                     signal.SIGTERM, term_sigfd, 50, "alloc")
         stop_threads.set()
         if s == CHILD_EXIT.KILL:
             raise PcoccError('VM launcher did not acknowlege VM shutdown ' +
                              'request after SIGTERM was received')
         return r
 
-    def _hearbeat_thread(self):
-        while not stop_threads.wait(30):
-            self._update_heartbeat()
+    def _heartbeat_thread(self, notify_systemd=False):
+        logging.debug("Starting job heartbeat thread")
+        retry = 0
+        max_retry = 3
+
+        while not stop_threads.wait(10):
+            # Update pcocc heartbeat
+            try:
+                if retry < max_retry:
+                    self._update_heartbeat()
+                    retry = 0
+            except Exception:
+                retry += 1
+
+            if retry >= max_retry:
+                logging.exception("Failed to update heartbeat: aborting")
+                # If we're unable to access the keystore after
+                # multiple tries, we have to shutdown as other processes
+                # may soon consider us dead: send a signal and
+                # exit this thread
+                os.kill(os.getpid(), signal.SIGTERM)
+                break
+
+            elif retry > 0:
+                logging.exception("Failed to update heartbeat: will retry")
+                # No need to check if VMs are running if we have
+                # trouble accessing the keystore: try again before
+                # going further
+                continue
+
+            if not notify_systemd:
+                continue
+
+            # Update systemd watchodg
+            try:
+                r = self.read_key('global/user',
+                                  'batch-local/heartbeat.vm/{0}.0'.format(self.batchid),
+                                  blocking=True)
+                if r is not None:
+                    systemd_notify("VM is running", watchdog=True)
+                    continue
+            except Exception:
+                logging.exception("Error while reading VM heartbeat")
+
+            systemd_notify("VM is not responsive")
+
+
 
     def _run_resource_cleanup(self):
-        os.environ['PCOCC_LOCAL_JOB_ID'] = str(self._uuid_to_batchid(self.batchuser,
-                                                                       self._req_uuid))
-        subprocess.call(['sudo', 'pcocc'] + Config().verbose_opt +
-                         ['internal', 'setup', 'delete'])
+        try:
+            os.environ['PCOCC_LOCAL_JOB_ID'] = str(self._uuid_to_batchid(self.batchuser,
+                                                                         self._req_uuid))
+            subprocess.call(['sudo', 'pcocc'] + Config().verbose_opt +
+                            ['internal', 'setup', 'delete'])
+        except Exception:
+            logging.exception("Failed to run resource cleanup")
 
     def run(self, cluster, run_opt, cmd):
         """Launch the VM tasks"""
@@ -1112,12 +1164,14 @@ class LocalManager(EtcdManager):
     def _job_allocation_key(self):
         return 'public/batch-local/job_allocation_state'
 
-    def _cleanup_orphan_jobs(self):
+    def _cleanup_failed_jobs(self):
         """Cleanup jobs which were not properly deleted
         """
         job_alloc_state = self.read_key('global',
                                         self._job_allocation_key())
         job_alloc_state = self._validate_job_state(job_alloc_state)
+
+        live_batchids = self._list_alive_jobs()
 
         for batchid, job in job_alloc_state['jobs'].iteritems():
             if job['host'] == socket.gethostname().split('.')[0]:
@@ -1132,9 +1186,17 @@ class LocalManager(EtcdManager):
                     f.close()
 
                 if not pids:
+                    # All processes died but the job entry was not cleaned
                     logging.warning('Trying to clean orphan job %s', batchid)
-                    subprocess.call(['pcocc'] + Config().verbose_opt +
-                                     ['internal', 'setup', 'delete', '-j', batchid, '--nolock'])
+                elif not batchid in live_batchids:
+                    # Heartbeat stopped, we should clean the job
+                    logging.warning('Trying to clean stale job %s', batchid)
+                else:
+                    continue
+
+
+                subprocess.call(['pcocc'] + Config().verbose_opt +
+                                ['internal', 'setup', 'delete', '-j', batchid, '--nolock'])
 
     def _list_alive_jobs(self):
         path = self.get_key_path('global/user', 'batch-local/heartbeat')
@@ -1157,7 +1219,7 @@ class LocalManager(EtcdManager):
                                     )
         return batchids
 
-    def _update_heartbeat(self, ttl=60):
+    def _update_heartbeat(self, ttl=180):
         _ = self.write_ttl('global/user',
                            'batch-local/heartbeat/{0}'.format(self.batchid),
                            '',
@@ -1186,8 +1248,8 @@ class LocalManager(EtcdManager):
 
                 jobs[batchid] = job
             else:
-                logging.warning('list_all_jobs: ignoring stale job %d on %s ',
-                    batchid, job['host'])
+                logging.info('list_all_jobs: ignoring stale job %d on %s ',
+                             batchid, job['host'])
 
         if details:
             return jobs
@@ -1219,7 +1281,7 @@ class LocalManager(EtcdManager):
 
 
     def find_job_by_name(self, user, batchname,
-                         host=None):
+                         host=None, include_expired=False):
 
         job_alloc_state = self.read_key('global',
                                         self._job_allocation_key())
@@ -1228,14 +1290,19 @@ class LocalManager(EtcdManager):
         batchids = []
         hosts = []
         for batchid, job in job_alloc_state['jobs'].iteritems():
+            batchid = int(batchid)
+
+            if not include_expired and not batchid in self._list_alive_jobs():
+                continue
+
             if (job['user'] == user and job['batchname'] == batchname):
                 if host and job['host'] == host:
-                    return int(batchid)
+                    return batchid
                 elif not host:
                     if job['host'] == socket.gethostname().split('.')[0]:
-                        return int(batchid)
+                        return batchid
                     else:
-                        batchids.append(int(batchid))
+                        batchids.append(batchid)
                         hosts.append(job['host'])
 
 
@@ -1274,8 +1341,11 @@ class LocalManager(EtcdManager):
 
 
         try:
+            # At this point orphan cleanup should have run so there shouldnt be
+            # any expired job remaining
             batchid = self.find_job_by_name(user, batchname,
-                                            socket.gethostname().split('.')[0])
+                                            socket.gethostname().split('.')[0],
+                                            include_expired=True)
         except InvalidJobError:
             batchid = -1
 
@@ -1343,12 +1413,17 @@ class LocalManager(EtcdManager):
         return 1
 
     def init_node(self):
-        self._cleanup_orphan_jobs()
+        self._cleanup_failed_jobs()
 
     def create_resources(self):
         req_jobname = os.getenv('PCOCC_LOCAL_JOB_NAME', None)
         req_uuid = os.getenv('PCOCC_LOCAL_JOB_UUID', None)
         caller_pid = psutil.Process(os.getppid()).ppid()
+
+        if caller_pid == 1:
+            raise AllocationError('Invalid parent pid')
+
+        logging.debug("Parent pid is %d", caller_pid)
 
         if not req_jobname:
             raise AllocationError('Job name was not specified')
@@ -1388,7 +1463,10 @@ class LocalManager(EtcdManager):
                     'Unable to set requested cpuset: ' + str(e))
 
         with open(os.path.join(self._cpuset_cluster(), 'tasks'), 'w') as f:
-            f.write(str(caller_pid))
+            try:
+                f.write(str(caller_pid))
+            except:
+                raise AllocationError("Failed to create cpuset")
 
         try:
             cores = os.environ.get('PCOCC_LOCAL_CORE_SET', None)
@@ -1407,6 +1485,34 @@ class LocalManager(EtcdManager):
         self.node_rank=0
         self.nodeset=NodeSet(socket.gethostname().split('.')[0])
 
+    def _kill_tasks(self, caller_pid):
+        if not self.batchid:
+            return
+
+        logging.debug("Looking for remaining processes")
+        try:
+            with open(os.path.join(self._cpuset_cluster(), 'tasks')) as f:
+                pids = f.read().splitlines()
+
+
+                for pid in pids:
+                    pid = int(pid)
+                    try:
+                        if (os.path.exists(os.path.join('/proc/', str(pid))) and
+                            (psutil.Process(pid).username() == self.batchuser) and
+                            pid != caller_pid and pid != os.getppid()
+                            and pid != os.getpid()):
+                            logging.debug("Killing process %d still active in cgroup", pid)
+                            os.kill(pid, signal.SIGKILL)
+                    except psutil.NoSuchProcess:
+                        pass
+                    except OSError:
+                        pass
+
+        except IOError:
+            logging.warning('Kill tasks: no cpuset for job %d', self.batchid)
+            return
+
     def delete_resources(self, force=False):
         if not self.batchid:
             raise AllocationError('Job id was not specified')
@@ -1424,36 +1530,9 @@ class LocalManager(EtcdManager):
 
         if not remote:
             caller_pid = psutil.Process(os.getppid()).ppid()
-            try:
-                f = open(os.path.join(self._cpuset_cluster(), 'tasks'))
-            except IOError:
-                logging.warning('No cpuset for job %s', self.batchid)
-                f = None
+            self._kill_tasks(caller_pid)
 
-            if f:
-                pids = f.read().splitlines()
-
-                # Only the allocation process is allowed to delete resources
-                # while there are still active processes
-                if pids and (str(caller_pid) not in pids) and not force:
-                    raise BatchError('There are still running processes for job '
-                                     '{0} ({1})'.format(
-                            self.batchid, ' '.join(pids)))
-
-                for pid in pids:
-                    pid = int(pid)
-                    try:
-                        if ((psutil.Process(pid).username() == self.batchuser) and
-                            pid != caller_pid and pid != os.getppid()
-                            and pid != os.getpid()):
-                            os.kill(pid, signal.SIGKILL)
-                    except psutil.NoSuchProcess:
-                        pass
-                    except OSError:
-                        pass
-
-                f.close()
-
+        logging.debug("Cleaning up allocation key")
         try:
             job_record = self.atom_update_key(
                 'global',
@@ -1465,9 +1544,11 @@ class LocalManager(EtcdManager):
             self._update_heartbeat(0)
         except:
             logging.error('No allocation record to delete '
-                          'matching job %s for user %s',
+                          'matching job %d for user %s',
                           self.batchid,
                           self.batchuser)
+
+        logging.debug("Global state cleanup complete")
         if remote:
             logging.warning('Exiting without performing host resource cleanup for '
                             'forced remote job deletion')
@@ -1588,7 +1669,7 @@ class SlurmManager(EtcdManager):
         if self.proc_type == ProcessType.LAUNCHER:
             self._init_cluster_dir()
 
-    def find_job_by_name(self, user, batchname, host=None):
+    def find_job_by_name(self, user, batchname, host=None, include_expired=False):
         """Return a jobid matching a user and batchname
 
         There must be one and only one job matching the specified criteria

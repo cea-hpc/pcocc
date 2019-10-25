@@ -48,7 +48,9 @@ def fake_signalfd(sigs):
         signal.signal(sig, _fake_sigfd_handler)
     return sig_r
 
-def _nanny_thread(child_proc, pipe, return_val):
+def _nanny_thread(child_proc, pipe, return_val, name):
+    logging.debug("Started nanny thread%s for %s", name, child_proc)
+
     if isinstance(child_proc, int):
         pid, r = os.waitpid(child_proc, 0)
     elif isinstance(child_proc, list):
@@ -60,28 +62,32 @@ def _nanny_thread(child_proc, pipe, return_val):
         r = child_proc.wait()
         pid = child_proc.pid
 
-    logging.debug("Nanny thread detected termination "
-                  "of pid %s", pid)
+    logging.debug("Nanny thread%s detected termination "
+                  "of pid %s", name, pid)
     return_val['val'] = r
     return_val['pid'] = pid
     os.write(pipe, 'x')
 
 CHILD_EXIT = enum('NORMAL', 'SIGNAL', 'KILL')
 
-def wait_or_term_child(child_proc, sig, sigfd, timeout):
+def wait_or_term_child(child_proc, sig, sigfd, timeout, name=""):
     """ Wait until child_proc terminates or sigfd is written to.
     In the latter case, send sig to child_proc and resume waiting """
 
     child_r, child_w = os.pipe()
     return_val={'val':  None}
 
+    if name:
+        name = " ({})".format(name)
+
     nanny = threading.Thread(None, _nanny_thread,
                              None, args=(child_proc, child_w,
-                                         return_val))
+                                         return_val, name))
 
     nanny.start()
     cur_timeout = None
     status = CHILD_EXIT.NORMAL
+
     while True:
         try:
             rdy, _ , _ = select.select([child_r, sigfd], [], [], cur_timeout)
@@ -93,18 +99,20 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout):
 
         if child_r in rdy:
             os.read(child_r, 1024)
-            logging.debug("Wait/Term child: child has exited")
+            logging.debug("Wait/Term child%s: child has exited",name)
             break
         else:
             if sigfd in rdy:
                 os.read(sigfd,1024)
                 status = CHILD_EXIT.SIGNAL
+                logging.debug("Wait/Term child%s: Signal received", name)
             else:
                 status = CHILD_EXIT.KILL
+                logging.debug("Wait/Term child%s: Timeout", name)
 
             cur_timeout = timeout
-            logging.debug("Wait/Term child: "
-                          "Sending sig %s to %s", sig, child_proc)
+            logging.debug("Wait/Term child%s: "
+                          "Sending sig %s to %s", name, sig, child_proc)
             try:
                 if isinstance(child_proc, int):
                     os.kill(child_proc, sig)

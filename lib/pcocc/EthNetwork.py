@@ -86,6 +86,9 @@ properties:
       allow-outbound:
        type: string
        default-value: 'all'
+      manage-ip-forward:
+       type: boolean
+       default-value: true
     additionalProperties: false
     required:
      - dev-prefix
@@ -933,10 +936,11 @@ additionalProperties: false
                                       self._ext_gw_ip)
 
         # Enable Routing for the external bridge only
-        subprocess.check_call('echo 1 > /proc/sys/net/ipv4/ip_forward',
-                      shell=True)
-        subprocess.check_call('iptables -P FORWARD DROP',
-                      shell=True)
+        if self._manage_ip_forward:
+            subprocess.check_call('echo 1 > /proc/sys/net/ipv4/ip_forward',
+                                  shell=True)
+            subprocess.check_call('iptables -P FORWARD DROP',
+                                  shell=True)
 
         for rule in self._iptables_routing_rules():
             rule.create()
@@ -945,11 +949,13 @@ additionalProperties: false
         # Remove external bridge
         OVSBridge(self._ext_br_name).delete()
 
+
         # Disable routing
-        subprocess.check_call("echo 0 > /proc/sys/net/ipv4/ip_forward",
-                      shell=True)
-        subprocess.check_call("iptables -P FORWARD ACCEPT",
-                      shell=True)
+        if self._manage_ip_forward:
+            subprocess.check_call("echo 0 > /proc/sys/net/ipv4/ip_forward",
+                                  shell=True)
+            subprocess.check_call("iptables -P FORWARD ACCEPT",
+                                  shell=True)
 
         for rule in self._iptables_routing_rules():
             rule.delete()
@@ -969,6 +975,8 @@ additionalProperties: false
         self._int_network_bits = int(int_network.split("/")[1])
 
         self._network_layer = settings.get("network-layer", "L3")
+
+        self._manage_ip_forward = settings.get("manage-ip-forward", True)
 
         # defaults to pcocc.dnsdomainname
         self._domain_name = settings.get('domain-name', 'pcocc.{0}'.format(

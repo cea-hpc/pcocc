@@ -96,7 +96,6 @@ function replicate_slurm_vars (spank)
      r = r + replicate_var(spank, "S_JOB_ID", "SLURM_JOB_ID")
      r = r + replicate_var(spank, "S_JOB_UID", "SLURM_JOB_UID")
      r = r + replicate_env(spank, "SLURM_STEP_TASKS_PER_NODE", "SLURM_TASKS_PER_NODE")
-     r = r + replicate_env(spank, "SLURM_STEP_NODELIST", "SLURM_NODELIST")
      r = r + replicate_env(spank, "PCOCC_REQUEST_CRED", "SPANK_PCOCC_REQUEST_CRED")
 
      r = r + setenv("SPANK_PCOCC_SETUP", vm_option)

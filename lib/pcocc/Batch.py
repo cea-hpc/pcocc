@@ -1195,7 +1195,7 @@ class LocalManager(EtcdManager):
                 if not pids:
                     # All processes died but the job entry was not cleaned
                     logging.warning('Trying to clean orphan job %s', batchid)
-                elif not batchid in live_batchids:
+                elif not int(batchid) in live_batchids:
                     # Heartbeat stopped, we should clean the job
                     logging.warning('Trying to clean stale job %s', batchid)
                 else:
@@ -1296,10 +1296,12 @@ class LocalManager(EtcdManager):
 
         batchids = []
         hosts = []
+        live_batchids = self._list_alive_jobs()
+
         for batchid, job in job_alloc_state['jobs'].iteritems():
             batchid = int(batchid)
 
-            if not include_expired and not batchid in self._list_alive_jobs():
+            if not include_expired and not batchid in live_batchids:
                 continue
 
             if (job['user'] == user and job['batchname'] == batchname):

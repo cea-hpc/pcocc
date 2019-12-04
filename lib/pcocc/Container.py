@@ -25,6 +25,8 @@ import stat
 import shlex
 import jsonschema
 import subprocess
+import pipes
+
 from distutils import spawn
 from copy import deepcopy
 
@@ -440,6 +442,15 @@ class OciRuntimeConfig(object):
     def env(self):
         proc = self.config.setdefault("process", {})
         return proc.setdefault("env", [])
+
+    def quote_env(self):
+        """Quota environment variables"""
+
+        new_env = []
+        for k, v  in self.get_env().iteritems():
+            new_env.append(k + "=" + pipes.quote(v))
+
+        self.config["process"]["env"] = new_env
 
     def get_env(self):
         current_keys = {}

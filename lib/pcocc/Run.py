@@ -32,7 +32,7 @@ import grp
 import shlex
 import json
 import logging
-import pipes
+
 from distutils import spawn
 from pwd import getpwnam
 from ClusterShell.NodeSet import RangeSet
@@ -1244,7 +1244,6 @@ class ContainerFs(object):
         if '\n' in value:
             logging.info("Ignoring variable: %s", key)
             return
-        value = pipes.quote(value)
 
         self.oci_config.set_env(["{}={}".format(key, value)])
 
@@ -1378,6 +1377,7 @@ class ContainerFs(object):
         self.oci_config.mirror_mount("/dev/shm/", transpose=False)
         self.oci_config.mirror_mount("/tmp/", transpose=False)
         self.oci_config.mirror_mount("/etc/resolv.conf", transpose=False)
+
 
     def setup_transposed_bundle(self, rootfs_path=None):
         self._resolve_mount_destination()
@@ -1839,6 +1839,10 @@ class NativeContainer(ContainerFs):
             return self.run_propagate()
 
     def run_local_bwrap(self):
+        # XXX
+        # Workaround quoting issues with bwrap-oci arguments
+        self.oci_config.quote_env()
+
         self.setup_transposed_bundle()
 
         # Time to generate the bwrapp configuration

@@ -32,6 +32,7 @@ import grp
 import shlex
 import json
 import logging
+import signal
 
 from distutils import spawn
 from pwd import getpwnam
@@ -1078,7 +1079,11 @@ class Slurm(Native):
 
         self.launcher = slurm_cmd + ["--export=ALL"]
 
-        return super(Slurm, self).run()
+        orig_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        r =  super(Slurm, self).run()
+        signal.signal(signal.SIGINT, orig_handler)
+
+        return r
 
     def mirror_env(self):
         pass

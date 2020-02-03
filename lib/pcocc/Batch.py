@@ -1479,12 +1479,16 @@ class LocalManager(EtcdManager):
 
         try:
             cores = os.environ.get('PCOCC_LOCAL_CORE_SET', None)
+            logging.info("Setting core set %s" % cores)
             if cores:
-                cores = RangeSet(cores)
-                pus = subprocess_check_output(['hwloc-calc',
-                                               '--intersect', 'PU',
-                                               'cores:{0}'.format(cores)]).strip()
+                cores = str(RangeSet(cores))
+                pus = []
+                for rng in cores.split(','):
+                    pus += [subprocess_check_output(['hwloc-calc',
+                                                     '--intersect', 'PU',
+                                                     'cores:{}'.format(rng)]).strip()]
 
+                pus = ','.join(pus)
                 with open(os.path.join(self._cpuset_cluster(),
                                        'cpuset.cpus'), 'w') as f:
                     f.write(str(pus))

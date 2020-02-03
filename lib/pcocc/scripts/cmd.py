@@ -1790,7 +1790,7 @@ def pcocc_agent_run(jobid,
         if pty:
             runner.set_pty()
 
-        runner.run()
+        sys.exit(runner.run())
     except PcoccError as err:
         handle_error(err)
 

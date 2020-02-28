@@ -520,6 +520,7 @@ class ObjectStore(object):
             for image_path in image_list:
                 image = os.path.basename(image_path)
                 image, revision = image.split('@')
+                revision = int(revision)
                 if image == name:
                     ret.append(revision)
             if not ret:

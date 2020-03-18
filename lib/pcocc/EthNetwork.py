@@ -55,6 +55,9 @@ properties:
        type: string
        default-value: '52:54:00'
        pattern: '^([0-9a-fA-F]{2}:){0,3}[0-9a-fA-F]{2}$'
+      mac-start-offset:
+       type: integer
+       default-value: 0
       dev-prefix:
        type: string
        pattern: '^([a-zA-Z][a-zA-Z_0-9]{0,7})$'
@@ -161,7 +164,7 @@ additionalProperties: false
                 'net_rank': num_vms,
                 'mac_addr': mac_gen_hwaddr(
                     self._mac_prefix,
-                    num_vms),
+                    num_vms + self._mac_start_offset),
                 'int_ip': get_ip_on_network(
                     self._int_network,
                     num_vms + 1)
@@ -957,6 +960,7 @@ additionalProperties: false
     def _parse_settings(self, settings):
         self._dev_prefix = settings.get('dev-prefix', self.name)
         self._mac_prefix = settings.get('mac-prefix', '52:54:00')
+        self._mac_start_offset = settings.get('mac-start-offset', 0)
         self._host_if_suffix = settings.get('host-if-suffix', '')
         self._mtu = int(settings.get("mtu", 1500))
 

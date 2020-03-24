@@ -43,7 +43,7 @@ Import and Export
 Supported file formats
 ......................
 
-The following VM image file formats can be imported or exported: *raw*, *qcow2*, *qed*, *vdi*, *vpc*, *vmdk*. By default, pcocc will try to guess the image format the filename extension, or from the image content if possible. It can be specified with the -t option if needed.
+The following VM image file formats can be imported or exported: *raw*, *qcow2*, *qed*, *vdi*, *vpc*, *vmdk*. By default, pcocc will try to guess the image format from its filename extension, or from the image content if possible. It can be specified with the -t option if needed.
 
 Container images can be imported / exported from remote Docker registries or local files by specifying them as follows:
   * **docker:**//docker-reference : an image in a Docker registry.

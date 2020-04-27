@@ -141,7 +141,7 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout, name=""):
     cur_timeout = None
     status = CHILD_EXIT.NORMAL
     next_sig = 0
-    logging.info("Wait/Term child starting for %s", str(child_proc))
+    logging.debug("Wait/Term child starting for %s", str(child_proc))
 
     while True:
         try:
@@ -159,7 +159,7 @@ def wait_or_term_child(child_proc, sig, sigfd, timeout, name=""):
             break
         else:
             if sigfd in rdy:
-                logging.info("Wait/Term child: Signal received (%s)", str(child_proc))
+                logging.debug("Wait/Term child: Signal received (%s)", str(child_proc))
                 os.read(sigfd,1024)
                 status = CHILD_EXIT.SIGNAL
                 logging.debug("Wait/Term child%s: Signal received", name)

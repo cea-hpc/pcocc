@@ -110,15 +110,21 @@ def load_config(batchid=None, batchname=None, batchuser=None,
     return config
 
 
-def load_batch_cluster():
+def load_batch_cluster(resource_only=False):
     val, index = Config().batch.read_key_index('cluster', 'destroyed')
     if val:
         logging.info("Load batch: stale cluster dir, waiting for cleanup")
         Config().batch.wait_key_index('cluster', 'destroyed', index)
 
+
     definition = Config().batch.read_key('cluster/user', 'definition',
                                          blocking=True)
-    return Cluster(definition)
+    if resource_only:
+        resource_definition = Config().batch.read_key('cluster/user', 'resource_definition')
+        if resource_definition:
+            definition = resource_definition
+
+    return Cluster(definition, resource_only=resource_only)
 
 
 def per_cluster_cli(allows_user):
@@ -296,7 +302,7 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts, port):
         load_config(jobid, jobname, default_batchname='pcocc',
                     batchuser=user)
 
-        cluster = load_batch_cluster()
+        cluster = load_batch_cluster(resource_only=True)
 
         ssh_opts = list(ssh_opts)
         arg_index, match = find_vm_ssh_opt(ssh_opts, r'(^|@)vm(\d+)',
@@ -343,7 +349,7 @@ def pcocc_scp(jobid, jobname, user, scp_opts):
         load_config(jobid, jobname, default_batchname='pcocc',
                     batchuser=user)
 
-        cluster = load_batch_cluster()
+        cluster = load_batch_cluster(resource_only=True)
 
         scp_opts = list(scp_opts)
         arg_index, match = find_vm_ssh_opt(scp_opts, r'(^|@)vm(\d+):',
@@ -387,7 +393,7 @@ def pcocc_nc(jobid, jobname, user, nc_opts):
     try:
         load_config(jobid, jobname, default_batchname='pcocc',
                     batchuser=user)
-        cluster = load_batch_cluster()
+        cluster = load_batch_cluster(resource_only=True)
 
         nc_opts = list(nc_opts)
         rgxp = r'^vm(\d+)$'
@@ -1386,6 +1392,7 @@ def pcocc_launcher(restart_ckpt,
 
     logging.debug("Hypervisors are running")
 
+    batch.write_key("cluster/user", "resource_definition", cluster.resource_definition)
     batch.write_key("cluster/user", "definition", cluster_definition)
 
     batch.write_key("cluster/user", "ca_cert", UserCA.new().dump_yaml())

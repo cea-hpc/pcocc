@@ -45,7 +45,7 @@ import Docker
 from abc import ABCMeta
 from ClusterShell.NodeSet  import RangeSet
 from .scripts import click
-from .Backports import subprocess_check_output, enum
+from .Backports import subprocess_check_output, enum, which
 from .Error import PcoccError
 from .Config import Config
 from .Misc import fake_signalfd, wait_or_term_child
@@ -1614,6 +1614,20 @@ username={3}@pcocc
                     yaml.safe_dump(user_data, f)
             else:
                 shutil.copyfile('/dev/null', user_data_file)
+
+            if user_data:
+                if which("cloud-init"):
+                    try:
+                        subprocess.check_output(['cloud-init', 'devel', 'schema',
+                                                 '--config-file', user_data_file],
+                                                stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as err:
+                        logging.warning('Failed to validate cloud-config file for vm %d',
+                                        vm.rank)
+                        logging.warning(err.output)
+                else:
+                    logging.info('cloud-init CLI is not installed: skipping cloud-config validation')
+
 
             with open(os.devnull, 'w') as devnull:
                 subprocess.check_call(['genisoimage',

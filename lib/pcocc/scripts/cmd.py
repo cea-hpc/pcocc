@@ -990,7 +990,7 @@ def pcocc_console(jobid, jobname, log, vm):
         signal.signal(signal.SIGTERM, clean_exit)
 
         config = load_config(jobid, jobname, default_batchname='pcocc')
-        cluster = load_batch_cluster()
+        cluster = load_batch_cluster(resource_only=True)
 
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]

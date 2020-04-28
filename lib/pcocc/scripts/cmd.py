@@ -123,6 +123,8 @@ def load_batch_cluster(resource_only=False):
         resource_definition = Config().batch.read_key('cluster/user', 'resource_definition')
         if resource_definition:
             definition = resource_definition
+        else:
+            resource_only=False
 
     return Cluster(definition, resource_only=resource_only)
 

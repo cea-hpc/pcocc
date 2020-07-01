@@ -1485,7 +1485,7 @@ class LocalManager(EtcdManager):
                 pus = []
                 for rng in cores.split(','):
                     pus += [subprocess_check_output(['hwloc-calc',
-                                                     '--intersect', 'PU',
+                                                     '--intersect', 'PU', '--po',
                                                      'cores:{}'.format(rng)]).strip()]
 
                 pus = ','.join(pus)

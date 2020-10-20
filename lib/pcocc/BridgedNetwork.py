@@ -26,6 +26,23 @@ properties:
       mtu:
        type: integer
        default-value: 1500
+      vlans:
+        type: array
+        items:
+          type: object
+          properties:
+            vid:
+              type: integer
+            type:
+              type: string
+              enum:
+                - native
+                - tagged
+                - untagged
+          required:
+            - vid
+            - type
+          additionalProperties: false
     additionalProperties: false
     required:
      - host-bridge
@@ -39,6 +56,7 @@ additionalProperties: false
         self._host_bridge = settings["host-bridge"]
         self._tap_prefix = settings["tap-prefix"]
         self._mtu = int(settings.get("mtu", 1500))
+        self._vlans = settings.get("vlans", [])
 
 
     def init_node(self):
@@ -124,6 +142,7 @@ additionalProperties: false
         tap.enable()
         tap.set_mtu(self._mtu)
         tap.connect(self._host_bridge)
+        tap.set_vlans(self._vlans)
 
         return {'tap_name': tap.name}
 

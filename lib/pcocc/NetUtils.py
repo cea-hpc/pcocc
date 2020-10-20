@@ -896,6 +896,15 @@ class TAP(NetDev):
         subprocess.check_call(["ip", "link", "set", self._name, "master",
                                bridge_name])
 
+    def set_vlans(self, vlans):
+        for vlan in vlans:
+            cmd = ["bridge", "vlan", "add", "dev", self._name, "vid", str(vlan["vid"])]
+            if vlan["type"] == "untagged":
+                cmd.append("untagged")
+            elif vlan["type"] == "native":
+                cmd.append("pvid")
+                cmd.append("untagged")
+            subprocess.check_call(cmd)
 
 class IBVFType(object):
     MLX4 = 1

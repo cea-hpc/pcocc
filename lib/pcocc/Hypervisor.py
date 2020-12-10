@@ -51,6 +51,7 @@ from .Config import Config
 from .Misc import fake_signalfd, wait_or_term_child
 from .Misc import stop_threads, systemd_notify
 from .Templates import DRIVE_IMAGE_TYPE
+from .Image import VMImage
 
 
 lock = threading.Lock()
@@ -1388,11 +1389,12 @@ username={3}@pcocc
             atexit.register(os.remove, snapshot_path)
 
             cmdline += qemu_gen_block_cmdline(vm.disk_model, snapshot_path, 'drive0',
-                                              block_idx, vm.disk_cache)
+                                              block_idx, vm.disk_cache, True)
             block_idx += 1
 
         for i, drive in enumerate(vm.persistent_drives):
             path = Config().resolve_path(drive, vm)
+            mmp = False
             if vm.persistent_drives[drive]['mmp']:
                 spath = os.path.realpath(path)
                 spath = spath[1:]
@@ -1403,9 +1405,13 @@ username={3}@pcocc
                                       self._do_lock_image,
                                       vm.persistent_drives[drive])
                 atexit.register(self._unlock_image, spath)
+
+                if vm.persistent_drives[drive]['mmp'] != 'cluster':
+                    mmp = True
+
             cmdline += qemu_gen_block_cmdline(vm.disk_model, path, 'drive'+str(block_idx),
                                               block_idx,
-                                              vm.persistent_drives[drive]['cache'])
+                                              vm.persistent_drives[drive]['cache'], mmp)
             block_idx += 1
 
         if vm.kernel:
@@ -2286,27 +2292,36 @@ username={3}@pcocc
                     break
 
 
-def qemu_gen_block_cmdline(model, path, name, index, cache):
+def qemu_gen_block_cmdline(model, path, name, index, cache, mmp):
     if model == 'virtio':
-        return qemu_gen_vblk_cmdline(path, name, index, cache)
+        return qemu_gen_vblk_cmdline(path, name, index, cache, mmp)
     elif model == 'ide':
-        return qemu_gen_ide_cmdline(path, name, index, cache)
+        return qemu_gen_ide_cmdline(path, name, index, cache, mmp)
     elif model == 'virtio-scsi':
-        return qemu_gen_scsi_cmdline(path, name, index, cache)
+        return qemu_gen_scsi_cmdline(path, name, index, cache, mmp)
 
     raise HypervisorError('Unknown block device model: {}'.format(model))
 
-def qemu_gen_ide_cmdline(path, name, index, cache):
+
+def qemu_gen_share_opt(mmp):
+    if mmp:
+        return ''
+    else:
+        return ',share-rw=on'
+
+def qemu_gen_ide_cmdline(path, name, index, cache, mmp):
     cmd = []
     if index == 0:
         cmd += ['-device', 'ich9-ahci,id=ahci,addr=06.0']
 
     cmd += ['-device', 'ide-hd,'
-            'drive={0},bus=ahci.{1}'.format(name,index)]
+            'drive={0},bus=ahci.{1}{2},{3}'.format(name, index,
+                                                  qemu_gen_share_opt(mmp),
+                                                  qemu_gen_dev_cache_opt(cache))]
 
-    return cmd + qemu_gen_drive_cmdline(path, name, cache)
+    return cmd + qemu_gen_drive_cmdline(path, name, cache, mmp)
 
-def qemu_gen_vblk_cmdline(path, name, index, cache):
+def qemu_gen_vblk_cmdline(path, name, index, cache, mmp):
     cmd = qemu_gen_iothread_cmdline(name)
 
     # Keep adressing scheme used in previous versions
@@ -2320,27 +2335,67 @@ def qemu_gen_vblk_cmdline(path, name, index, cache):
 
     cmd += ['-device',
             'virtio-blk-pci,id=vblk-{0},multifunction=on,'
-            'drive={0},addr={1:02d}.{2}'.format(name, dev_addr, func)]
+            'drive={0},addr={1:02d}.{2}{3},{4}'.format(name, dev_addr, func,
+                                                   qemu_gen_share_opt(mmp),
+                                                  qemu_gen_dev_cache_opt(cache))]
 
-    return cmd + qemu_gen_drive_cmdline(path, name, cache)
+    return cmd + qemu_gen_drive_cmdline(path, name, cache, mmp)
 
-def qemu_gen_scsi_cmdline(path, name, index, cache):
+def qemu_gen_scsi_cmdline(path, name, index, cache, mmp):
     cmd = qemu_gen_iothread_cmdline(name)
 
     cmd += ['-device',
             'scsi-hd,id=scsi-hd-{0},bus=scsi0.0,scsi-id={1},'
-            'drive={0}'.format(name, index)]
+            'drive={0}{2},{3}'.format(name, index, qemu_gen_share_opt(mmp),
+                                                  qemu_gen_dev_cache_opt(cache))]
 
-    return cmd + qemu_gen_drive_cmdline(path, name, cache)
+    return cmd + qemu_gen_drive_cmdline(path, name, cache, mmp)
 
 def qemu_gen_iothread_cmdline(name):
     return ['-object',
            'iothread,id=ioth-{0}'.format(name)]
 
-def qemu_gen_drive_cmdline(path, name, cache):
-    return ['-drive',
-            'file={0},cache={1},id={2},discard=on,'
-            'if=none'.format(path, cache, name)]
+
+def qemu_gen_dev_cache_opt(cache):
+    if cache == 'writeback':
+        return 'write-cache=on'
+    elif cache == 'none':
+        return 'write-cache=on'
+    elif cache == 'unsafe':
+        return 'write-cache=on'
+    elif cache == 'writethrough':
+        return 'write-cache=off'
+    elif cache == 'directsync':
+        return 'write-cache=off'
+
+    raise HypervisorError('cache mode {} is unsupported'.format(cache))
+
+def qemu_gen_block_cache_opt(cache):
+    if cache == 'writeback':
+        return 'cache.direct=off,cache.no-flush=off'
+    elif cache == 'none':
+        return 'cache.direct=on,cache.no-flush=off'
+    elif cache == 'unsafe':
+        return 'cache.direct=off,cache.no-flush=on'
+    elif cache == 'writethrough':
+        return 'cache.direct=off,cache.no-flush=off'
+    elif cache == 'directsync':
+        return 'cache.direct=on,cache.no-flush=off'
+
+    raise HypervisorError('cache mode {} is unsupported'.format(cache))
+
+def qemu_gen_drive_cmdline(path, name, cache, mmp):
+    if mmp:
+        locking = ''
+    else:
+        locking = ',file.locking=off'
+
+    driver = VMImage.image_type(path)
+
+    return ['-blockdev',
+            'driver={0},node-name={1},{2},file.driver=file,'
+            'file.filename={3},discard=unmap,file.discard=unmap{4}'.format(
+                driver, name, qemu_gen_block_cache_opt(cache), path, locking)]
 
 def checkpoint_mem_file(vm, ckpt_dir):
     return os.path.join(ckpt_dir,'memory-vm{}'.format(vm.rank))

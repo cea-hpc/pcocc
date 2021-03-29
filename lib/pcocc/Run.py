@@ -1189,7 +1189,7 @@ class ContainerFs(object):
         # Environment variables may need to be passed to the runner
         Env.append(self, self.cont_tpl.env())
         Env.path_prefix(self, self.cont_tpl.pathprefix())
-        Env.path_suffix(self, self.cont_tpl.pathprefix())
+        Env.path_suffix(self, self.cont_tpl.pathsuffix())
 
         if not self.no_user:
             self.inject_current_user()

@@ -722,7 +722,7 @@ class ContainerTemplate(dict):
         mlist = self._extract_command_lines(program_output, "MODULE ")
         # FIXME: generators for such modules will not be applied
         for m in mlist:
-            module_template = Config().container.modules.get_template(m,
+            module_template = Config().containers.modules.get_template(m,
                                                                       required=True)
             self.merge_settings(module_template)
 

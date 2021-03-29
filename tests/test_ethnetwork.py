@@ -116,6 +116,8 @@ def test_alloc_ethnetwork(mocker, config, datadir):
     config.vnets.load(str(datadir.join('networks_l3.yaml')))
     config.rsets.load(str(datadir.join('resources.yaml')))
     config.tpls.load(str(datadir.join('templates.yaml')))
+    config.tpls.validate_inheritance()
+
     config.tracker = pcocc.NetUtils.Tracker(str(datadir.join('tracker.db')))
 
     cluster = pcocc.Cluster('test_l3:4', resource_only=True)

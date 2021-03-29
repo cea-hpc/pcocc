@@ -109,6 +109,8 @@ class TemplateConfig(dict):
 
             self[name] = Template(name, tpl_attr, filename, filetype)
 
+
+    def validate_inheritance(self):
         # Finish validation once everything has been loaded
         for tpl in self.itervalues():
             if not tpl.placeholder:

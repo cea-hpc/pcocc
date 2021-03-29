@@ -85,6 +85,7 @@ class Config(object):
         self.load_vnets(os.path.join(conf_dir, 'networks.yaml'))
         self.load_rsets(os.path.join(conf_dir, 'resources.yaml'))
         self.load_tpls(os.path.join(conf_dir, 'templates.yaml'), 'system')
+        self.tpls.validate_inheritance()
         self.load_containers(os.path.join(conf_dir,
                                           'containers.yaml'))
         self.load_batch(os.path.join(conf_dir, 'batch.yaml'), jobid,
@@ -110,6 +111,8 @@ class Config(object):
                 if tpl_file.endswith('.yaml'):
                     self.load_tpls(os.path.join(tpl_dir, tpl_file),
                                    'user', required=False)
+
+        self.tpls.validate_inheritance()
 
         user_repos_path = os.path.join(self.user_conf_dir, 'repos.yaml')
         if os.path.exists(user_repos_path):

@@ -1056,7 +1056,7 @@ class Slurm(Native):
 
     def run(self):
         """Run the command."""
-        slurm_cmd = ["srun", "--mpi=pmi2"]
+        slurm_cmd = ["srun"]
         if self.pty:
             # In slurm PTY can only run on a single process
             if self.proc > 1:

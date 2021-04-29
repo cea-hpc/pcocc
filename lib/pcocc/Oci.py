@@ -822,9 +822,12 @@ class OciImage(object):
                 if "org.opencontainers.image.ref.name" in cont["annotations"]:
                     annotations = cont["annotations"]
                     label = annotations["org.opencontainers.image.ref.name"]
-            nc = self.new_container(arch=cont["platform"]["architecture"],
-                                    os=cont["platform"]["os"],
-                                    label=label)
+            if "platform" in cont:
+                nc = self.new_container(arch=cont["platform"]["architecture"],
+                                        os=cont["platform"]["os"],
+                                        label=label)
+            else:
+                nc = self.new_container(label=label)
             nc.load(self.oci, cont["digest"])
             nc.validate(self.oci, check_digest=check_digest)
 

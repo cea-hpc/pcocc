@@ -18,7 +18,7 @@
 --
 --  Written by Francois Diakhate <francois.diakhate@cea.fr>
 
-require "posix"
+local posix = require "posix"
 
 local vm_enabled = false
 
@@ -67,7 +67,7 @@ function setenv(env_name, val)
 end
 
 function replicate_var(spank, slurm_name, env_name)
-   local val, msg = spank:get_item (slurm_name)
+   local val, msg = math.floor(spank:get_item (slurm_name))
    if val == nil then
       SPANK.log_error("Faile to get item %s: %s", slurm_name, msg)
       return 1

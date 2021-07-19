@@ -479,6 +479,8 @@ class NetNameSpace(TrackableObject):
     def create(self):
         self.run(["ip", "netns", "add", self._name])
         self._log_create()
+        self.run(["ip", "netns", "exec", self._name,
+                  'ip', 'link', 'set', 'dev', 'lo', 'up'])
         return self
 
     def delete(self):

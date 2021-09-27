@@ -29,11 +29,11 @@ Template parameters
 **description**
  A string describing the VM template. This parameter is not inheritable.
 **user-data**
- A cloud-config file to configure a VM image with cloud-init (see :ref:`pcocc-configvm-tutorial(7)<configvm>`)
+ A cloud-config file to configure a VM image with cloud-init (see :ref:`pcocc-cloudconfig-tutorial(7)<configvm>`)
 **instance-id**
  Instance ID to provide to cloud-init (defaults to a randomly generated uuid).
 **mount-points**
- A key/value mapping defining directories to export as 9p mount points (see :ref:`pcocc-9pmount-tutorial(7)<configvm>`). Each key defines a 9p mount tag and the associated value defines the directory to export. The following parameters are supported:
+ A key/value mapping defining directories to export as 9p mount points (see :ref:`pcocc-9pmount-tutorial(7)<9pmount>`). Each key defines a 9p mount tag and the associated value defines the directory to export. The following parameters are supported:
 
   **path**
    The host directory to export.

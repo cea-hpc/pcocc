@@ -249,4 +249,4 @@ This is the default configuration file for reference::
 See also
 ********
 
-:ref:`pcocc-template(1)<template>`, :ref:`pcocc-templates.yaml(5)<templates.yaml>`, :ref:`pcocc-resources.yaml(5)<resources.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`, :ref:`pcocc-configvm-tutorial(7)<configvm>`
+:ref:`pcocc-template(1)<template>`, :ref:`pcocc-templates.yaml(5)<templates.yaml>`, :ref:`pcocc-resources.yaml(5)<resources.yaml>`, :ref:`pcocc-newvm-tutorial(7)<newvm>`, :ref:`pcocc-cloudconfig-tutorial(7)<configvm>`

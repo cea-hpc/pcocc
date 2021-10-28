@@ -1304,11 +1304,11 @@ username={3}@pcocc
             for core_id in coreset:
                 try:
                     with open(os.devnull, 'w') as devnull:
-                        numa_node = int(subprocess_check_output(['hwloc-calc',
-                                                                 'Core:%d' %
+                        numa_node = int(subprocess_check_output(['hwloc-calc'] +
+                                                                topology_cache_args +
+                                                                 ['Core:%d' %
                                                                  (int(core_id)),
-                                                                 '-I', 'NUMANode'] +
-                                                                topology_cache_args,
+                                                                 '-I', 'NUMANode'],
                                         stderr=devnull))
                 except ValueError:
                     # Use NUMA node 0 if the CPU doesnt intersect any NUMANode

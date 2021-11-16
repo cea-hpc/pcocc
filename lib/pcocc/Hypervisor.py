@@ -1052,8 +1052,9 @@ class QemuMonitor(object):
 
         return ('{"execute": "drive-backup",'
                 '"arguments": { "device": "%s",'
-                '"target": "%s", "sync": "%s"'
-                '} }\n\n' % (devices[0], dests[0], sync_arg))
+                '"target": "%s", "sync": "%s",'
+                '"job-id": "%s"'
+                '} }\n\n' % (devices[0], dests[0], sync_arg, devices[0]))
 
     def drive_backup(self, device, dest, sync_type):
         self.validate_reply(self.exec_cmd_sync(self.drive_backup_cmd(

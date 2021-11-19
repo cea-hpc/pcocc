@@ -699,6 +699,7 @@ additionalProperties: false
                         "--dhcp-option=119,{search} "
                         "--dhcp-option=26,{mtu} "
                         "--dhcp-option=option:dns-server,{dnssrv} "
+                        "--listen-address={dnssrv} "
                         "{addopts} "
                         "--dhcp-option=option:netmask,{netmask} "
                         "--dhcp-option=option:router,{router} "

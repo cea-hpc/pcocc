@@ -682,7 +682,8 @@ class ContImage(object):
             fmt = "docker-daemon"
 
         if fmt == "docker":
-            if Config().containers.config.default_registry and (not '.' in path or ':' in path):
+            components = path[2:].split("/")
+            if Config().containers.config.default_registry and (not '.' in components[0] or ':' in components[0]):
                 if not '/' in path[2:]:
                     path='//library/' + path[2:]
 

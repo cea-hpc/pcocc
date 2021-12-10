@@ -13,6 +13,7 @@ import fcntl
 import struct
 import termios
 import random
+import click
 
 from abc import ABCMeta
 
@@ -25,7 +26,6 @@ from google.protobuf.json_format import MessageToJson
 from .Misc import ThreadPool
 from .Error import AgentCommandError, PcoccError
 from .Misc import fake_signalfd
-from .scripts import click
 
 DEFAULT_AGENT_TIMEOUT=60
 

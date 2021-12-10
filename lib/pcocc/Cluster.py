@@ -22,11 +22,13 @@ import time
 import logging
 import threading
 import etcd
+import click
+
 from . import Hypervisor
 from . import Batch
 from .Error import PcoccError
 from .Config import Config
-from .scripts import click
+
 from .Tbon import TreeNode, TreeClient
 from .Templates import DRIVE_IMAGE_TYPE
 

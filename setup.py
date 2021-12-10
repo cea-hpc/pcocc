@@ -78,7 +78,7 @@ setup(name= 'pcocc', version= '0.6.5', description= 'Spawn VMs on a HPC Cluster'
       'of VMs are seen as regular jobs.',
       author= 'Francois Diakhate', author_email= 'francois.diakhate@cea.fr',
       license= "GPLv3", package_dir={'': 'lib'},
-      packages=['pcocc', 'pcocc.scripts', 'pcocc.scripts.click',
+      packages=['pcocc', 'pcocc.scripts',
                 'pcocc.scripts.Shine'],
       data_files= [],
       entry_points= '''
@@ -87,7 +87,7 @@ setup(name= 'pcocc', version= '0.6.5', description= 'Spawn VMs on a HPC Cluster'
       ''',
       install_requires=['PyYAML', 'python-etcd >= 0.4.3', 'psutil',
                         'jsonschema', 'urllib3', 'dnspython', 'ClusterShell',
-                        'grpcio', 'pyOpenSSL', 'protobuf', 'six'],
+                        'grpcio', 'pyOpenSSL', 'protobuf', 'six', 'click'],
       cmdclass={'bdist_rpm': pcocc_bdist_rpm,
                 'install': pcocc_install}
 )

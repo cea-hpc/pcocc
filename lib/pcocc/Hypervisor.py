@@ -39,12 +39,12 @@ import random
 import binascii
 import uuid
 import queue
+import click
 from . import agent_pb2
 from . import Docker
 
 from abc import ABCMeta
 from ClusterShell.NodeSet  import RangeSet
-from .scripts import click
 from .Backports import subprocess_check_output, enum, which
 from .Error import PcoccError
 from .Config import Config

@@ -28,6 +28,7 @@ import shutil
 import tempfile
 import time
 import hashlib
+import click
 from . import ObjectStore
 from . import Docker
 
@@ -38,7 +39,7 @@ from distutils import spawn
 from .Config import Config
 from .Cache import chmod_rm
 from .Error import PcoccError
-from .scripts import click
+
 from .Oci import OciImage, OciRepoBlobs
 from .Misc import path_join, pcocc_at_exit
 

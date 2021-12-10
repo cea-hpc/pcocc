@@ -37,9 +37,9 @@ import pwd
 import logging
 import pcocc
 import json
+import click
 
 from pcocc.Tbon import UserCA
-from pcocc.scripts import click
 from pcocc import PcoccError, Config, Cluster, Hypervisor, Docker
 from pcocc.Batch import ProcessType
 from pcocc.Misc import fake_signalfd, wait_or_term_child, stop_threads,CHILD_EXIT

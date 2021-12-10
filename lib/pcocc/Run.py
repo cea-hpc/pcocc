@@ -33,6 +33,7 @@ import shlex
 import json
 import logging
 import signal
+import click
 
 from distutils import spawn
 from pwd import getpwnam
@@ -40,7 +41,7 @@ from ClusterShell.NodeSet import RangeSet
 
 from .Agent import AgentCommand, DEFAULT_AGENT_TIMEOUT, WritableVMRootfs
 from . import agent_pb2
-from .scripts import click
+
 from .Container import OciRuntimeConfig
 from .Config import Config
 from .Error import PcoccError

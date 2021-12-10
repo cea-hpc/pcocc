@@ -22,8 +22,8 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import click
 
-from .scripts import click
 from .Config import Config
 from .Error import PcoccError
 

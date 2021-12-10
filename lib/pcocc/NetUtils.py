@@ -106,7 +106,7 @@ class Tracker(object):
         self._tracked_objs.sync()
 
     def list_objs(self, obj_type=None):
-        for key, value in self._tracked_objs.iteritems():
+        for key, value in self._tracked_objs.items():
             if key == 'index':
                 continue
 
@@ -134,9 +134,7 @@ class TrackableClass(ABCMeta):
         Tracker.register_trackable(name, cls)
         super(TrackableClass, cls).__init__(name, bases, dct)
 
-class TrackableObject(object):
-    __metaclass__ = TrackableClass
-
+class TrackableObject(object, metaclass=TrackableClass):
     def __init__(self, name):
         self._name = name
 
@@ -431,7 +429,7 @@ class VFIOInfinibandVF(VFIODev):
         device_path = "/sys/class/infiniband/{0}".format(self._ibdev_name)
         num_ports = len(os.listdir(os.path.join(device_path, "ports")))
 
-        for port in xrange(1, num_ports + 1):
+        for port in range(1, num_ports + 1):
             pkeys_path = os.path.join(device_path, "ports", str(port),
                                       "pkeys")
             pkey_idx_path = os.path.join(device_path, "iov", self._dev_addr,
@@ -455,7 +453,7 @@ class VFIOInfinibandVF(VFIODev):
         device_path = '/sys/class/infiniband/{0}'.format(self._ibdev_name)
         num_ports = len(os.listdir(os.path.join(device_path, 'ports')))
 
-        for port in xrange(1, num_ports+1):
+        for port in range(1, num_ports+1):
             pkey_idx_path = os.path.join(device_path, 'iov', self._dev_addr,
                                          'ports', str(port), 'pkey_idx')
 
@@ -515,7 +513,7 @@ class NetPort(TrackableObject):
                          port, _ in tracker.list_objs(cls.__name__)  if
                          port._number >= min_port ])
 
-        for i in xrange(min_port, max_port):
+        for i in range(min_port, max_port):
             if i - min_port >= len(alloc):
                 return cls(i)
 
@@ -956,7 +954,7 @@ def mac_gen_hwaddr(prefix, num):
         raise ValueError('Invalid id for this MAC prefix')
     suffix = ("{0:x}".format(num)).zfill(mac_suffix_len(prefix))
     suffix = ':'.join(
-        suffix[i:i+2] for i in xrange(0, len(suffix), 2))
+        suffix[i:i+2] for i in range(0, len(suffix), 2))
     return prefix + ':' + suffix
 
 def bridge_exists(brname):
@@ -1014,5 +1012,5 @@ def ibdev_get_guid(ibdev_name):
 
 
 def guid_hex_to_col(guid):
-    res = ':'.join(guid[c:c+2] for c in xrange(2, len(guid), 2))
+    res = ':'.join(guid[c:c+2] for c in range(2, len(guid), 2))
     return res

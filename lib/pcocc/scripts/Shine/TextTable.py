@@ -114,7 +114,7 @@ class TextTable(object):
         leftover={}
         has_leftover=False
         # Keep track of wider value for each field
-        for key, value in row.iteritems():
+        for key, value in row.items():
             header_length = len(self._header(key))
             real_value_len = len(str(value or ''))
 
@@ -153,7 +153,7 @@ class TextTable(object):
                 length = matchobj.group(2) or self._max_width[key]
                 length = int(length)
                 value = getter(key) or ""
-            except KeyError, ex:
+            except KeyError as ex:
                 if self.ignore_bad_keys:
                     value = "%%%s" % key
                     length = len(value)

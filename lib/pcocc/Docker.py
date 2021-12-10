@@ -106,8 +106,8 @@ def get_image(vm, dest_image, src_image):
 
 def env(vm):
     docker_env = _generate_docker_env(vm, propagate=False)
-    for k, v in docker_env.items():
-        print("export {}={}".format(k, v))
+    for k, v in list(docker_env.items()):
+        print(("export {}={}".format(k, v)))
 
 def shell(vm, script=None):
     shell_env = _generate_docker_env(vm)
@@ -233,7 +233,7 @@ def _write_certs(target_dir, cert_data):
     os.makedirs(target_dir)
     os.chmod(target_dir, 0o700)
 
-    for key, value in cert_data.items():
+    for key, value in list(cert_data.items()):
         path = os.path.join(target_dir,
                             key + ".pem")
         _write_cert_file(path, value)

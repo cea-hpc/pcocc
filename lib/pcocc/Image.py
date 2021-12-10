@@ -17,7 +17,7 @@
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
 """pcocc image management interface for containers and VM images."""
-from __future__ import division
+
 import logging
 import os
 import subprocess
@@ -28,8 +28,8 @@ import shutil
 import tempfile
 import time
 import hashlib
-import ObjectStore
-import Docker
+from . import ObjectStore
+from . import Docker
 
 from enum import Enum
 from os.path import expanduser
@@ -319,7 +319,7 @@ class VMImage(object):
         try:
             subprocess.check_output(
                 ["qemu-img", "create", "-f", fmt] + backing_opt + [path, size])
-        except subprocess.CalledProcessError, e:
+        except subprocess.CalledProcessError as e:
             raise PcoccError("Unable to create image. "
                              "The qemu-img command failed with: " + e.output)
 
@@ -820,7 +820,7 @@ class ContImage(object):
         oci_index = oci.index
         all_blobs = oci.blobs_resolve(add_path=True)
 
-        for h, infos in all_blobs.items():
+        for h, infos in list(all_blobs.items()):
             dst_store.put_data_blob(infos["path"], known_hash=h)
 
         return oci_index, all_blobs
@@ -926,7 +926,7 @@ class ImageMgr(object):
         except re.error as e:
             raise PcoccError("Could not parse regular expression :%s" % str(e))
 
-        return {key: value for key, value in meta.iteritems()
+        return {key: value for key, value in meta.items()
                 if search.search(key)}
 
     def get_image(self,
@@ -1024,7 +1024,7 @@ class ImageMgr(object):
                                                 full=True)
 
         if not os.path.samefile(cur_backing_file, tgt_backing_file):
-            print 'Rebasing snapshot to preserve chaining...'
+            print('Rebasing snapshot to preserve chaining...')
             VMImage.rebase(path, tgt_backing_file, False)
 
         rel_backing_file = dst_store.get_obj_path('data',
@@ -1212,7 +1212,7 @@ class ImageMgr(object):
                                                                dst_store,
                                                                tmp_oci)
                 # At this points all blobs are saved
-                image_blobs = [b["digest"] for b in blobs.values()]
+                image_blobs = [b["digest"] for b in list(blobs.values())]
                 image_custom_meta["oci_index"] = index
 
             except PcoccError as e:

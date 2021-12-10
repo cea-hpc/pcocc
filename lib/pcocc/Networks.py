@@ -80,7 +80,7 @@ class VNetworkConfig(dict):
             best_err = jsonschema.exceptions.best_match(rel_errs)
             raise InvalidConfigurationError(best_err.message)
 
-        for name, net_attr in net_config.iteritems():
+        for name, net_attr in net_config.items():
             self[name] = VNetwork.create(net_attr['type'],
                                          name,
                                          net_attr['settings'])
@@ -91,9 +91,7 @@ class VNetworkClass(ABCMeta):
             VNetwork.register_network(dct['_schema'], cls)
         super(VNetworkClass, cls).__init__(name, bases, dct)
 
-class VNetwork(object):
-    __metaclass__ = VNetworkClass
-
+class VNetwork(object, metaclass=VNetworkClass):
     """Base class for all network types"""
     _networks = {}
     _type = None

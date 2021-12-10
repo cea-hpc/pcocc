@@ -256,7 +256,7 @@ required:
 
             tmp.write('\n')
 
-            for pkey, config in pkeys.iteritems():
+            for pkey, config in pkeys.items():
                 partline = 'PK_{0}={0} , ipoib'.format(pkey)
                 for vf_guids in chunks(config['vf_guids'], 128):
                     partline_vf = ', indx0 : ' + ', '.join(g + '=full'
@@ -278,7 +278,7 @@ required:
 
 
             for proc in psutil.process_iter():
-                if isinstance(proc.name, basestring):
+                if isinstance(proc.name, str):
                     procname = proc.name
                 else:
                     procname = proc.name()

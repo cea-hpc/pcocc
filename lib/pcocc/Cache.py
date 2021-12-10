@@ -161,11 +161,11 @@ class Cache(dict):
             if h.endswith(".deleted"):
                 chmod_rm(bpath)
 
-        dir_list = filter(os.path.isdir,
+        dir_list = list(filter(os.path.isdir,
                           [os.path.join(self.path, p)
-                           for p in os.listdir(self.path)])
-        empty_dirs = filter(lambda d: len(os.listdir(d)) == 0, dir_list)
-        map(os.rmdir, empty_dirs)
+                           for p in os.listdir(self.path)]))
+        empty_dirs = [d for d in dir_list if len(os.listdir(d)) == 0]
+        list(map(os.rmdir, empty_dirs))
 
     def _check_overall_cache_size(self, count=1):
         if self._max_entry and len(self) >= self._max_entry:
@@ -215,11 +215,11 @@ class Cache(dict):
         return blob_dir + "/" + h
 
     def clear(self):
-        map(lambda b: b.remove(), self.values())
+        list(map(lambda b: b.remove(), list(self.values())))
         self.clean_empty_dirs()
 
     def get_sorted_blob_list(self):
-        return sorted(self.values(), key=lambda b: b.time)
+        return sorted(list(self.values()), key=lambda b: b.time)
 
     def decimate(self, count=None):
         blobs = self.get_sorted_blob_list()
@@ -235,7 +235,7 @@ class Cache(dict):
         def delblob(b):
             self.delete_hash(b.hash)
 
-        map(delblob, blobs[:to_keep])
+        list(map(delblob, blobs[:to_keep]))
 
         self.clean_empty_dirs()
 

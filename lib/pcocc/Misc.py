@@ -29,7 +29,7 @@ import jsonschema
 import yaml
 import atexit
 import pwd
-from Queue import Queue
+from queue import Queue
 from threading import Thread
 from ctypes import c_uint, c_char_p, c_int, POINTER, cdll, c_int32, byref
 from ctypes.util import find_library
@@ -84,7 +84,7 @@ def path_join(*args):
     def remove_start_sep(path):
         return path[1:] if path.startswith(os.sep) else path
 
-    paths = [paths[0]] + map(remove_start_sep, paths[1:])
+    paths = [paths[0]] + list(map(remove_start_sep, paths[1:]))
     return os.path.join(*paths)
 
 stop_threads = threading.Event()
@@ -354,7 +354,7 @@ class IDAllocator(object):
 
             i+=1
         else:
-            id_indexes += [ i for i in xrange(i, i +  count) ]
+            id_indexes += [ i for i in range(i, i +  count) ]
 
         for i in id_indexes:
             id_alloc_state.append({'pkey_index': i,

@@ -166,7 +166,7 @@ class HierarchObjectStore(object):
             self._cache = Cache(repo_config["cache"]["path"])
 
         for repo in repo_config['repos']:
-            if repo['name'] in self._repos.keys():
+            if repo['name'] in list(self._repos.keys()):
                 message = 'Duplicate'' repository: {0}'.format(repo['name'])
                 raise InvalidConfigurationError(message)
 
@@ -178,7 +178,7 @@ class HierarchObjectStore(object):
     @property
     def default_repo(self):
         try:
-            return self._repos.values()[0]['name']
+            return list(self._repos.values())[0]['name']
         except IndexError:
             raise InvalidConfigurationError('No repository configured')
 
@@ -190,13 +190,13 @@ class HierarchObjectStore(object):
                 raise PcoccError('Unknown repository {0}'.format(repo_name))
 
         try:
-            return self._repos.values()[0]['store']
+            return list(self._repos.values())[0]['store']
         except IndexError:
             raise InvalidConfigurationError('No repository configured')
 
     def list_repos(self, tag):
         return [r['store']
-                for r in self._repos.itervalues()
+                for r in self._repos.values()
                 if not tag or r['tag'] == tag]
 
     def get_meta(self,
@@ -206,7 +206,7 @@ class HierarchObjectStore(object):
         if repo:
             return self.get_repo(repo).get_meta(name, revision)
 
-        for r in self._repos.itervalues():
+        for r in self._repos.values():
             obj_store = r['store']
             try:
                 return obj_store.get_meta(name, revision)
@@ -219,7 +219,7 @@ class HierarchObjectStore(object):
         if repo:
             return self.get_repo(repo).get_revisions(name)
 
-        for r in self._repos.itervalues():
+        for r in self._repos.values():
             obj_store = r['store']
             try:
                 return obj_store.get_revisions(name)
@@ -233,7 +233,7 @@ class HierarchObjectStore(object):
             return self.get_repo(repo).load_meta()
 
         glob_meta = {}
-        for r in reversed(self._repos.values()):
+        for r in reversed(list(self._repos.values())):
             meta = r['store'].load_meta(shallow=shallow)
             glob_meta.update(meta)
 
@@ -367,8 +367,8 @@ class ObjectStore(object):
             shutil.move(self._meta_path, self._meta_path + '.old')
             try:
                 os.mkdir(self._meta_path)
-                for revs in meta.itervalues():
-                    for m in revs.itervalues():
+                for revs in meta.values():
+                    for m in revs.values():
                         self.put_meta(m['name'], m['revision'], m['kind'],
                                       m['data_blobs'], m['custom_meta'],
                                       m['owner'], m['timestamp'])
@@ -388,13 +388,13 @@ class ObjectStore(object):
     def garbage_collect(self):
         meta = self.load_meta()
         in_use = set()
-        for revs in meta.itervalues():
-            for m in revs.itervalues():
+        for revs in meta.values():
+            for m in revs.values():
                 for o in m["data_blobs"]:
                     in_use.add(o)
 
-        in_use = map(ObjectStore._parse_hash_algorithm,
-                     in_use)
+        in_use = list(map(ObjectStore._parse_hash_algorithm,
+                     in_use))
 
         obj_list = glob.glob(os.path.join(
                 self._data_path, '*/*'))
@@ -511,7 +511,7 @@ class ObjectStore(object):
     def get_revisions(self, name):
         if self.version < 2:
             try:
-                return self.load_meta()[name].keys()
+                return list(self.load_meta()[name].keys())
             except KeyError:
                 raise ObjectNotFound(name, self._name, None)
         else:

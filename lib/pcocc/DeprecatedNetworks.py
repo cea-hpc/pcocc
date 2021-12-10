@@ -271,7 +271,7 @@ additionalProperties: false
         suffix_len = 12 - prefix_len
         hw_suffix = ("%x"%(vm.rank)).zfill(suffix_len)
         hw_suffix = ':'.join(
-            hw_suffix[i:i+2] for i in xrange(0, len(hw_suffix), 2))
+            hw_suffix[i:i+2] for i in range(0, len(hw_suffix), 2))
 
         return hw_prefix + ':' + hw_suffix
 
@@ -853,7 +853,7 @@ def mac_gen_hwaddr(prefix, num):
         raise ValueError('Invalid id for this MAC prefix')
     suffix = ("%x"%(num)).zfill(mac_suffix_len(prefix))
     suffix = ':'.join(
-        suffix[i:i+2] for i in xrange(0, len(suffix), 2))
+        suffix[i:i+2] for i in range(0, len(suffix), 2))
     return prefix + ':' + suffix
 
 def ovs_add_bridge(brname, hwaddr=None):

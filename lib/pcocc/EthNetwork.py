@@ -271,7 +271,7 @@ additionalProperties: false
 
         if self._network_layer == 'L3':
             #ARP responders for VMs and host IPs on both bridges
-            for vm_attrs in net_vms_attrs.itervalues():
+            for vm_attrs in net_vms_attrs.values():
                 self._setup_arp_responders(int_br,
                                            vm_attrs['mac_addr'],
                                            vm_attrs['int_ip'],
@@ -548,7 +548,7 @@ additionalProperties: false
             ))
 
         # Define VM external IPs from the allocated IDs
-        for vm_attr in net_vms_attrs.itervalues():
+        for vm_attr in net_vms_attrs.values():
             vm_attr['ext_ip'] = get_ip_on_network(
                 self._ext_network,
                 vm_ext_ips[vm_attr['net_rank']] + 1)
@@ -610,7 +610,7 @@ additionalProperties: false
 
 
         # Add rewrite rules for each VM
-        for vm_attr in net_vms_attrs.itervalues():
+        for vm_attr in net_vms_attrs.values():
             self._add_rewrite_rules(int_br,
                                     vm_attr['int_ip'],
                                     vm_attr['ext_ip'])
@@ -631,7 +631,7 @@ additionalProperties: false
                 self._l3_forward_table + 7))
 
         # Forward from gateways: set destination MAC addr
-        for vm_attr in net_vms_attrs.itervalues():
+        for vm_attr in net_vms_attrs.values():
             self._add_forwarding_entries(int_br,
                                          vm_attr['int_ip'],
                                          vm_attr['mac_addr'],

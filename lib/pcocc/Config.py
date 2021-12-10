@@ -60,8 +60,7 @@ class Lock(object):
     def __del__(self):
         self.handle.close()
 
-class Config(object):
-    __metaclass__ = Singleton
+class Config(object, metaclass=Singleton):
     def __init__(self):
         self.vnets  = pcocc.Networks.VNetworkConfig()
         self.rsets  = pcocc.Resources.ResSetConfig()
@@ -182,7 +181,7 @@ class Config(object):
         except AttributeError:
             pass
 
-        for key, val in os.environ.iteritems():
+        for key, val in os.environ.items():
             tplvalues['env:%s' % (key)] = val
 
         tplvalues['homedir'] =  expanduser("~")

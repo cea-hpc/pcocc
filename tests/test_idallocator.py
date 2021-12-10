@@ -13,11 +13,11 @@ def test_range_alloc(config):
 
     # Allocate 50 ids per job
     config.batch.batchid = 100
-    for i in xrange(0, 5):
+    for i in range(0, 5):
         ids_100 += ida.alloc(10)
 
     config.batch.batchid = 101
-    for i in xrange(0, 5):
+    for i in range(0, 5):
         ids_101 += ida.alloc(10)
 
     assert len(ids_100) == 50

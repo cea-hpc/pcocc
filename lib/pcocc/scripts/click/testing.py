@@ -15,7 +15,7 @@ clickpkg = sys.modules[__name__.rsplit('.', 1)[0]]
 
 
 if PY2:
-    from cStringIO import StringIO
+    from io import StringIO
 else:
     import io
     from ._compat import _find_binary_reader

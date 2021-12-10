@@ -119,7 +119,7 @@ additionalProperties: false
                            random.randint(0x00, 0x7f),
                            random.randint(0x00, 0xff),
                            random.randint(0x00, 0xff) ]
-                hwaddr = ':'.join(map(lambda x: "%02x" % x, hwaddr))
+                hwaddr = ':'.join(["%02x" % x for x in hwaddr])
 
             vm.add_eth_if(self.name,
                           net_res[vm_label]['tap_name'],

@@ -17,8 +17,8 @@
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
 import grpc
-import agent_pb2
-import agent_pb2_grpc
+from . import agent_pb2
+from . import agent_pb2_grpc
 import socket
 import threading
 import logging
@@ -26,9 +26,9 @@ import yaml
 
 from OpenSSL import crypto
 from concurrent import futures
-from Queue import Queue
-from Config import Config
-from Error import PcoccError, AgentTransportError, AgentCommandError
+from queue import Queue
+from .Config import Config
+from .Error import PcoccError, AgentTransportError, AgentCommandError
 from ClusterShell.NodeSet import RangeSet
 
 
@@ -71,7 +71,7 @@ def createCertRequest(pkey, digest="md5", altname=None, **name):
     req = crypto.X509Req()
     subj = req.get_subject()
 
-    for (key,value) in name.items():
+    for (key,value) in list(name.items()):
         setattr(subj, key, value)
 
     if altname:
@@ -83,10 +83,8 @@ def createCertRequest(pkey, digest="md5", altname=None, **name):
     req.sign(pkey, digest)
     return req
 
-def createCertificate(req,
-                      (issuerCert, issuerKey),
-                      serial,
-                      (notBefore, notAfter),
+def createCertificate(req, xxx_todo_changeme,
+                      serial, xxx_todo_changeme1,
                       digest="sha1",
                       altname=None):
     """
@@ -103,6 +101,8 @@ def createCertificate(req,
                altname    - fields to add to the subjectAltName cert field
     Returns:   The signed certificate in an X509 object
     """
+    (issuerCert, issuerKey) = xxx_todo_changeme
+    (notBefore, notAfter) = xxx_todo_changeme1
     cert = crypto.X509()
     cert.set_serial_number(serial)
     cert.gmtime_adj_notBefore(notBefore)
@@ -534,7 +534,7 @@ class TreeNodeRelay(object):
         children_dups = mt_tee(input_iterator, len(self._children_ids))
         children_rpcs = []
 
-        for stub, dup in zip(self._children_stubs.itervalues(), children_dups):
+        for stub, dup in zip(iter(self._children_stubs.values()), children_dups):
             logging.debug("Relay %d intiating child stream rpc", self._vmid)
             children_rpcs.append(stub.route_stream(dup))
 

@@ -169,7 +169,7 @@ class VM(object):
                            'persistent': False})
             idx+=1
 
-        for path, settings in self.persistent_drives.items():
+        for path, settings in list(self.persistent_drives.items()):
             drives.append({
                     'image': settings['backup'],
                     'name': 'drive'+str(idx),
@@ -302,7 +302,7 @@ class Cluster(object):
                     tpl_name = Config().tpls.resource_template(tpl_name)
 
                 tpl_count = int(tpl_count)
-                for i in xrange(tpl_count):
+                for i in range(tpl_count):
                     self.vms.append(
                         VM(count + i, Config().tpls[tpl_name]))
 
@@ -347,7 +347,7 @@ class Cluster(object):
                                  None)
             raise
         try:
-            for net in Config().vnets.values():
+            for net in list(Config().vnets.values()):
                 net.alloc_node_resources(self)
 
         except Exception as e:
@@ -365,16 +365,16 @@ class Cluster(object):
     def free_node_resources(self):
         Config().batch.cleanup_cluster_keys()
 
-        for net in Config().vnets.values():
+        for net in list(Config().vnets.values()):
             net.free_node_resources(self)
 
     def load_node_resources(self):
-        for net in Config().vnets.values():
+        for net in list(Config().vnets.values()):
             net.load_node_resources(self)
 
     def get_license_list(self):
         license_list = []
-        for net in Config().vnets.values():
+        for net in list(Config().vnets.values()):
             license_list += net.get_license(self)
 
         return license_list

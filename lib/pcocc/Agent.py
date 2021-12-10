@@ -16,9 +16,9 @@ import random
 
 from abc import ABCMeta
 
-import agent_pb2
+from . import agent_pb2
 
-from Tbon import mt_chain
+from .Tbon import mt_chain
 from ClusterShell.NodeSet import NodeSet, RangeSet
 from ClusterShell.MsgTree import MsgTree
 from google.protobuf.json_format import MessageToJson
@@ -46,9 +46,7 @@ class AgentCommandClass(ABCMeta):
         super(AgentCommandClass, cls).__init__(name, bases, dct)
 
 
-class AgentCommand(object):
-    __metaclass__ = AgentCommandClass
-
+class AgentCommand(object, metaclass=AgentCommandClass):
     """Base class for all AgentCommands"""
     _request_pb = None
     _reply_pb = None
@@ -179,7 +177,7 @@ class AgentCommand(object):
         while True:
             try:
                 rdr, _, _ = select.select([stop_sig_r, intr_r], [], [])
-            except select.error  as e:
+            except select.error as e:
                 logging.info("Ignoring interrupt in select")
                 if e.args[0] == 4:
                     continue
@@ -283,7 +281,7 @@ class AgentCommand(object):
                         logging.warning("%s while reading from stdin, closing", str(e))
                         return
 
-                except select.error  as e:
+                except select.error as e:
                     if e.args[0] == errno.EBADF:
                         data = None
                     else:
@@ -398,7 +396,7 @@ class AgentCommand(object):
 
     @staticmethod
     def filter_vms(indices, result):
-        return indices.difference(RangeSet(result.errors.keys()))
+        return indices.difference(RangeSet(list(result.errors.keys())))
 
     @staticmethod
     def collect_output_bg(result_iterator,
@@ -693,7 +691,7 @@ class Listexec(AgentCommand):
     def pretty_str(cls, msg):
         return "\n".join(["{}\t{}\t{}\t{}".format(execid, e.running,
                                                   e.attached, e.filename)
-                          for execid, e in msg.execs.iteritems()])
+                          for execid, e in msg.execs.items()])
 
 class Reset(AgentCommand):
     _name = "reset"
@@ -806,7 +804,7 @@ class ParallelAgentResult(object):
             self._cmd,
             "{} failed on {}".format(
                 self._cmd,
-                NodeSet.fromlist(["vm{}".format(i) for i in self.errors.keys()])),
+                NodeSet.fromlist(["vm{}".format(i) for i in list(self.errors.keys())])),
             self._errors)
 
     @property
@@ -815,5 +813,5 @@ class ParallelAgentResult(object):
 
     def __str__(self):
         return '\n'.join(["{0}: {1}".format(
-            NodeSet.fromlist(map(lambda x: "vm"+x, keys)),
+            NodeSet.fromlist(["vm"+x for x in keys]),
             m) for m, keys in self._res_tree.walk()])

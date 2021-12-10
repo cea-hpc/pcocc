@@ -447,7 +447,7 @@ class OciRuntimeConfig(object):
         """Quota environment variables"""
 
         new_env = []
-        for k, v  in self.get_env().iteritems():
+        for k, v  in self.get_env().items():
             new_env.append(k + "=" + pipes.quote(v))
 
         self.config["process"]["env"] = new_env
@@ -502,10 +502,10 @@ class OciRuntimeConfig(object):
             # Save new keys
             self.config["process"]["env"] = [x + "=" +
                                              v for x, v in
-                                             current_keys.items()]
+                                             list(current_keys.items())]
         else:
             # Env is a dict simply merge
-            for k, v in env.items():
+            for k, v in list(env.items()):
                 if filt:
                     if not k.startswith(filt):
                         continue
@@ -727,7 +727,7 @@ class ContainerTemplate(dict):
             self.merge_settings(module_template)
 
     def sanitize_mounts(self):
-        for name, opt in self["mounts"].items():
+        for name, opt in list(self["mounts"].items()):
             if "source" not in opt:
                 raise InvalidConfigurationError(
                     ("Container {} mountpoint {} should"
@@ -803,7 +803,7 @@ class ContainerTemplate(dict):
     def mount_list(self):
         ret = []
         self.setdefault("mounts", {})
-        for _, v in self["mounts"].items():
+        for _, v in list(self["mounts"].items()):
             tmp = dict(v)
             ret.append(tmp)
 
@@ -961,12 +961,12 @@ class ContainerTemplateConfig(dict):
             raise InvalidConfigurationError(str(err))
 
         # Make sure inheritance configurations are defined as lists
-        for _, res_attr in tpl_config.iteritems():
+        for _, res_attr in tpl_config.items():
             if "inherits" in res_attr:
                 if isinstance(res_attr["inherits"], str):
                     res_attr["inherits"] = [res_attr["inherits"]]
 
-        for name, tpl_attrs in tpl_config.iteritems():
+        for name, tpl_attrs in tpl_config.items():
             # Update existing template or create a new one
             if name in self:
                 self[name].merge_settings(tpl_attrs)
@@ -1114,7 +1114,7 @@ class ContainerRuntimeConfig(dict):
         except jsonschema.exceptions.ValidationError as err:
             raise InvalidConfigurationError(str(err))
 
-        for k, v in config.items():
+        for k, v in list(config.items()):
             self[k] = v
 
 

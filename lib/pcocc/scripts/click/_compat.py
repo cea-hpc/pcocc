@@ -131,11 +131,11 @@ class _FixupStream(object):
 
 
 if PY2:
-    text_type = unicode
+    text_type = str
     bytes = str
     raw_input = raw_input
-    string_types = (str, unicode)
-    iteritems = lambda x: x.iteritems()
+    string_types = (str, str)
+    iteritems = lambda x: iter(x.items())
     range_type = xrange
 
     def is_bytes(x):
@@ -198,7 +198,7 @@ else:
     string_types = (str,)
     range_type = range
     isidentifier = lambda x: x.isidentifier()
-    iteritems = lambda x: iter(x.items())
+    iteritems = lambda x: iter(list(x.items()))
 
     def is_bytes(x):
         return isinstance(x, (bytes, memoryview, bytearray))

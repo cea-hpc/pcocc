@@ -49,7 +49,7 @@ additionalProperties: false
 
     @staticmethod
     def _gen_guid_suffix():
-        return ''.join(['%02x' % random.randint(0,0xff) for _ in xrange(6)])
+        return ''.join(['%02x' % random.randint(0,0xff) for _ in range(6)])
 
     def alloc_node_resources(self, cluster):
         batch = Config().batch

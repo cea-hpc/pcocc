@@ -41,7 +41,7 @@ def _length_hint(obj):
         except TypeError:
             return None
         if hint is NotImplemented or \
-           not isinstance(hint, (int, long)) or \
+           not isinstance(hint, int) or \
            hint < 0:
             return None
         return hint
@@ -233,7 +233,7 @@ class ProgressBar(object):
         self.current_item = None
         self.finished = True
 
-    def next(self):
+    def __next__(self):
         if self.is_hidden:
             return next(self.iter)
         try:
@@ -415,11 +415,11 @@ def open_url(url, wait=False, locate=False):
 
     def _unquote_file(url):
         try:
-            import urllib
+            import urllib.request, urllib.parse, urllib.error
         except ImportError:
-            import urllib
+            import urllib.request, urllib.parse, urllib.error
         if url.startswith('file://'):
-            url = urllib.unquote(url[7:])
+            url = urllib.parse.unquote(url[7:])
         return url
 
     if sys.platform == 'darwin':

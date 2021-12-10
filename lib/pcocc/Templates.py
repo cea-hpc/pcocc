@@ -76,7 +76,7 @@ class TemplateConfig(dict):
                 return
 
         # Define an empty template corresponding to each resource set
-        for rset in config.rsets.iterkeys():
+        for rset in config.rsets.keys():
             name = self.resource_template(rset)
             if name not in self:
                 self[name] = Template(name,
@@ -88,7 +88,7 @@ class TemplateConfig(dict):
         if not tpl_config:
             return
 
-        for name, tpl_attr in tpl_config.iteritems():
+        for name, tpl_attr in tpl_config.items():
             if name[0] == '_':
                 raise InvalidConfigurationError(
                     "template name '{}' is "
@@ -112,7 +112,7 @@ class TemplateConfig(dict):
 
     def validate_inheritance(self):
         # Finish validation once everything has been loaded
-        for tpl in self.itervalues():
+        for tpl in self.values():
             if not tpl.placeholder:
                 tpl.validate()
 
@@ -121,7 +121,7 @@ class TemplateConfig(dict):
         if not Config().rsets.default_rset:
             return
 
-        for i in images.itervalues():
+        for i in images.values():
             rev = max(i.keys())
             name = i[rev]["name"]
             if not name in self:
@@ -221,7 +221,7 @@ class Template(object):
                         'inherited': 'No',
                         'value': 'N/A'})
 
-        print tbl
+        print(tbl)
 
     def image_type(self, vm=None):
         if getattr(self, 'image') is None:
@@ -332,8 +332,8 @@ class Template(object):
         for drive in self.settings['persistent-drives']:
             # Dict syntax
             if isinstance(drive, dict):
-                path = drive.keys()[0]
-                opts = drive.values()[0]
+                path = list(drive.keys())[0]
+                opts = list(drive.values())[0]
 
                 if not 'mmp' in opts:
                     opts['mmp'] = True

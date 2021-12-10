@@ -15,7 +15,7 @@
 #
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
-from __future__ import division
+
 import hashlib
 import os
 import shutil
@@ -37,7 +37,7 @@ from .Misc import path_join
 
 if six.PY2:
     # pylint: disable=W0611
-    import xtarfile
+    from . import xtarfile
 
 def human_size(size):
     for u in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
@@ -229,15 +229,15 @@ flist_lock = threading.Lock()
 def call_flist(archive):
     ret = {"archive": archive, "content": archive.file_set()}
     with flist_lock:
-        print("\033[2KDONE layer contains {}"
-              " files".format(len(ret["content"]["set"])))
+        print(("\033[2KDONE layer contains {}"
+              " files".format(len(ret["content"]["set"]))))
     return ret
 
 
 def call_extract(archive):
     archive.extract_no_right()
     with flist_lock:
-        print("\t- layer {} has been extracted".format(archive.layer_id))
+        print(("\t- layer {} has been extracted".format(archive.layer_id)))
 
 
 def set_file_rights(entry):
@@ -304,7 +304,7 @@ class OciManifest(object):
                for i in range(1, len(archives) + 1)]
         log = "\n".join(log)
         print(log)
-        print("\033[F" * (len(archives) + 1))
+        print(("\033[F" * (len(archives) + 1)))
 
         original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
         p = mproc.Pool(processes=worker)
@@ -319,8 +319,8 @@ class OciManifest(object):
         p.close()
         p.join()
 
-        print("\033[F\033[2K" * len(archives))
-        print("Listed files for {} layers".format(len(archives)))
+        print(("\033[F\033[2K" * len(archives)))
+        print(("Listed files for {} layers".format(len(archives))))
 
         return result
 
@@ -341,7 +341,7 @@ class OciManifest(object):
     @classmethod
     def _set_dir_state(cls, directory, state_dict, visible=False):
         directory = cls._normalize_path(directory)
-        for f, _ in state_dict.items():
+        for f, _ in list(state_dict.items()):
             if cls._is_in_dir(f, directory) and f != directory:
                 state_dict[f] = visible
 
@@ -372,7 +372,7 @@ class OciManifest(object):
                 if not f.startswith(".wh."):
                     self._set_file_state(f, state_dict, visible=True)
 
-        return [path_join(output_dir, k) for (k, v) in state_dict.items()
+        return [path_join(output_dir, k) for (k, v) in list(state_dict.items())
                 if not v]
 
     def _delta_groups(self, file_sets, no_strict_ts=True):
@@ -451,7 +451,7 @@ class OciManifest(object):
                                                      no_strict_ts=no_strict_ts)
 
         paral = max([len(e) for e in group_list])
-        print("Maximum layer extraction parallelism is {}".format(paral))
+        print(("Maximum layer extraction parallelism is {}".format(paral)))
 
         # Create out dir if needed before parallel extraction
         if not os.path.isdir(output_dir):
@@ -465,10 +465,10 @@ class OciManifest(object):
         for i in range(0, len(group_list)):
             group = group_list[i]
             total_size = sum([a.size for a in group])
-            print("Extracting layer group {}/{} "
+            print(("Extracting layer group {}/{} "
                   "(size {}) ...".format(i + 1,
                                          len(group_list),
-                                         human_size(total_size)))
+                                         human_size(total_size))))
             try:
                 r = p.map_async(call_extract, group)
                 r.wait(timeout=1000000)
@@ -478,7 +478,7 @@ class OciManifest(object):
 
         # Make mode path absolute and parse them
         new_rights = []
-        for archive_path, rights in file_rights.items():
+        for archive_path, rights in list(file_rights.items()):
             abs_path = path_join(output_dir, archive_path)
             txt_rights = rights.split(" ")[0]
             new_rights.append({"path": abs_path,
@@ -636,7 +636,7 @@ class OciBlobs(object):
         if not os.path.isfile(bpath):
             raise PcoccError("Could not locate blob " + h)
 
-        print("\033[2KChecking blob {} ...".format(h))
+        print(("\033[2KChecking blob {} ...".format(h)))
 
         oneup = "\033[2K\033[F"
         up = oneup
@@ -649,7 +649,7 @@ class OciBlobs(object):
                                                                      esize,
                                                                      h))
             else:
-                print("\tSize OK ({})".format(human_size(fsize)))
+                print(("\tSize OK ({})".format(human_size(fsize))))
                 up += oneup
         if check_digest:
             print("\tChecking digest ...")
@@ -874,7 +874,7 @@ class OciImage(object):
         all_blobs = self.blobs_resolve(add_path=True)
         oci_dir = OciFileBlobs(target_dir)
 
-        for k, data in all_blobs.items():
+        for k, data in list(all_blobs.items()):
             oci_dir.mirror(k, data["path"])
         oci_dir.set_index(self.data)
 

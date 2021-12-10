@@ -50,7 +50,7 @@ class GnuPlot(object):
                 self.row = int(float(self.row) // ratio)
 
     def clear_win(self):
-        print(chr(27) + "[2J")
+        print((chr(27) + "[2J"))
 
     def plot(self, data, titles=None, xlabel="", style="lp", grid=False):
         if data is None:
@@ -68,8 +68,8 @@ class GnuPlot(object):
             raise Exception("No title provided")
 
         # Filter nones
-        data = filter(None, data)
-        titles = filter(None, titles)
+        data = [_f for _f in data if _f]
+        titles = [_f for _f in titles if _f]
 
         # Handle term resize
         self.resize()

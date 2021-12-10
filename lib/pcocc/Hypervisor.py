@@ -15,7 +15,7 @@
 #
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
-from __future__ import division
+
 
 import os
 import time
@@ -38,9 +38,9 @@ import signal
 import random
 import binascii
 import uuid
-import Queue
-import agent_pb2
-import Docker
+import queue
+from . import agent_pb2
+from . import Docker
 
 from abc import ABCMeta
 from ClusterShell.NodeSet  import RangeSet
@@ -132,7 +132,7 @@ class HostAgentCtx(object):
         return ret
 
     def get_all_cbs(self):
-        ret = self.cb.values()
+        ret = list(self.cb.values())
         self.cb = {}
 
         return ret
@@ -290,7 +290,7 @@ class HostAgent(object):
         logging.info("Host agent: sending message %s "
                      "to VM %d agent", name, self.vm.rank)
 
-        retq = Queue.Queue()
+        retq = queue.Queue()
 
         if request_context is None:
             # FIXME: For now ignore results for locally sent requests (thaw) as
@@ -459,16 +459,15 @@ class HAReqClass(ABCMeta):
             HostAgent.register_handler(dct['_name'], cls)
         super(HAReqClass, cls).__init__(name, bases, dct)
 
-class HADumpReq(object):
+class HADumpReq(object, metaclass=HAStreamReqClass):
     _name = "dump"
-    __metaclass__ = HAStreamReqClass
 
     def __init__(self):
         pass
 
     @staticmethod
     def handle(agent, args, kind, tag, request_context):
-        retq = Queue.Queue()
+        retq = queue.Queue()
 
         def complete_cb(event):
             if event is None:
@@ -493,7 +492,7 @@ class HADumpReq(object):
             try:
                 res = retq.get(True, 0.1)
                 break
-            except Queue.Empty:
+            except queue.Empty:
                 pass
 
             r = agent.vm.qemu_mon.query_dump()
@@ -511,13 +510,12 @@ class HADumpReq(object):
         return
 
 
-class HACkptReq(object):
+class HACkptReq(object, metaclass=HAStreamReqClass):
     _name = "checkpoint"
-    __metaclass__ = HAStreamReqClass
 
     @staticmethod
     def handle(agent, args, kind, tag, request_context):
-        retq = Queue.Queue()
+        retq = queue.Queue()
 
         complete = False
 
@@ -575,7 +573,7 @@ class HACkptReq(object):
                     yield agent_pb2.CheckpointResult(status = 'complete')
                     agent.vm.qemu_mon.quit()
                 return
-            except Queue.Empty:
+            except queue.Empty:
                 pass
 
             r = agent.vm.qemu_mon.query_migration()
@@ -595,13 +593,12 @@ class HACkptReq(object):
                 return
 
 
-class HASaveDriveReq(object):
+class HASaveDriveReq(object, metaclass=HAStreamReqClass):
     _name = "save"
-    __metaclass__ = HAStreamReqClass
 
     @staticmethod
     def handle(agent, args, kind, tag, request_context):
-        retq = Queue.Queue()
+        retq = queue.Queue()
 
         if len(args.drives) != 1:
             yield agent_pb2.GenericError(
@@ -710,7 +707,7 @@ class HASaveDriveReq(object):
                 res = retq.get(True, 0.1)
                 complete = True
                 break
-            except Queue.Empty:
+            except queue.Empty:
                 pass
 
             r = agent.vm.qemu_mon.query_block_jobs()
@@ -731,18 +728,16 @@ class HASaveDriveReq(object):
             yield agent_pb2.SaveDriveResult(status='complete', len=1, offset=1)
         return
 
-class HAResetReq(object):
+class HAResetReq(object, metaclass=HAReqClass):
     _name = "reset"
-    __metaclass__ = HAReqClass
 
     @staticmethod
     def handle(agent, args, request_context):
         agent.vm.qemu_mon.system_reset()
         return agent_pb2.HelloResult()
 
-class HAMonCmdReq(object):
+class HAMonCmdReq(object, metaclass=HAReqClass):
     _name = "monitor_cmd"
-    __metaclass__ = HAReqClass
 
     @staticmethod
     def handle(agent, args, request_context):
@@ -761,7 +756,7 @@ class QemuMonitor(object):
         self.sp_r, self.sp_w = os.pipe()
 
         # Context manager for callbacks
-        self.sync_cb = Queue.Queue()
+        self.sync_cb = queue.Queue()
         self.async_cb = []
 
         self.sync_cb.put(self._handle_hello)
@@ -807,7 +802,7 @@ class QemuMonitor(object):
         while True:
             try:
                 cb = self.sync_cb.get(None)
-            except Queue.Empty:
+            except queue.Empty:
                 break
             cb(None)
 
@@ -888,7 +883,7 @@ class QemuMonitor(object):
         else:
             try:
                 cb = self.sync_cb.get(False)
-            except Queue.Empty:
+            except queue.Empty:
                 logging.error("Qemu monitor sent unexpected reply: %s", json_msg)
                 return
             cb(json_msg)
@@ -909,7 +904,7 @@ class QemuMonitor(object):
         self.wlock.release()
 
     def exec_cmd_sync(self, json_cmd):
-        retq = Queue.Queue()
+        retq = queue.Queue()
 
         def return_cb(result):
             retq.put(result)
@@ -1182,7 +1177,7 @@ auxprop_plugin: sasldb
             f.write(qemu_conf)
 
 
-        randrange = range(5900,6100, 2)
+        randrange = list(range(5900,6100, 2))
         random.shuffle(randrange)
         # TODO: find a better way to allocate port numbers since qemu
         # requires a fixed port. For now use odd port numbers as locks
@@ -1498,7 +1493,7 @@ username={3}@pcocc
             f.close()
             vhost_string = ',vhost=on'
 
-        for i, net in enumerate(sorted(vm.eth_ifs.iterkeys(),
+        for i, net in enumerate(sorted(iter(vm.eth_ifs.keys()),
                                       key=vm.networks.index)):
             tap_name = vm.eth_ifs[net]['tap']
             hwaddr = vm.eth_ifs[net]['hwaddr']
@@ -1516,7 +1511,7 @@ username={3}@pcocc
                         'mac=%s'%(model,net,net,hwaddr)]
 
         # VFIO interfaces
-        for i, net in enumerate(sorted(vm.vfio_ifs.iterkeys(),
+        for i, net in enumerate(sorted(iter(vm.vfio_ifs.keys()),
                                       key=vm.networks.index)):
             vfio_name = vm.vfio_ifs[net]['vf_name']
 
@@ -2105,7 +2100,7 @@ username={3}@pcocc
 
         except IOError as err:
             raise AgentError("failed to communicate:  %s" % err)
-        except (KeyError, ValueError)  as err:
+        except (KeyError, ValueError) as err:
             raise AgentError("unexpected answer when "
                              "receiving exec output "
                              "%s\n" % data)
@@ -2168,7 +2163,7 @@ username={3}@pcocc
 
             envlist = "".join("{\"nameval\": %s},"
                               %(json.dumps(name+'='+val)) for (name, val) in
-                              os.environ.iteritems()
+                              os.environ.items()
                               if not re.search(r'SLURM', name))
             envlist = envlist[:-1]
 
@@ -2200,7 +2195,7 @@ username={3}@pcocc
                 data = os.read(s_io.stdout.fileno(), 4096)
 
                 if data:
-                    print data,
+                    print(data, end=' ')
 
             if s_ctl.stdout in rdy[0]:
                 data = os.read(s_ctl.stdout.fileno(), 4096)
@@ -2268,7 +2263,7 @@ username={3}@pcocc
             if subproc.stdout in rdy[0]:
                 data = os.read(subproc.stdout.fileno(), 4096)
                 if data:
-                    print data,
+                    print(data, end=' ')
                 else:
                     break
             else:

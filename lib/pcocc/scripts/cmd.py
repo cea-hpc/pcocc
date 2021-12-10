@@ -16,7 +16,7 @@
 #  You should have received a copy of the GNU General Public License
 #  along with PCOCC. If not, see <http://www.gnu.org/licenses/>
 
-from __future__ import division
+
 
 import sys
 import subprocess
@@ -264,7 +264,7 @@ def pcocc_display(jobid, jobname, print_opts, vm):
                                      'spice_vm{0}/console.vv'.format(index))
             if print_opts:
                 with open(opts_file, 'r') as f:
-                    print f.read()
+                    print(f.read())
             else:
                 s_ctl = subprocess.Popen(['remote-viewer', opts_file])
                 ret = s_ctl.wait()
@@ -669,7 +669,7 @@ def pcocc_monitor_cmd(jobid, jobname,  vms, cmd, cluster):
         for k, e in ret.iterate():
             display_vmagent_error(k, e)
 
-        print ret
+        print(ret)
 
         # Return -1 if there is any error
         sys.exit(-int(bool(ret.errors)))
@@ -1048,7 +1048,7 @@ def pcocc_console(jobid, jobname, log, vm):
                         int_count += 1
 
                     if int_count == 3:
-                        print '\nDetaching ...'
+                        print('\nDetaching ...')
                         break
 
                 s_ctl.stdin.write(buf)
@@ -1651,14 +1651,14 @@ def pcocc_tpl_list():
             click.secho("{} templates:".format(t.capitalize()),
                         fg='blue', bold=True)
 
-            for name, tpl in sorted(config.tpls.iteritems()):
+            for name, tpl in sorted(config.tpls.items()):
                 if tpl.source_type == t:
                     tbl.append({'name': name,
                                 'image': tpl.image,
                                 'res': tpl.rset.name,
                                 'desc': tpl.description})
-            print tbl
-            print
+            print(tbl)
+            print()
             tbl.purge()
 
     except PcoccError as err:
@@ -1793,7 +1793,7 @@ def pcocc_agent_run(jobid,
             runner.set_argv(cmd)
 
         if mirror_env:
-            for e, v in os.environ.iteritems():
+            for e, v in os.environ.items():
                 runner.set_env_var(e, v)
 
         if pty:
@@ -1977,7 +1977,7 @@ def print_repolist(rlist):
                     'path': r.path,
                     'writable': writable})
 
-    print tbl
+    print(tbl)
 
 @img_repo.command(name='list',
                   short_help="List pcocc image repositories")
@@ -2124,16 +2124,16 @@ def pcocc_image_show(image):
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
 
         print("------------------------------")
-        print("%5s %24s" % ("Repo:", meta["repo"]))
-        print("%5s %24s" % ("Name:", meta["name"]))
-        print("%s %24s" % ("Type:",  meta["kind"]))
+        print(("%5s %24s" % ("Repo:", meta["repo"])))
+        print(("%5s %24s" % ("Name:", meta["name"])))
+        print(("%s %24s" % ("Type:",  meta["kind"])))
         print("------------------------------")
-        print("%5s %24s" % ("URI: ", meta["repo"] + ":" +
-                            meta["name"] + "@" + str(meta["revision"])))
-        print("%s %22s" % ("Layers:", str(len(meta["data_blobs"]))))
+        print(("%5s %24s" % ("URI: ", meta["repo"] + ":" +
+                            meta["name"] + "@" + str(meta["revision"]))))
+        print(("%s %22s" % ("Layers:", str(len(meta["data_blobs"])))))
         print("------------------------------")
-        print("%7s %22s" % ("Owner: ", meta["owner"]))
-        print("%7s %21s" % ("Date:   ", str_time))
+        print(("%7s %22s" % ("Owner: ", meta["owner"])))
+        print(("%7s %21s" % ("Date:   ", str_time)))
         print("------------------------------")
 
         revisions = Config().images.image_revisions(image)
@@ -2152,15 +2152,15 @@ def pcocc_image_show(image):
                         'size': formatted_file_size(data),
                         'date': str_time})
 
-        print tbl
+        print(tbl)
     except PcoccError as err:
         handle_error(err)
 
 
 def print_image_list(images):
     tbl = TextTable("%name %type %revision %repo %owner %date")
-    for img in sorted(images.itervalues(),
-                      key=lambda i: i[i.keys()[0]]["name"]):
+    for img in sorted(iter(images.values()),
+                      key=lambda i: i[list(i.keys())[0]]["name"]):
         rev = max(img.keys())
         ts = time.localtime(img[rev]["timestamp"])
         str_time = time.strftime('%Y-%m-%d %H:%M:%S', ts)
@@ -2173,7 +2173,7 @@ def print_image_list(images):
                     'owner': img[rev]["owner"],
                     "date": str_time})
 
-    print tbl
+    print(tbl)
 
 @image.command(name='list',
                short_help="List images in repositories")
@@ -2200,7 +2200,7 @@ def pcocc_image_list(regex, repo):
                 click.secho("{} images:".format(repo.capitalize()),
                             fg='blue', bold=True)
                 print_image_list(img_list)
-                print
+                print()
 
     except PcoccError as err:
         handle_error(err)
@@ -2226,8 +2226,8 @@ def pcocc_image_cache_list():
 
         all_blobs_key = {}
 
-        for m in metas.values():
-            for rev, val in m.items():
+        for m in list(metas.values()):
+            for rev, val in list(m.items()):
                 name = val["name"]
                 repo = val["repo"]
 
@@ -2255,8 +2255,8 @@ def pcocc_image_cache_list():
                             'type': elem["type"],
                             'hash': b.hash[:10]})
         print(tbl)
-        print("\nCache contains %d items"
-              % len(config.images.object_store.cache))
+        print(("\nCache contains %d items"
+              % len(config.images.object_store.cache)))
     except PcoccError as err:
         handle_error(err)
 
@@ -2297,8 +2297,8 @@ def pcocc_image_cache_gc(force_below, force_clear):
 
         possible_keys = set()
 
-        for m in metas.values():
-            for rev, val in m.items():
+        for m in list(metas.values()):
+            for rev, val in list(m.items()):
                 name = val["name"]
                 repo = val["repo"]
                 for k in CACHEABLE_ITEMS:
@@ -2309,15 +2309,15 @@ def pcocc_image_cache_gc(force_below, force_clear):
                     possible_keys.add(key)
 
         # Compute actual blob hash as keys are hashed
-        possible_keys = map(config.images.object_store.cache.hash_key,
-                            possible_keys)
+        possible_keys = list(map(config.images.object_store.cache.hash_key,
+                            possible_keys))
 
         cache_keys = set(config.images.object_store.cache.keys())
 
         # Now proceed to delete elements which
         # are not from known images anymore
         for e in cache_keys.difference(possible_keys):
-            print("Deleting dangling cache blob {} ...".format(e[:10]))
+            print(("Deleting dangling cache blob {} ...".format(e[:10])))
             config.images.object_store.cache.delete_hash(e)
 
     except PcoccError as err:
@@ -2369,7 +2369,7 @@ def pcocc_ps(user, allusers):
                         'duration': j["exectime"],
                         'timelimit': j["timelimit"]})
 
-        print tbl
+        print(tbl)
 
     except PcoccError as err:
         handle_error(err)

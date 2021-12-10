@@ -31,7 +31,7 @@ class ResSetConfig(dict):
 
         self._rsets = {}
         self.default_rset = None
-        for name, res_attr in res_config.iteritems():
+        for name, res_attr in res_config.items():
             self[name] = ResSet(name, res_attr)
             if res_attr.get('default', False):
                 if self.default_rset:

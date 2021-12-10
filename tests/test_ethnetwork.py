@@ -47,7 +47,7 @@ def test_init_ethnetwork(mocker, config, datadir):
         else:
             cmdline += ' '.join(args[0]) + '\n'
 
-    print cmdline
+    print(cmdline)
     assert cmdline == """ovs-vsctl --may-exist add-br nat_xbr
 ovs-ofctl del-flows -OOpenFlow13 nat_xbr --strict priority=0
 ovs-vsctl set bridge nat_xbr other-config:hwaddr=52:54:00:ff:ff:ff
@@ -126,8 +126,8 @@ def test_alloc_ethnetwork(mocker, config, datadir):
     mocker.patch('subprocess.check_output', new=check_call)
     check_call.side_effect = sproc_init
 
-    mocker.patch('pcocc.NetUtils.OVSBridge.get_port_id').side_effect = xrange(0,10)
-    mocker.patch('pcocc.NetUtils.NetDev._find_used_dev_ids').side_effect = [xrange(0,i) for i in xrange(0,10)]
+    mocker.patch('pcocc.NetUtils.OVSBridge.get_port_id').side_effect = range(0,10)
+    mocker.patch('pcocc.NetUtils.NetDev._find_used_dev_ids').side_effect = [range(0,i) for i in range(0,10)]
 
     config.batch.get_host_rank.return_value = 0
     config.batch.node_rank = 0

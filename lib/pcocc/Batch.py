@@ -151,8 +151,7 @@ class ProcessType(object):
 ETCD_PASSWORD_BYTES = 16
 
 
-class BatchManager(object):
-    __metaclass__ = ABCMeta
+class BatchManager(object, metaclass=ABCMeta):
     """Manages all interactions with the batch environment"""
     def load(batch_config_file, batchid, batchname, default_batchname,
              proc_type, batchuser):
@@ -1180,7 +1179,7 @@ class LocalManager(EtcdManager):
 
         live_batchids = self._list_alive_jobs()
 
-        for batchid, job in job_alloc_state['jobs'].iteritems():
+        for batchid, job in job_alloc_state['jobs'].items():
             if job['host'] == socket.gethostname().split('.')[0]:
                 f = None
                 try:
@@ -1246,7 +1245,7 @@ class LocalManager(EtcdManager):
         user_live_batchids = self._list_alive_jobs()
 
         jobs = {}
-        for batchid, job in job_alloc_state['jobs'].iteritems():
+        for batchid, job in job_alloc_state['jobs'].items():
             batchid = int(batchid)
             if (include_expired or
                 job['user'] != self.batchuser or
@@ -1267,7 +1266,7 @@ class LocalManager(EtcdManager):
         """Gather details about pcocc jobs
         """
         ret = []
-        for batchid, job in self.list_all_jobs(details=True).iteritems():
+        for batchid, job in self.list_all_jobs(details=True).items():
             if user and job['user'] != user:
                 continue
 
@@ -1298,7 +1297,7 @@ class LocalManager(EtcdManager):
         hosts = []
         live_batchids = self._list_alive_jobs()
 
-        for batchid, job in job_alloc_state['jobs'].iteritems():
+        for batchid, job in job_alloc_state['jobs'].items():
             batchid = int(batchid)
 
             if not include_expired and not batchid in live_batchids:
@@ -1410,7 +1409,7 @@ class LocalManager(EtcdManager):
         job_alloc_state = self._validate_job_state(job_alloc_state)
 
         try:
-            for batchid, job in job_alloc_state['jobs'].iteritems():
+            for batchid, job in job_alloc_state['jobs'].items():
                 if job['uuid'] == str(uuid):
                     return int(batchid)
         except KeyError:
@@ -1799,8 +1798,8 @@ class SlurmManager(EtcdManager):
                 ntasks = int(node_def)
                 nnodes = 1
 
-            for _ in xrange(nnodes):
-                for _ in xrange(ntasks):
+            for _ in range(nnodes):
+                for _ in range(ntasks):
                     self._rank_map.append(node_index)
                 node_index += 1
 

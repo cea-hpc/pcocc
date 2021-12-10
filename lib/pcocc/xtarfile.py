@@ -84,7 +84,7 @@ def _create_pax_generic_header(cls, pax_headers, type=tarfile.XHDTYPE):
        must be unicode objects.
     """
     records = []
-    for keyword, value in pax_headers.iteritems():
+    for keyword, value in pax_headers.items():
 
         try:
             keyword = keyword.encode("utf8")

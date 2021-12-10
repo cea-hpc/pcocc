@@ -478,7 +478,7 @@ class Mount(object):
     @classmethod
     def add(cls, runner, mountlist):
         for mnt in mountlist:
-            if isinstance(mnt, (str, unicode)):
+            if isinstance(mnt, str):
                 # We need to parse the config
                 mnt = mnt.encode('ascii', 'ignore')
                 conf = cls.parse(mnt)
@@ -517,7 +517,7 @@ class VirtualMachine(Runner):
         self.cwd = cwd
 
     def mirror_env(self):
-        for e, v in os.environ.items():
+        for e, v in list(os.environ.items()):
             self.set_env_var(e, v)
 
     def getenv(self, key):
@@ -688,7 +688,7 @@ class VirtualMachine(Runner):
             raise PcoccError("Cannot specifiy partitions for running within VMs")
 
         if not core and not node and not proc:
-            self.target_rangeset = RangeSet(range(self.cluster.vm_count()))
+            self.target_rangeset = RangeSet(list(range(self.cluster.vm_count())))
             self.command_list = []
             return
 
@@ -743,7 +743,7 @@ class VirtualMachine(Runner):
             self.target_rangeset = newset
             self.command_list = []
             if core:
-                self.core = range(0, core)
+                self.core = list(range(0, core))
             return
 
         # As RangeSet cannot handle multiple times the same entry
@@ -760,8 +760,8 @@ class VirtualMachine(Runner):
                     continue
                 if core <= cnt:
                     # Can fit in this slot
-                    core_range = range(int(cnt) - int(core),
-                                       int(cnt))
+                    core_range = list(range(int(cnt) - int(core),
+                                       int(cnt)))
                     core_count[idx] = int(cnt) - int(core)
                     self.command_list.append({'range': RangeSet(str(idx)),
                                               'cores': core_range})
@@ -774,7 +774,7 @@ class VirtualMachine(Runner):
         # We now have components create the same number of rangesets
         simplified_command_list = []
         for comp in cpu_sets:
-            cpu_array = map(int, comp.split(","))
+            cpu_array = list(map(int, comp.split(",")))
             candidates = [x['range']
                           for x in self.command_list
                           if x['cores'] == cpu_array]
@@ -1506,7 +1506,7 @@ class ContainerFs(object):
         groups = gen_user_group_list(user, gid)
         lgroups = dict(groups)
 
-        if gid not in lgroups.values():
+        if gid not in list(lgroups.values()):
             # Add the self group if not present
             # and use the last group membership
             # as a default
@@ -1530,7 +1530,7 @@ class ContainerFs(object):
                 ret = ret + entries[0] + ":" + entries[1] +\
                     ":" + entries[2] + ":" + entries[3] + "\n"
         # Now all the remaining groups need to be inserted
-        for key, value in lgroups.items():
+        for key, value in list(lgroups.items()):
             ret = ret + key + ":x:" + str(value) + ":" + user + "\n"
 
         if not outfile:
@@ -1746,11 +1746,11 @@ class NativeContainer(ContainerFs):
         for k in conf["env"]:
             self.set_env_var(k, conf["env"][k])
 
-        for k, l in conf["prepend_env"].items():
+        for k, l in list(conf["prepend_env"].items()):
             for v in l:
                 Env.path_prefix(self, ["{}={}".format(k, v)])
 
-        for k, l in conf["append_env"].items():
+        for k, l in list(conf["append_env"].items()):
             for v in l:
                 Env.path_suffix(self, ["{}={}".format(k, v)])
 
@@ -1758,7 +1758,7 @@ class NativeContainer(ContainerFs):
         Mount.add(self, conf["mounts"])
 
     def mirror_env(self):
-        for key, value in os.environ.items():
+        for key, value in list(os.environ.items()):
             self.set_env_var(key, value)
 
     def set_script(self, script):

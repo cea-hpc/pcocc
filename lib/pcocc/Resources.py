@@ -22,7 +22,7 @@ from .Error import InvalidConfigurationError
 class ResSetConfig(dict):
     def load(self, filename):
         try:
-            stream = file(filename, 'r')
+            stream = open(filename, 'r')
             res_config = yaml.safe_load(stream)
         except yaml.YAMLError as err:
             raise InvalidConfigurationError(str(err))

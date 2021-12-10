@@ -148,7 +148,7 @@ class HierarchObjectStore(object):
 
     def load_repos(self, repo_config_file, tag):
         try:
-            stream = file(repo_config_file, 'r')
+            stream = open(repo_config_file, 'r')
             repo_config = yaml.load(stream, Loader=yaml.CSafeLoader)
         except (yaml.YAMLError, IOError) as err:
             raise InvalidConfigurationError(str(err))

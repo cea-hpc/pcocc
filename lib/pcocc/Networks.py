@@ -45,7 +45,7 @@ class VNetworkConfig(dict):
 
         """
         try:
-            stream = file(filename, 'r')
+            stream = open(filename, 'r')
             net_config = yaml.load(stream, Loader=yaml.CLoader)
         except yaml.YAMLError as err:
             raise InvalidConfigurationError(str(err))

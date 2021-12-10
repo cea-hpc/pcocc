@@ -65,7 +65,7 @@ class TemplateConfig(dict):
         config = Config()
 
         try:
-            stream = file(filename, 'r')
+            stream = open(filename, 'r')
             tpl_config = yaml.safe_load(stream)
         except yaml.YAMLError as err:
             raise InvalidConfigurationError(str(err))

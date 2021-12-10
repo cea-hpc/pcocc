@@ -157,7 +157,7 @@ class BatchManager(object, metaclass=ABCMeta):
              proc_type, batchuser):
         """Factory function to initialize a batch manager"""
         try:
-            stream = file(batch_config_file, 'r')
+            stream = open(batch_config_file, 'r')
             batch_config = yaml.safe_load(stream)
         except yaml.YAMLError as err:
             raise InvalidConfigurationError(str(err))

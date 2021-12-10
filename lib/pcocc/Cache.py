@@ -202,7 +202,7 @@ class Cache(dict):
 
     def hash_key(self, key):
         d = hashlib.sha512()
-        d.update(key)
+        d.update(key.encode('utf-8'))
         return d.hexdigest()
 
     def _hash_dir(self, h):

@@ -574,7 +574,7 @@ class ContainerBundleView(ContainerView):
                                          stdout=subprocess.PIPE,
                                          stderr=subprocess.PIPE)
             stdout, stderr = help_proc.communicate()
-            help_output = stdout + stderr
+            help_output = (stdout + stderr).decode()
         except (subprocess.CalledProcessError, OSError):
             # Do not crash for reading the help
             pass
@@ -622,7 +622,7 @@ class ContainerBundleView(ContainerView):
                     stdout, stderr = mksh.communicate()
                     ret = mksh.returncode
                     if ret != 0:
-                        print(stdout)
+                        sys.stdout.write(stdout)
                         sys.stderr.write(stderr)
                         raise subprocess.CalledProcessError(ret, base_cmd)
             except (subprocess.CalledProcessError, OSError):

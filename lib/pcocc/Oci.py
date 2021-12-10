@@ -77,7 +77,7 @@ class CompressedArchive(object):
         ret = {"set": set(), "rights": {}}
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         while True:
-            line = proc.stdout.readline()
+            line = proc.stdout.readline().decode()
             if not line:
                 break
             # We now split to separate name and permisions

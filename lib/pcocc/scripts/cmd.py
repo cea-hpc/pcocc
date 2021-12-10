@@ -78,11 +78,6 @@ def cleanup(spr, terminal_settings):
         else:
             raise
 
-
-def ascii(text):
-    return text.encode('ascii', 'ignore')
-
-
 def docstring(docstr, sep="\n"):
     """ Decorator: Append to a function's docstring.
     """
@@ -1163,7 +1158,6 @@ def _pcocc_batch(restart_ckpt,
         if config is None:
             config = load_config(process_type=ProcessType.OTHER)
 
-        cluster_definition = ascii(cluster_definition)
         cluster = Cluster(cluster_definition)
         batch_options = list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
@@ -1287,7 +1281,6 @@ def _pcocc_alloc(restart_ckpt,
         if config is None:
             config = load_config(process_type=ProcessType.OTHER)
 
-        cluster_definition = ascii(cluster_definition)
         cluster = Cluster(cluster_definition)
         batch_options = list(batch_options)
         ckpt_opt = gen_ckpt_opt(restart_ckpt)
@@ -1348,7 +1341,6 @@ def pcocc_launcher(restart_ckpt,
     else:
         oldterm = None
 
-    cluster_definition = ascii(cluster_definition)
     cluster = Cluster(cluster_definition)
 
     batch.populate_env()
@@ -1690,7 +1682,7 @@ class CLIRangeSet(RangeSet):
                 super(CLIRangeSet, self).__init__(
                     "0-{}".format(cluster.vm_count() - 1))
             elif indices is not None:
-                super(CLIRangeSet, self).__init__(ascii(indices))
+                super(CLIRangeSet, self).__init__(indices)
             else:
                 super(CLIRangeSet, self).__init__()
         except RangeSetParseError as e:

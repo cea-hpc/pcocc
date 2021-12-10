@@ -290,8 +290,7 @@ class Env(object):
         # Now walk the array for regular addition A[=B]
         for variable in array_of_vars:
             splitvar = cls._split_or_resolve_env_var(variable)
-            runner.set_env_var(splitvar[0].encode('ascii', 'ignore'),
-                               splitvar[1].encode('ascii', 'ignore'))
+            runner.set_env_var(splitvar[0], splitvar[1])
 
     @classmethod
     def _path_append(cls,
@@ -338,9 +337,8 @@ class Env(object):
                 raise PcoccError("No such path"
                                  " operation '{}'".format(operation))
 
-            runner.set_env_var(splitvar[0].encode('ascii', 'ignore'),
-                               (separ.join(new_list))
-                               .encode('ascii', 'ignore'),
+            runner.set_env_var(splitvar[0],
+                               separ.join(new_list),
                                prefixexpand=operation)
 
     @classmethod
@@ -481,7 +479,6 @@ class Mount(object):
         for mnt in mountlist:
             if isinstance(mnt, str):
                 # We need to parse the config
-                mnt = mnt.encode('ascii', 'ignore')
                 conf = cls.parse(mnt)
             elif isinstance(mnt, dict):
                 # Here the config is already parsed
@@ -1873,6 +1870,7 @@ class NativeContainer(ContainerFs):
 
         # Needed to enable the removal of the PID namespace
         # which is not compatible with MPI SHM segments
+        bwcmd = bwcmd.decode()
         bwcmd = bwcmd.replace("--as-pid-1", "")
 
         # Do not force CGROUP unsharing (not supported on centos)

@@ -659,6 +659,8 @@ class ContainerTemplate(dict):
             raise PcoccError("Could not run configuration "
                              "generator '{}': {}\n".format(" ".join(argv), e))
 
+        output=output.decode()
+
         self._expand_command_based_mounts(output)
         self._expand_command_based_env(output)
         self._expand_command_based_modules(output)

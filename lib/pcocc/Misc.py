@@ -437,7 +437,7 @@ def getgrouplist(user, gid):
     ngrouplist = c_int(max_groups)
 
     u = pwd.getpwnam(user)
-    ct = libc_getgrouplist(u.pw_name, u.pw_gid, byref(grouplist), byref(ngrouplist))
+    ct = libc_getgrouplist(bytes(u.pw_name, 'UTF-8'), u.pw_gid, byref(grouplist), byref(ngrouplist))
 
     # if 50 groups was not enough this will be -1, try again
     # luckily the last call put the correct number of groups in ngrouplist

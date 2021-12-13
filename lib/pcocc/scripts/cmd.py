@@ -1047,6 +1047,7 @@ def pcocc_console(jobid, jobname, log, vm):
                         break
 
                 s_ctl.stdin.write(buf)
+                s_ctl.stdin.flush()
 
         # Restore terminal now to let user interrupt the wait if needed
         Run.restore_terminal(old)

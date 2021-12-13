@@ -222,6 +222,10 @@ class VMImage(object):
             subprocess.check_output(["qemu-img", "rebase"] + unsafe_arg +
                                     ["-b",
                                      backing_file,
+                                     "-F",
+                                     "qcow2",
+                                     "-f",
+                                     "qcow2",
                                      image])
         except subprocess.CalledProcessError as e:
             raise PcoccError("Unable to rebase image. "
@@ -315,7 +319,7 @@ class VMImage(object):
 
         backing_opt = []
         if backing_path:
-            backing_opt = ['-b', backing_path]
+            backing_opt = ['-F', fmt, '-b', backing_path]
 
         try:
             subprocess.check_output(

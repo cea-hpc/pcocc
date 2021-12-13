@@ -1377,6 +1377,7 @@ username={3}@pcocc
                 try:
                     subprocess.check_call(['qemu-img', 'create',
                                            '-f', 'qcow2',
+                                           '-F', 'qcow2',
                                         '-b', image_path, snapshot_path],
                                           stdout=devnull)
                 except (OSError, subprocess.CalledProcessError) as err:

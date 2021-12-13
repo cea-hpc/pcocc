@@ -1063,7 +1063,7 @@ class QemuMonitor(object):
         self.validate_reply(self.exec_cmd_sync(self.block_job_cancel_cmd(drive)))
 
     def query_cpus_cmd(self):
-        return '{ "execute": "query-cpus" }'
+        return '{ "execute": "query-cpus-fast" }'
 
     def query_cpus(self):
         data = self.validate_reply(self.exec_cmd_sync(self.query_cpus_cmd()))
@@ -1534,13 +1534,13 @@ username={3}@pcocc
 
         # Monitor
         socket_path = batch.get_vm_state_path(vm.rank, 'monitor_socket')
-        cmdline += ['-qmp', 'unix:%s,server,nowait' % (socket_path)]
+        cmdline += ['-qmp', 'unix:%s,server=on,wait=off' % (socket_path)]
 
         # Serial Console
         socket_path = batch.get_vm_state_path(vm.rank, 'qemu_console_socket')
         cmdline += ['-chardev',
                     'socket,id=charserial0,'
-                    'path=%s,server,nowait' % (socket_path),
+                    'path=%s,server=on,wait=off' % (socket_path),
                     '-device', 'isa-serial,chardev=charserial0,id=serial0']
 
         # Custom serial ports
@@ -1554,7 +1554,7 @@ username={3}@pcocc
                                                       'serial_%s_socket'%
                                                       serial)
                 cmdline += [ '-chardev', 'socket,id=charserial%d,'
-                            'path=%s,server,nowait' % (serialid, socket_path)]
+                            'path=%s,server=on,wait=off' % (serialid, socket_path)]
                 cmdline += [ '-device',
                             'virtserialport,chardev=charserial%d,'
                             'id=ioserial%d,name=%s' %
@@ -1695,8 +1695,8 @@ username={3}@pcocc
             infos = qemu_mon.query_cpus()
             # Bind each vcpu thread on its physical cpu
             for cpu_info in infos:
-                cpu_id = cpu_info["CPU"]
-                cpu_thread_id = cpu_info["thread_id"]
+                cpu_id = cpu_info["cpu-index"]
+                cpu_thread_id = cpu_info["thread-id"]
                 phys_coreid = subprocess_check_output(
                     ['hwloc-calc'] + topology_cache_args + [ '--po', '-I', 'PU',
                      'core:%s'%(virt_to_phys_coreid[cpu_id])]

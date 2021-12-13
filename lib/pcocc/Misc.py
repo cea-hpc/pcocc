@@ -96,7 +96,7 @@ def fake_signalfd(sigs):
         def _fake_sigfd_handler(signum, frame):
             logging.debug("Signalfd handler injecting "
                           "event for signal %s", signum)
-            os.write(sig_w, 'x')
+            os.write(sig_w, 'x'.encode('ascii'))
         signal.signal(sig, _fake_sigfd_handler)
     return sig_r
 
@@ -119,7 +119,7 @@ def _nanny_thread(child_proc, pipe, return_val, name):
 
     return_val['val'] = r
     return_val['pid'] = pid
-    os.write(pipe, 'x')
+    os.write(pipe, 'x'.encode('ascii'))
 
 CHILD_EXIT = enum('NORMAL', 'SIGNAL', 'KILL')
 

@@ -174,7 +174,7 @@ class VMImage(object):
 
         try:
             jsdata = subprocess.check_output(["qemu-img", "info",
-                                              "--output=json", path])
+                                              "--output=json", path]).decode()
         except subprocess.CalledProcessError:
             return None
 

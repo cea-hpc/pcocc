@@ -40,6 +40,8 @@ import binascii
 import uuid
 import queue
 import click
+import codecs
+
 from . import agent_pb2
 from . import Docker
 
@@ -328,8 +330,9 @@ class HostAgent(object):
 
         self.wlock.acquire()
         try:
-            enc=base64.b64encode(am.SerializeToString())
-            self.sock.sendall(enc+'\n')
+            enc = base64.b64encode(am.SerializeToString())
+            enc += b'\n'
+            self.sock.sendall(enc)
         except IOError as e:
             logging.warning("Failed to send %s message to agent due to %s", am.name, str(e))
 
@@ -396,7 +399,7 @@ class HostAgent(object):
         """Waits for a stop_threads event and signal the client thread to stop blocking"""
         stop_threads.wait()
         logging.info("Host agent: signaling serial port reader thread to exit")
-        os.write(self.sp_w, "x")
+        os.write(self.sp_w, "x".encode())
 
     def _client_thread(self):
         """Read data from the VM agent answers over the dedicated serial port
@@ -438,12 +441,9 @@ class HostAgent(object):
                 if not tdata:
                     return None
                 else:
-                    self.databuff = self.databuff + tdata
+                    self.databuff += dec.decode(tdata)
 
-        sret = self.databuff.split("\n")
-        self.databuff = "\n".join(sret[1:])
-        ret = sret[0]
-        return ret
+        ret, _,  self.databuff  = self.databuff.partition('\n')
 
 
 class HAStreamReqClass(ABCMeta):
@@ -810,7 +810,7 @@ class QemuMonitor(object):
         """Waits for a stop_threads event and signal the client thread to stop blocking"""
         stop_threads.wait()
         logging.info("Qemu monitor: signaling serial port reader thread to exit")
-        os.write(self.sp_w, "x")
+        os.write(self.sp_w, "x".encode())
 
     def _client_thread(self):
         logging.info("Listening to Qemu monitor for VM %d",
@@ -835,6 +835,8 @@ class QemuMonitor(object):
         """
         Read data from the VM until a complete command is read
         """
+        dec = codecs.getincrementaldecoder('utf8')()
+
         while not '\n' in self.databuff:
             rdr, _, _ = select.select([self.sp_r, self.sock], [], [])
             if self.sp_r in rdr:
@@ -850,11 +852,9 @@ class QemuMonitor(object):
                 if not tdata:
                     return None
                 else:
-                    self.databuff = self.databuff + tdata
+                    self.databuff += dec.decode(tdata)
 
-        sret = self.databuff.split("\n")
-        self.databuff = "\n".join(sret[1:])
-        ret = sret[0]
+        ret, _,  self.databuff  = self.databuff.partition('\n')
         return ret
 
     def _handle_monitor(self, monitor_data):
@@ -897,7 +897,7 @@ class QemuMonitor(object):
         self.wlock.acquire()
         self.sync_cb.put(cb)
         try:
-            self.sock.sendall(payload)
+            self.sock.sendall(payload.encode('utf-8'))
         except IOError as e:
             logging.warning("Failed to send message to monitor due to %s",
                             str(e))
@@ -1257,7 +1257,7 @@ username={3}@pcocc
         # Python hwloc bindings would be nice
         try:
             version_string = subprocess_check_output(['lstopo-no-graphics',
-                                                      '--version'])
+                                                      '--version']).decode()
         except (OSError, subprocess.CalledProcessError) as err:
             raise HypervisorError('hwloc (lstopo-no-graphics) is not available')
 
@@ -1309,7 +1309,7 @@ username={3}@pcocc
                                                              ['Core:%d' %
                                                              (int(core_id)),
                                                              '-I', 'NUMANode'],
-                                    stderr=devnull))
+                                                            stderr=devnull).decode())
             except ValueError:
                 # Use NUMA node 0 if the CPU doesnt intersect any NUMANode
                 # Usually this means that we have a UMA machine
@@ -1328,7 +1328,7 @@ username={3}@pcocc
         else:
             cmdline = [ self.qemu_bin ]
 
-        version_string = subprocess_check_output(cmdline + ['--version'])
+        version_string = subprocess_check_output(cmdline + ['--version']).decode()
         match = re.search(r'version (\d+\.\d+)', version_string)
         qemu_version = float(match.group(1))
 
@@ -1621,7 +1621,7 @@ username={3}@pcocc
                     except subprocess.CalledProcessError as err:
                         logging.warning('Failed to validate cloud-config file for vm %d',
                                         vm.rank)
-                        logging.warning(err.output)
+                        logging.warning(err.output.decode())
                 else:
                     logging.info('cloud-init CLI is not installed: skipping cloud-config validation')
 
@@ -1652,7 +1652,7 @@ username={3}@pcocc
         if emulator_coreset and autobind_cpumem:
             emulator_phys_coreset = [ subprocess_check_output(
                 ['hwloc-calc'] + topology_cache_args +
-                ['--po', '-I', 'PU', 'Core:%s' % core]).strip()
+                ['--po', '-I', 'PU', 'Core:%s' % core]).decode().strip()
                                        for core in emulator_coreset ]
             cmdline = ['taskset',
                        '-c', ','.join(emulator_phys_coreset)] + cmdline
@@ -1700,10 +1700,10 @@ username={3}@pcocc
                 phys_coreid = subprocess_check_output(
                     ['hwloc-calc'] + topology_cache_args + [ '--po', '-I', 'PU',
                      'core:%s'%(virt_to_phys_coreid[cpu_id])]
-                    ).strip()
+                    ).decode().strip()
                 phys_coreid = phys_coreid.split(',')[0]
                 subprocess_check_output(['taskset', '-p', '-c',
-                                         phys_coreid, str(cpu_thread_id)])
+                                         phys_coreid, str(cpu_thread_id)]).decode()
 
 
         if ckpt_dir:
@@ -1810,7 +1810,7 @@ username={3}@pcocc
                         except:
                             pass
 
-                    console_log_file.write(data)
+                    console_log_file.write(data.decode())
 
                 elif s is client_sock:
                     try:
@@ -2002,6 +2002,7 @@ username={3}@pcocc
                         # Pipe closed, retry
                         break
 
+                    data = data.decode()
                     if data.find(str(syn_id)) == -1:
                         self._cleanup_and_raise(s_ctl, AgentError("unexpected answer when "
                                                                   "pinging VM agent  "
@@ -2010,7 +2011,7 @@ username={3}@pcocc
 
                 if retry_send and s_ctl.stdin in rdy[1]:
                     try:
-                        s_ctl.stdin.write(qga_cmd)
+                        s_ctl.stdin.write(qga_cmd.encode('utf-8'))
                         retry_send = False
                     except IOError as err:
                         # Qemu wasn't ready, retry
@@ -2063,18 +2064,21 @@ username={3}@pcocc
                              "for copy: %s" % str(err))
 
         try:
-            s_ctl.stdin.write('{"execute":"guest-file-open",'
-                              '"arguments":{"path":"%s",'
-                              '"mode":"w+"}}\n\n'%(dest_file))
-            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
+            cmd = """{"execute":"guest-file-open",
+                     "arguments":{"path":"{}",'
+                     "mode":"w+"}}\n\n""".format(dest_file)
+            s_ctl.stdin.write(cmd.encode('utf-8'))
+
+            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
             handle = json.loads(data)["return"]
 
 
-            s_ctl.stdin.write('{"execute":"guest-file-write",'
-                              '"arguments":{"handle":%d,'
-                              '"buf-b64":"%s"}}' %
-                              (handle, encoded_source))
-            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
+            cmd = """{"execute":"guest-file-write",
+                      "arguments":{"handle":{},
+                      "buf-b64":"{}"}}""".format(handle, encoded_source.decode())
+            s_ctl.stdin.write(cmd.encode('utf-8'))
+
+            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
             count = json.loads(data)["return"]["count"]
             eof = json.loads(data)["return"]["eof"]
 
@@ -2086,11 +2090,11 @@ username={3}@pcocc
             if eof:
                 raise AgentError("Unexepected EOF writing {0}".format(source_file))
 
-            s_ctl.stdin.write('{"execute":"guest-file-close",'
-                              '"arguments":{"handle":%d}}' %
-                              handle)
+            cmd = """{"execute":"guest-file-close",
+                      "arguments":{"handle": {}}}""".format(handle)
+            s_ctl.stdin.write(cmd.encode('utf-8'))
 
-            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
+            data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
             ret = json.loads(data)["return"]
             if ret:
                 raise ValueError
@@ -2110,8 +2114,8 @@ username={3}@pcocc
 
     def fsfreeze(self, vm, port=QEMU_GUEST_AGENT_PORT, timeout=0):
         s_ctl = self._get_agent_ctl_safe(vm, port, timeout)
-        s_ctl.stdin.write('{"execute":"guest-fsfreeze-freeze"}')
-        data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
+        s_ctl.stdin.write('{"execute":"guest-fsfreeze-freeze"}'.encode('utf-8'))
+        data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
         try:
             ret = json.loads(data)
         except:
@@ -2128,8 +2132,8 @@ username={3}@pcocc
 
     def fsthaw(self, vm, port=QEMU_GUEST_AGENT_PORT, timeout=0):
         s_ctl = self._get_agent_ctl_safe(vm, port, timeout)
-        s_ctl.stdin.write('{"execute":"guest-fsfreeze-thaw"}')
-        data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
+        s_ctl.stdin.write('{"execute":"guest-fsfreeze-thaw"}'.encode('utf-8'))
+        data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
         try:
             ret = json.loads(data)
         except:
@@ -2179,7 +2183,7 @@ username={3}@pcocc
                                   arglist,
                                   envlist))
             try:
-                s_ctl.stdin.write(qga_cmd)
+                s_ctl.stdin.write(qga_cmd.encode('utf-8'))
 
             except IOError as err:
                 raise AgentError("failed to send cmd to guest agent: %s "
@@ -2190,15 +2194,15 @@ username={3}@pcocc
         while 1:
             rdy = select.select([s_ctl.stdout, s_io.stdout],
                                 [], [])
-
+            # FIXME: use a codec for partial decoding
             if s_io.stdout in rdy[0]:
-                data = os.read(s_io.stdout.fileno(), 4096)
+                data = os.read(s_io.stdout.fileno(), 4096).decode()
 
                 if data:
                     print(data, end=' ')
 
             if s_ctl.stdout in rdy[0]:
-                data = os.read(s_ctl.stdout.fileno(), 4096)
+                data = os.read(s_ctl.stdout.fileno(), 4096).decode()
 
                 try:
                     retval = json.loads(data)["return"]
@@ -2261,7 +2265,7 @@ username={3}@pcocc
         while True:
             rdy = select.select([subproc.stdout], [], [], 0)
             if subproc.stdout in rdy[0]:
-                data = os.read(subproc.stdout.fileno(), 4096)
+                data = os.read(subproc.stdout.fileno(), 4096).decode()
                 if data:
                     print(data, end=' ')
                 else:

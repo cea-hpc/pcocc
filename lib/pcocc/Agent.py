@@ -792,7 +792,7 @@ class ParallelAgentResult(object):
             else:
                 if keep_results:
                     self._res_tree.add(str(key),
-                                       self._pretty_str(res))
+                                       self._pretty_str(res).encode('utf-8'))
                 if yield_results:
                     yield key, res
 
@@ -814,4 +814,4 @@ class ParallelAgentResult(object):
     def __str__(self):
         return '\n'.join(["{0}: {1}".format(
             NodeSet.fromlist(["vm"+x for x in keys]),
-            m) for m, keys in self._res_tree.walk()])
+            m.message().decode()) for m, keys in self._res_tree.walk()])

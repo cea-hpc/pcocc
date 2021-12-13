@@ -705,7 +705,7 @@ class NetDev(TrackableObject):
         try:
             self.add_ip(ip, bits)
         except subprocess.CalledProcessError as err:
-            if err.output != "RTNETLINK answers: File exists\n":
+            if err.output.decode() != "RTNETLINK answers: File exists\n":
                 raise
 
     def set_hwaddr(self, hwaddr):
@@ -833,7 +833,7 @@ class OVSBridge(NetDev):
     def get_port_id(self, dev_name):
         match = re.search(r'(\d+)\({0}\)'.format(dev_name),
                           self.run_output_in_ns(["ovs-ofctl", "show",
-                                                 self._name]))
+                                                 self._name]).decode())
         if match:
             return int(match.group(1))
         else:
@@ -964,7 +964,7 @@ def bridge_exists(brname):
 
 def ovs_bridge_exists(brname):
     match = re.search(r'Bridge {0}'.format(brname),
-                  subprocess.check_output(["ovs-vsctl", "show"]))
+                      subprocess.check_output(["ovs-vsctl", "show"]).decode())
     if match:
         return True
     else:
@@ -1008,7 +1008,7 @@ def ibdev_find_pkey_idx(device_name, pkey_value):
 
 def ibdev_get_guid(ibdev_name):
     return subprocess.check_output(['ibstat', '-p',
-                                    ibdev_name]).splitlines()[0]
+                                    ibdev_name]).decode().splitlines()[0]
 
 
 def guid_hex_to_col(guid):

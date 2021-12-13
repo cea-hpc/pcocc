@@ -263,9 +263,9 @@ class BatchManager(object, metaclass=ABCMeta):
         """
         self._only_in_a_job()
         # Assume we've been bound to our cores by the batch manager
-        taskset = subprocess_check_output(['hwloc-bind', '--get']).strip()
+        taskset = subprocess_check_output(['hwloc-bind', '--get']).decode().strip()
         coreset = subprocess_check_output(['hwloc-calc', '--intersect', 'Core',
-                                           taskset]).strip()
+                                           taskset]).decode().strip()
 
         return RangeSet(coreset)
 
@@ -714,7 +714,7 @@ class EtcdManager(BatchManager):
 
     def _get_keyval_credential(self):
         if self._etcd_auth_type == 'munge':
-            return subprocess_check_output(['/usr/bin/munge', '-n'])
+            return subprocess_check_output(['/usr/bin/munge', '-n']).decode()
         elif self._etcd_auth_type == 'password':
             if self._etcd_password is None:
                 self._init_password()
@@ -1158,7 +1158,7 @@ class LocalManager(EtcdManager):
         return os.path.join(self._cpuset_base(), 'pcocc', str(batchid))
 
     def _cpuset_base(self):
-        cpuset_base = subprocess.check_output(['lssubsys', '-m', 'cpuset'])
+        cpuset_base = subprocess.check_output(['lssubsys', '-m', 'cpuset']).decode()
         cpuset_base = cpuset_base.split(' ')[1].strip()
         return cpuset_base
 
@@ -1485,7 +1485,7 @@ class LocalManager(EtcdManager):
                 for rng in cores.split(','):
                     pus += [subprocess_check_output(['hwloc-calc',
                                                      '--intersect', 'PU', '--po',
-                                                     'cores:{}'.format(rng)]).strip()]
+                                                     'cores:{}'.format(rng)]).decode().strip()]
 
                 pus = ','.join(pus)
                 with open(os.path.join(self._cpuset_cluster(),
@@ -1641,7 +1641,7 @@ class SlurmManager(EtcdManager):
                     subprocess_check_output(['squeue', '-j',
                                              str(self.batchid),
                                              '-u', self.batchuser,
-                                             '-h', '-o', '%N']))
+                                             '-h', '-o', '%N']).decode())
             except subprocess.CalledProcessError:
                 raise InvalidJobError('no valid match for id '+ str(self.batchid))
 
@@ -1694,7 +1694,7 @@ class SlurmManager(EtcdManager):
             cmd += ['-w', host]
 
         try:
-            batchid = subprocess_check_output(cmd)
+            batchid = subprocess_check_output(cmd).decode()
         except subprocess.CalledProcessError:
             raise InvalidJobError('no valid match for name '+ batchname)
 
@@ -1713,7 +1713,7 @@ class SlurmManager(EtcdManager):
         """
         try:
             joblist = subprocess_check_output(['squeue', '-ho',
-                                               '%A']).split()
+                                               '%A']).split().decode()
             return [ int(j) for j in joblist ]
         except subprocess.CalledProcessError as err:
             raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
@@ -1742,7 +1742,7 @@ class SlurmManager(EtcdManager):
 
         try:
             joblist = subprocess_check_output(['squeue'] + user_filter +
-                                              ['-ho','%A %u %M %l %P %D %t %j']).split("\n")
+                                              ['-ho','%A %u %M %l %P %D %t %j']).split("\n").decode()
         except subprocess.CalledProcessError as err:
             raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
 
@@ -1837,7 +1837,7 @@ class SlurmManager(EtcdManager):
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             #Make sure user owned keys and cert are generated
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
-            ret = subprocess.call(['salloc'] + self._batch_args + alloc_opt + cmd)
+            ret = subprocess.call(['salloc'] + self._batch_args + alloc_opt + cmd).decode()
         except KeyboardInterrupt:
             raise AllocationError("interrupted")
 
@@ -1940,9 +1940,9 @@ class SlurmManager(EtcdManager):
         """
         self._only_in_a_job()
         # Assume we've been bound to our cores by SLURM
-        taskset = subprocess_check_output(['hwloc-bind', '--get']).strip()
+        taskset = subprocess_check_output(['hwloc-bind', '--get']).decode().strip()
         coreset = subprocess_check_output(['hwloc-calc', '--intersect', 'Core',
-                                           taskset]).strip()
+                                           taskset]).decode().strip()
 
         return RangeSet(coreset)
 

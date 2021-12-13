@@ -278,7 +278,7 @@ def mt_chain(iterators):
     for i in range(0, len(iterators)):
         workers[i].join()
 
-    logging.debug("mt_chain: all srouce streams completed and joined")
+    logging.debug("mt_chain: all source streams completed and joined")
 
 class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
     """Services RPC request to a node in the tree.
@@ -337,7 +337,7 @@ class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
         init_msg = next(request_iterator)
         stream_local = False
 
-        if self._vmid in RangeSet(init_msg.destinations.encode('ascii', 'ignore')):
+        if self._vmid in RangeSet(init_msg.destinations):
             # If we are part of the recipients, use a tee to get a
             # local copy of the stream while forwarding it
             local_iter, forward_iter = mt_tee(request_iterator)

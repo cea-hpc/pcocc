@@ -326,10 +326,12 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts, port):
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
+@click.option('-P','--port',
+              help='Port to connect to on the remote host')
 @click.option('--user',
               help='Select cluster among jobs of the specified user')
 @click.argument('scp-opts', nargs=-1, type=click.UNPROCESSED)
-def pcocc_scp(jobid, jobname, user, scp_opts):
+def pcocc_scp(jobid, jobname, user, scp_opts, port):
     """Transfer files to a VM via scp
 
        This requires the VM to have its ssh port reverse NAT'ed to the host in
@@ -354,7 +356,7 @@ def pcocc_scp(jobid, jobname, user, scp_opts):
         remote_host = cluster.vms[vm_index].get_host()
         scp_opts[arg_index] = scp_opts[arg_index].replace("vm%d:" % vm_index,
                                                           remote_host + ':')
-        ssh_port = find_vm_rnat_port(cluster, vm_index)
+        ssh_port = find_vm_rnat_port(cluster, vm_index, port=port)
         s_ctl = subprocess.Popen(
             ['scp', '-P', ssh_port] + DEFAULT_SSH_OPTS + scp_opts)
         ret = s_ctl.wait()

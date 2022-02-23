@@ -1302,30 +1302,31 @@ username={3}@pcocc
         if num_cores == len(coreset) and vm.bind_vcpus:
             logging.info('Physical resources match VM definition, activating autobinding')
             autobind_cpumem = True
-            for core_id in coreset:
-                try:
-                    with open(os.devnull, 'w') as devnull:
-                        numa_node = int(subprocess_check_output(['hwloc-calc'] +
-                                                                topology_cache_args +
-                                                                 ['Core:%d' %
-                                                                 (int(core_id)),
-                                                                 '-I', 'NUMANode'],
-                                        stderr=devnull))
-                except ValueError:
-                    # Use NUMA node 0 if the CPU doesnt intersect any NUMANode
-                    # Usually this means that we have a UMA machine
-                    numa_node = 0
-
-                except Exception as err:
-                    raise HypervisorError('unable to compute NUMA node: '
-                                          + str(err))
-
-                cores_on_numa.setdefault(numa_node,
-                                         RangeSet()).update(RangeSet(str(core_id)))
         else:
             logging.info('Physical resources don\'t match VM definition. Autobind deactivated.')
             autobind_cpumem = False
-            cores_on_numa[0] = coreset
+
+        for core_id in coreset:
+            try:
+                with open(os.devnull, 'w') as devnull:
+                    numa_node = int(subprocess_check_output(['hwloc-calc'] +
+                                                            topology_cache_args +
+                                                             ['Core:%d' %
+                                                             (int(core_id)),
+                                                             '-I', 'NUMANode'],
+                                    stderr=devnull))
+            except ValueError:
+                # Use NUMA node 0 if the CPU doesnt intersect any NUMANode
+                # Usually this means that we have a UMA machine
+                numa_node = 0
+
+            except Exception as err:
+                raise HypervisorError('unable to compute NUMA node: '
+                                      + str(err))
+
+            cores_on_numa.setdefault(numa_node,
+                                         RangeSet()).update(RangeSet(str(core_id)))
+
 
         if vm.qemu_bin:
             cmdline = [ vm.qemu_bin ]
@@ -1471,8 +1472,21 @@ username={3}@pcocc
                             i)]
 
                 start_cpu += ncores_on_node
+        elif not self._need_shared_mem(vm):
+            policy = "interleave" if len(cores_on_numa) > 1 else "preferred"
+
+            cmdline += ['-object',
+                        'memory-backend-ram,id=mem,size={}M,'
+                        'policy={},{},prealloc=on'.format(
+                            str(total_mem), policy,
+                            ','.join(map("host-nodes={}".format, cores_on_numa.keys())))]
+            cmdline += ['-numa', 'node,memdev=mem,cpus=0-{},nodeid=0'.format(num_cores - 1)]
         else:
-            cmdline += ['-m', str(total_mem)]
+            cmdline += ['-object',
+                        'memory-backend-file,id=mem,size={}M,mem-path=/dev/shm,share=on'.format(
+                            str(total_mem))]
+            cmdline += ['-numa', 'node,memdev=mem']
+
 
         # Ethernet interfaces
         try:
@@ -1513,34 +1527,15 @@ username={3}@pcocc
 
         if docker:
             cert_dir = Docker.init_server_certs(vm)
-            vm.mount_points['pcocc_vm_certs'] = {'path': cert_dir,
-                                                 'readonly':True}
-            vm.mount_points['host_rootfs_'] = {'path': "/"}
+            vm.mount_points.setdefault('pcocc_vm_certs',
+                                       {'path': cert_dir,
+                                        'readonly':True})
+            vm.mount_points.setdefault('host_rootfs_',
+                                       {'path': "/"})
             logging.info("Added mount points for Docker VM")
 
         # Mount points
-        for mount in vm.mount_points:
-            host_path = vm.mount_points[mount]['path']
-            host_path = Config().resolve_path(host_path, vm)
-
-            readonly = vm.mount_points[mount].get('readonly', False)
-            if readonly:
-                readonly_string=',readonly'
-            else:
-                readonly_string=''
-
-            # Fail early if the mount point is not accessible as Qemu will
-            # refuse to start anyway
-            if ( not os.path.isdir(host_path) or
-                 not os.access(host_path, os.R_OK|os.X_OK)):
-                raise HypervisorError('unable to access mount '
-                                      'point {0}'.format(host_path))
-
-            cmdline += ['-fsdev', 'local,id=%s,path=%s,security_model=none%s'%
-                        (mount, host_path, readonly_string)]
-
-            cmdline += ['-device', 'virtio-9p-pci,fsdev=%s,mount_tag=%s'%
-                        (mount, mount)]
+        cmdline += self._setup_mount_points(vm)
 
         # Monitor
         socket_path = batch.get_vm_state_path(vm.rank, 'monitor_socket')
@@ -1661,9 +1656,9 @@ username={3}@pcocc
 
         if emulator_coreset and autobind_cpumem:
             emulator_phys_coreset = [ subprocess_check_output(
-                ['hwloc-calc', '--po', '-I', 'PU', 'Core:%s' % core] +
-                topology_cache_args).strip()
-                                      for core in emulator_coreset ]
+                ['hwloc-calc'] + topology_cache_args +
+                ['--po', '-I', 'PU', 'Core:%s' % core]).strip()
+                                       for core in emulator_coreset ]
             cmdline = ['taskset',
                        '-c', ','.join(emulator_phys_coreset)] + cmdline
 
@@ -1708,9 +1703,9 @@ username={3}@pcocc
                 cpu_id = cpu_info["CPU"]
                 cpu_thread_id = cpu_info["thread_id"]
                 phys_coreid = subprocess_check_output(
-                    ['hwloc-calc' , '--po', '-I', 'PU',
-                     'core:%s'%(virt_to_phys_coreid[cpu_id])]  +
-                    topology_cache_args).strip()
+                    ['hwloc-calc'] + topology_cache_args + [ '--po', '-I', 'PU',
+                     'core:%s'%(virt_to_phys_coreid[cpu_id])]
+                    ).strip()
                 phys_coreid = phys_coreid.split(',')[0]
                 subprocess_check_output(['taskset', '-p', '-c',
                                          phys_coreid, str(cpu_thread_id)])
@@ -1891,6 +1886,68 @@ username={3}@pcocc
             ret = 0
 
         return ret
+
+    def _need_shared_mem(self, vm):
+        for mount in vm.mount_points:
+            mount_type = vm.mount_points[mount].get('type', 'virtio-9p')
+            if mount_type == 'virtio-fs':
+                return True
+
+        return False
+
+    def _setup_mount_points(self, vm):
+        cmdline = []
+
+        for i, mount in enumerate(vm.mount_points):
+            mount_type = vm.mount_points[mount].get('type', 'virtio-9p')
+            readonly = vm.mount_points[mount].get('readonly', False)
+
+            if mount_type  == 'virtio-fs':
+                if vm.bind_vcpus:
+                    raise HypervisorError('Please disable cpus binding for '
+                                           'virtio-fs mounts')
+                if readonly:
+                    raise HypervisorError('Read-only mounts are not supported with '
+                                           'virtio-fs')
+
+            host_path = vm.mount_points[mount]['path']
+            host_path = Config().resolve_path(host_path, vm)
+
+            # Fail early if the mount point is not accessible as Qemu will
+            # refuse to start anyway
+            if ( not os.path.isdir(host_path) or
+                 not os.access(host_path, os.R_OK|os.X_OK)):
+                raise HypervisorError('unable to access mount '
+                                      'point {0}'.format(host_path))
+            if readonly:
+                readonly_string=',readonly'
+            else:
+                readonly_string=''
+
+            if mount_type == 'virtio-9p':
+                cmdline += ['-fsdev',
+                            'local,id=%s,path=%s,security_model=none%s'%
+                            (mount, host_path, readonly_string)]
+
+                cmdline += ['-device', 'virtio-9p-pci,fsdev=%s,mount_tag=%s'%
+                            (mount, mount)]
+
+            else:
+                socket_path = Config().batch.get_vm_state_path(vm.rank,
+                                                               'virtio_fsd_{}'.format(i))
+                cmdline += [ '-chardev',
+                             'socket,id=char_fs_{},path={}'.format(i, socket_path)]
+                cmdline += [ '-device',
+                             'vhost-user-fs-pci,queue-size=1024,chardev=char_fs_{},tag={}'.format(
+                                 i, mount)]
+                sp = subprocess.Popen(['sh', '-c', 'ulimit -n 80000 ; virtiofsd  --socket-path '
+                                       '{} --sandbox none --shared-dir {} --log-level warn'.format(
+                                           socket_path, host_path)], close_fds=True)
+                atexit.register(try_kill, sp)
+
+
+        return cmdline
+
 
     def heartbeat(self, vm):
         logging.debug("Starting VM heartbeat thread")

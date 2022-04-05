@@ -1,4 +1,4 @@
- #!/usr/bin/env python
+ #!/usr/bin/env python3
 import os
 import glob
 from setuptools.command.bdist_rpm import bdist_rpm

@@ -49,7 +49,7 @@ def createKeyPair(key_type, bits):
     return pkey
 
 def getAltnameExtension(altnames):
-    return [crypto.X509Extension("subjectAltName", True, ", ".join(altnames))]
+    return [crypto.X509Extension(b"subjectAltName", True, ", ".join(altnames).encode())]
 
 def createCertRequest(pkey, digest="md5", altname=None, **name):
     """
@@ -182,12 +182,12 @@ class UserCA(Cert):
         ca_key_data = crypto.dump_privatekey(crypto.FILETYPE_PEM, cakey)
         ca_cert_data = crypto.dump_certificate(crypto.FILETYPE_PEM, cacert)
         logging.debug("Done generating CA cert")
-        return cls(ca_key_data, ca_cert_data)
+        return cls(ca_key_data.decode(), ca_cert_data.decode())
 
     def gen_cert(self, cn, key_size=2048, days=9999, altname=None):
         logging.debug("Generating cert for " + cn)
-        cacert = crypto.load_certificate(crypto.FILETYPE_PEM, self.cert)
-        cakey = crypto.load_privatekey(crypto.FILETYPE_PEM, self.key)
+        cacert = crypto.load_certificate(crypto.FILETYPE_PEM, self.cert.encode())
+        cakey = crypto.load_privatekey(crypto.FILETYPE_PEM, self.key.encode())
 
         pkey = createKeyPair(crypto.TYPE_RSA, key_size)
         req = createCertRequest(pkey, altname=altname, CN=cn)
@@ -200,7 +200,7 @@ class UserCA(Cert):
         key_data = crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey)
         cert_data = crypto.dump_certificate(crypto.FILETYPE_PEM, cert)
 
-        return Cert(key_data, cert_data, self.cert)
+        return Cert(key_data.decode(), cert_data.decode(), self.cert)
 
 #
 # Multi-Threaded Generator Plumbing
@@ -305,8 +305,8 @@ class TreeNode(agent_pb2_grpc.pcoccNodeServicer):
 
         server_cert = Config().batch.ca_cert.gen_cert(socket.gethostname())
         credential = grpc.ssl_server_credentials(
-            ((server_cert.key, server_cert.cert), ),
-            server_cert.ca_cert,
+            ((server_cert.key.encode(), server_cert.cert.encode()), ),
+            server_cert.ca_cert.encode(),
             True
         )
         self._port = self._server.add_secure_port(
@@ -584,9 +584,9 @@ class TreeNodeRelay(object):
 
         client_cert = Config().batch.ca_cert
         credential = grpc.ssl_channel_credentials(
-            root_certificates=client_cert.ca_cert,
-            private_key=client_cert.key,
-            certificate_chain=client_cert.cert
+            root_certificates=client_cert.ca_cert.encode(),
+            private_key=client_cert.key.encode(),
+            certificate_chain=client_cert.cert.encode()
         )
 
         if parent_id >= 0:
@@ -614,9 +614,9 @@ class TreeClient(object):
 
         client_cert = Config().batch.client_cert
         credential = grpc.ssl_channel_credentials(
-            root_certificates=client_cert.ca_cert,
-            private_key=client_cert.key,
-            certificate_chain=client_cert.cert
+            root_certificates=client_cert.ca_cert.encode(),
+            private_key=client_cert.key.encode(),
+            certificate_chain=client_cert.cert.encode()
         )
         self._channel = grpc.secure_channel(
             self._host + ":" + self._port, credential)

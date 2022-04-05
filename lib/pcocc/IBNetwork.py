@@ -249,7 +249,7 @@ required:
                                     pkey, e)
                     continue
 
-            tmp = tempfile.NamedTemporaryFile(delete=False)
+            tmp = tempfile.NamedTemporaryFile(mode='w+', delete=False)
             with open(self._opensm_partition_tpl) as f:
                 lines = f.readlines()
                 tmp.writelines(lines)

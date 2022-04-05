@@ -607,7 +607,7 @@ class VirtualMachine(Runner):
             PcoccError: Could not read the source file
         """
         try:
-            with open(source) as f:
+            with open(source, "rb") as f:
                 source_data = f.read()
             perms = os.stat(source)[stat.ST_MODE]
         except IOError as err:

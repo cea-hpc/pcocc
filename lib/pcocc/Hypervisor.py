@@ -426,6 +426,8 @@ class HostAgent(object):
         """
         Read data from the VM until a complete command is read
         """
+        dec = codecs.getincrementaldecoder('utf8')()
+
         while not '\n' in self.databuff:
             rdr, _, _ = select.select([self.sp_r, self.sock], [], [])
             if self.sp_r in rdr:
@@ -444,7 +446,7 @@ class HostAgent(object):
                     self.databuff += dec.decode(tdata)
 
         ret, _,  self.databuff  = self.databuff.partition('\n')
-
+        return ret
 
 class HAStreamReqClass(ABCMeta):
     def __init__(cls, name, bases, dct):
@@ -1731,7 +1733,7 @@ username={3}@pcocc
         client_sock = None
 
         console_log_file = open(batch.get_vm_state_path(vm.rank,
-                                                   'qemu_console_log'), 'w+',
+                                                   'qemu_console_log'), 'wb+',
                                 1)
 
         qemu_socket_path = batch.get_vm_state_path(vm.rank,
@@ -1811,7 +1813,7 @@ username={3}@pcocc
                         except:
                             pass
 
-                    console_log_file.write(data.decode())
+                    console_log_file.write(data)
 
                 elif s is client_sock:
                     try:

@@ -783,10 +783,10 @@ class EtcdManager(BatchManager):
 
             try:
                 self._etcd_password = binascii.b2a_hex(
-                    os.urandom(ETCD_PASSWORD_BYTES))
+                    os.urandom(ETCD_PASSWORD_BYTES)).decode()
                 f = os.open(pwd_path,
                             os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o400)
-                os.write(f, self._etcd_password)
+                os.write(f, self._etcd_password.encode())
                 os.close(f)
             except OSError as e:
                 raise KeyCredentialError('unable to generate password: ' + str(e))
@@ -803,7 +803,6 @@ class EtcdManager(BatchManager):
             u.write()
 
             logging.info('Initializing etcd user %s', self.batchuser)
-
             u = etcd.auth.EtcdUser(self.keyval_client, self.batchuser)
             try:
                 u.read()
@@ -814,7 +813,7 @@ class EtcdManager(BatchManager):
                 requested_cred = os.environ.get('SPANK_PCOCC_REQUEST_CRED', '')
                 if (len(requested_cred) == 2 * ETCD_PASSWORD_BYTES
                     and u.password != requested_cred):
-                    logging.info('Updating password with ' + requested_cred)
+                    logging.info('Updating password')
                     u.password = requested_cred
 
             u.write()
@@ -1713,7 +1712,7 @@ class SlurmManager(EtcdManager):
         """
         try:
             joblist = subprocess_check_output(['squeue', '-ho',
-                                               '%A']).split().decode()
+                                               '%A']).decode().split()
             return [ int(j) for j in joblist ]
         except subprocess.CalledProcessError as err:
             raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
@@ -1742,7 +1741,7 @@ class SlurmManager(EtcdManager):
 
         try:
             joblist = subprocess_check_output(['squeue'] + user_filter +
-                                              ['-ho','%A %u %M %l %P %D %t %j']).split("\n").decode()
+                                              ['-ho','%A %u %M %l %P %D %t %j']).decode().split("\n")
         except subprocess.CalledProcessError as err:
             raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
 
@@ -1837,7 +1836,7 @@ class SlurmManager(EtcdManager):
                 os.environ['PCOCC_REQUEST_CRED'] = self._get_keyval_credential()
             #Make sure user owned keys and cert are generated
             os.environ['SLURM_DISTRIBUTION'] = 'block:block'
-            ret = subprocess.call(['salloc'] + self._batch_args + alloc_opt + cmd).decode()
+            ret = subprocess.call(['salloc'] + self._batch_args + alloc_opt + cmd)
         except KeyboardInterrupt:
             raise AllocationError("interrupted")
 
@@ -1893,7 +1892,7 @@ class SlurmManager(EtcdManager):
         self._only_in_a_job()
 
         raw_output = subprocess_check_output(
-            ['scontrol', 'show', 'jobid=%d' % (self.batchid)])
+            ['scontrol', 'show', 'jobid=%d' % (self.batchid)]).decode()
 
         # First, assume the memory was specified on a per cpu basis:
         match = re.search(r'MinMemoryCPU=(\d+)M', raw_output)

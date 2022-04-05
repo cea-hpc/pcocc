@@ -168,7 +168,7 @@ class AgentCommand(object, metaclass=AgentCommandClass):
         cls._lock.acquire()
         cls._registered_execs.remove((cluster, indices, execid, ctx))
         if len(cls._registered_execs) == 0:
-            os.write(cls._stop_sig_w, "1")
+            os.write(cls._stop_sig_w, "1".encode())
         cls._lock.release()
 
     @classmethod
@@ -412,10 +412,10 @@ class AgentCommand(object, metaclass=AgentCommandClass):
                         if ignore_output:
                             continue
                         if msg.kind == agent_pb2.IOMessage.stdout:
-                            sys.stdout.write(msg.data)
+                            sys.stdout.buffer.write(msg.data)
                             sys.stdout.flush()
                         else:
-                            sys.stderr.write(msg.data)
+                            sys.stderr.buffer.write(msg.data)
                             sys.stderr.flush()
                     elif isinstance(msg, agent_pb2.ExitStatus):
                         logging.info("Received Exit status")
@@ -529,7 +529,7 @@ class WritableVMRootfs(object):
                                      self.rangeset,
                                      DEFAULT_AGENT_TIMEOUT,
                                      path="/.pcocctest",
-                                     data="test",
+                                     data=b"test",
                                      append=True,
                                      perms=0o0755)
 

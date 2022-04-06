@@ -640,7 +640,7 @@ class ContImage(object):
 
     known_img_formats = ["containers-storage", "dir", "docker",
                          "docker-archive", "docker-daemon", "oci",
-                         "ostree", "pcocc-docker-daemon"]
+                         "ostree", "pcocc-docker-daemon", "sif"]
 
     @classmethod
     def known_format(cls, ext):

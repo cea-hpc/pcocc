@@ -1982,27 +1982,30 @@ username={3}@pcocc
             s_ctl = self.socket_connect(vm, 'serial_{0}_socket'.format(port), kill_atexit)
             syn_id = random.randint(100000000,999999999)
             qga_cmd = '{"execute":"guest-sync", "arguments": { "id": %d }}\n\n' % syn_id
-            logging.debug("Sending agent sync %s", qga_cmd)
-
-            # TODO: Remove this wait. For now, without it, some of the data we
-            # send is lost
-            time.sleep(1)
+            logging.info("Syncing with QGA (id %d)", syn_id)
 
             retry_send = True
             while 1:
                 if retry_send:
+                    logging.debug("Waiting for QGA stdout/stdin")
                     rdy = select.select([s_ctl.stdout],
                                         [s_ctl.stdin], [])
-                else:
+                elif timeout > 0:
+                    logging.debug("Waiting for QGA stdout, timeout: %d", timeout)
                     rdy = select.select([s_ctl.stdout], [], [], timeout)
+                else:
+                    logging.debug("Waiting for QGA stdout")
+                    rdy = select.select([s_ctl.stdout], [], [])
 
                 if timeout and rdy == ([], [], []):
+                    logging.debug("QGA timeout")
                     self._cleanup_and_raise(s_ctl, AgentError("Timeout pinging agent"))
 
                 if s_ctl.stdout in rdy[0]:
+                    logging.debug("Reading QGA data")
                     data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE)
                     if not data:
-                        # Pipe closed, retry
+                        logging.debug("Pipe closed, retrying")
                         break
 
                     data = data.decode()
@@ -2010,14 +2013,17 @@ username={3}@pcocc
                         self._cleanup_and_raise(s_ctl, AgentError("unexpected answer when "
                                                                   "pinging VM agent  "
                                                                   "%s\n" % data))
+                    logging.debug("Synced with QGA returning socket")
                     return s_ctl
 
                 if retry_send and s_ctl.stdin in rdy[1]:
                     try:
+                        logging.debug("Sending sync message")
                         s_ctl.stdin.write(qga_cmd.encode('utf-8'))
                         retry_send = False
                     except IOError as err:
                         # Qemu wasn't ready, retry
+                        logging.debug("QGA was not ready, retry")
                         if err.errno == errno.EPIPE:
                             break
                         else:
@@ -2032,14 +2038,14 @@ username={3}@pcocc
             s_ctl.communicate()
 
             if timeout:
-                # Shave 5 seconds off of the timeout as we are
+                # Shave 1 second off of the timeout as we are
                 # going to sleep for that much before retry our select
-                timeout -= 5
+                timeout -= 1
                 if timeout <= 0:
                     self._cleanup_and_raise(s_ctl, AgentError("Timeout pinging agent"))
 
             # wait before trying a reconnection
-            time.sleep(5)
+            time.sleep(1)
 
     def _cleanup_and_raise(self, sproc, error):
         try:
@@ -2284,6 +2290,7 @@ username={3}@pcocc
         lock.acquire()
         subproc = subprocess.Popen(shlex.split('ssh %s nc -U %s'%(
                     remote_host, io_file)),
+                                   bufsize=0,
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE,
                              stdin=subprocess.PIPE)

@@ -141,6 +141,7 @@ class VMImage(object):
         try:
             jsdata = subprocess.check_output(["qemu-img",
                                               "info",
+                                              "-U",
                                               "--output=json",
                                               path])
         except subprocess.CalledProcessError:
@@ -173,7 +174,7 @@ class VMImage(object):
             raise PcoccError("{} is not readable".format(path))
 
         try:
-            jsdata = subprocess.check_output(["qemu-img", "info",
+            jsdata = subprocess.check_output(["qemu-img", "info", "-U",
                                               "--output=json", path]).decode()
         except subprocess.CalledProcessError:
             return None

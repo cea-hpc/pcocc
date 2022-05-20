@@ -227,7 +227,8 @@ required:
                     continue
 
                 # Find keys matching a valid PKey value
-                m = re.match(r'{0}/(0x\d\d\d\d)$'.format(pkey_path), child.key)
+                m = re.match(r'{0}/(0x[0-9a-f][0-9a-f][0-9a-f][0-9a-f])$'
+                             .format(pkey_path), child.key)
                 if not m:
                     logging.warning("Invalid entry in PKey directory: " +
                                     child.key)

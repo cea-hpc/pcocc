@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-ALLOC" "1" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-alloc \- Instantiate or restore a virtual cluster (interactive mode)
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-ALLOC" "1" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-alloc \- Instantiate or restore a virtual cluster (interactive mode)
 .SH SYNOPSIS
 .sp
 pcocc alloc [OPTIONS] [BATCH_OPTIONS]... CLUSTER_DEFINITION
@@ -74,7 +74,7 @@ pcocc alloc \-c 4 \-\-qos=test \-J ubuntu tpl1:6,tpl2:2
 .UNINDENT
 .SS Restore a checkpointed cluster
 .sp
-The pcocc\-ckpt(1) command allows to save the state of a whole cluster (disks and memory) in a checkpoint. Assuming a cluster was submitted and checkpointed as follows:
+The \fI\%pcocc\-ckpt(1)\fP command allows to save the state of a whole cluster (disks and memory) in a checkpoint. Assuming a cluster was submitted and checkpointed as follows:
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -112,7 +112,7 @@ The restore path must be an absolute path
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-batch(1), pcocc\-ckpt(1), pcocc\-template(1), pcocc\-templates.yaml(5)
+\fI\%pcocc\-batch(1)\fP, \fI\%pcocc\-ckpt(1)\fP, \fI\%pcocc\-template(1)\fP, \fI\%pcocc\-templates.yaml(5)\fP
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

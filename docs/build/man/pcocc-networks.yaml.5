@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-NETWORKS.YAML" "5" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-networks.yaml \- Networks configuration file
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-NETWORKS.YAML" "5" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-networks.yaml \- Networks configuration file
 .SH DESCRIPTION
 .sp
 \fB/etc/pcocc/networks.yaml\fP is a YAML formatted file defining virtual networks available to pcocc VMs. Virtual networks are referenced through VM resource sets defined in the \fB/etc/pcocc/resources.yaml\fP configuration file. For each virtual cluster, private instances of the virtual networks referenced by its VMs are created, which means each virtual network instance is only shared by VMs within a single virtual cluster.
@@ -362,7 +362,7 @@ ib:
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-template(1), pcocc\-templates.yaml(5), pcocc\-resources.yaml(5), pcocc\-newvm\-tutorial(7), pcocc\-configvm\-tutorial(7)
+\fI\%pcocc\-template(1)\fP, \fI\%pcocc\-templates.yaml(5)\fP, \fI\%pcocc\-resources.yaml(5)\fP, \fI\%pcocc\-newvm\-tutorial(7)\fP, \fI\%pcocc\-cloudconfig\-tutorial(7)\fP
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

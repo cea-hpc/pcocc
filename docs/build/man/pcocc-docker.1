@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-DOCKER" "1" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-docker \- Access a docker daemon
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-DOCKER" "1" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-docker \- Access a docker daemon
 .SH SYNOPSIS
 .sp
 pcocc docker [COMMAND] [ARG]
@@ -40,7 +40,7 @@ Use a docker daemon running in a VM
 The \fIpcocc docker\fP subcommands allow to provision a remote docker daemon running in a VM managed by pcocc and to use it as if it was running on a local node.
 .SS Allocate a Docker VM
 .sp
-\fIpcocc docker alloc\fP and \fIpcocc docker batch\fP allow to allocate Docker VMs. Their behaviour mirror the pcocc\-alloc(1) and pcocc\-batch(1) commands. Batch options are transferred to the batch manager so as to select, for example, a partition or a core count for the VM.
+\fIpcocc docker alloc\fP and \fIpcocc docker batch\fP allow to allocate Docker VMs. Their behaviour mirror the \fI\%pcocc\-alloc(1)\fP and \fI\%pcocc\-batch(1)\fP commands. Batch options are transferred to the batch manager so as to select, for example, a partition or a core count for the VM.
 .sp
 In interactive mode (\fIpcocc docker alloc\fP), an interactive shell is launched where environment variables are defined to tell clients of the Docker API to target the remote virtualized daemon. The \fIdocker\fP CLI or other tools such as \fIdocker\-compose\fP can then be used as if the daemon was running locally. Once the interactive shell exits, the Docker VM is terminated.
 .sp
@@ -126,7 +126,7 @@ docker run \-ti \-\-rm busybox
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-image(1), pcocc\-run(1)
+\fI\%pcocc\-image(1)\fP, \fI\%pcocc\-run(1)\fP
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

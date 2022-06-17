@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC" "1" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc \- Private Cloud on a Compute Cluster
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC" "1" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc \- Private Cloud on a Compute Cluster
 .SH INTRODUCTION
 .sp
 pcocc (pronounced like "peacock") stands for Private Cloud On a Compute Cluster. It allows users of an HPC cluster to host their own clusters of VMs on compute nodes, alongside regular jobs. Users are thus able to fully customize their software environments for development, testing, or facilitating application deployment. Compute nodes remain managed by the batch scheduler as usual since the clusters of VMs are seen as regular jobs. For each virtual cluster, pcocc allocates the necessary resources to host the VMs, including private Ethernet and/or Infiniband networks, creates temporary disk images from the selected templates and instantiates the requested VMs.
@@ -63,7 +63,7 @@ pcocc help ssh
 .UNINDENT
 .UNINDENT
 .sp
-For installing pcocc on a cluster, have a look at the installation guide\&. [1]
+For installing pcocc on a cluster, have a look at the \fI\%installation guide\fP\&. [1]
 .SS Sub\-Commands
 .sp
 pcocc supports the following sub\-commands:
@@ -76,19 +76,19 @@ Define and Allocate VMs:
 .INDENT 3.5
 .INDENT 0.0
 .TP
-.B alloc
+.B \fI\%alloc\fP
 Instantiate or restore a virtual cluster (interactive mode)
 .TP
-.B batch
+.B \fI\%batch\fP
 Instantiate or restore a virtual cluster (batch mode)
 .TP
-.B template
+.B \fI\%template\fP
 List and manage VM templates
 .TP
-.B image
+.B \fI\%image\fP
 List and manage VM and Container images
 .TP
-.B docker
+.B \fI\%docker\fP
 Access a docker daemon
 .UNINDENT
 .UNINDENT
@@ -99,22 +99,22 @@ Connect to VMs:
 .INDENT 3.5
 .INDENT 0.0
 .TP
-.B console
+.B \fI\%console\fP
 Connect to a VM console
 .TP
-.B nc
+.B \fI\%nc\fP
 Connect to a VM via  nc
 .TP
-.B scp
+.B \fI\%scp\fP
 Transfer files to a VM via scp
 .TP
-.B ssh
+.B \fI\%ssh\fP
 Connect to a VM via ssh
 .TP
-.B run
+.B \fI\%run\fP
 Execute commands in VMs and containers
 .TP
-.B display
+.B \fI\%display\fP
 Display the graphical output of a VM
 .UNINDENT
 .UNINDENT
@@ -125,22 +125,22 @@ Manage running VMs:
 .INDENT 3.5
 .INDENT 0.0
 .TP
-.B reset
+.B \fI\%reset\fP
 Reset a VM
 .TP
-.B ckpt
+.B \fI\%ckpt\fP
 Checkpoint a virtual cluster
 .TP
-.B dump
+.B \fI\%dump\fP
 Dump the memory of a VM to a file
 .TP
-.B monitor\-cmd
+.B \fI\%monitor\-cmd\fP
 Send a command to the monitor
 .TP
-.B save
+.B \fI\%save\fP
 Save the disk of a VM
 .TP
-.B ps
+.B \fI\%ps\fP
 List current pcocc jobs
 .UNINDENT
 .UNINDENT
@@ -151,39 +151,39 @@ List current pcocc jobs
 .SS Tutorials
 .INDENT 0.0
 .TP
-.B newvm\-tutorial
+.B \fI\%newvm\-tutorial\fP
 How to import VM images and define VM templates
 .TP
-.B cloudconfig\-tutorial
+.B \fI\%cloudconfig\-tutorial\fP
 How to configure cloud\-init enabled VMs
 .TP
-.B 9pmount\-tutorial
+.B \fI\%9pmount\-tutorial\fP
 How to mount host directories in VMs
 .UNINDENT
 .SS Configuration Files
 .INDENT 0.0
 .TP
-.B batch.yaml
+.B \fI\%batch.yaml\fP
 Batch environment configuration file
 .TP
-.B networks.yaml
+.B \fI\%networks.yaml\fP
 Networks configuration file
 .TP
-.B resources.yaml
+.B \fI\%resources.yaml\fP
 Resource sets configuration file
 .TP
-.B repos.yaml
+.B \fI\%repos.yaml\fP
 Image repositories configuration file
 .TP
-.B templates.yaml
+.B \fI\%templates.yaml\fP
 VM templates definition file
 .UNINDENT
 .SS See also
 .sp
-pcocc\-alloc(1), pcocc\-batch(1), pcocc\-ckpt(1), pcocc\-console(1), pcocc\-display(1), pcocc\-dump(1), pcocc\-run(1), pcocc\-monitor\-cmd(1), pcocc\-image(1), pcocc\-docker(1), pcocc\-nc(1), pcocc\-reset(1), pcocc\-save(1), pcocc\-scp(1), pcocc\-ssh(1), pcocc\-template(1), pcocc\-batch.yaml(5), pcocc\-networks.yaml(5), pcocc\-resources.yaml(5), pcocc\-repos.yaml(5), pcocc\-templates.yaml(5), pcocc\-9pmount\-tutorial(7), pcocc\-cloudconfig\-tutorial(7), pcocc\-newvm\-tutorial(7)
+\fI\%pcocc\-alloc(1)\fP, \fI\%pcocc\-batch(1)\fP, \fI\%pcocc\-ckpt(1)\fP, \fI\%pcocc\-console(1)\fP, \fI\%pcocc\-display(1)\fP, \fI\%pcocc\-dump(1)\fP, \fI\%pcocc\-run(1)\fP, \fI\%pcocc\-monitor\-cmd(1)\fP, \fI\%pcocc\-image(1)\fP, \fI\%pcocc\-docker(1)\fP, \fI\%pcocc\-nc(1)\fP, \fI\%pcocc\-reset(1)\fP, \fI\%pcocc\-save(1)\fP, \fI\%pcocc\-scp(1)\fP, \fI\%pcocc\-ssh(1)\fP, \fI\%pcocc\-template(1)\fP, \fI\%pcocc\-batch.yaml(5)\fP, \fI\%pcocc\-networks.yaml(5)\fP, \fI\%pcocc\-resources.yaml(5)\fP, \fI\%pcocc\-repos.yaml(5)\fP, \fI\%pcocc\-templates.yaml(5)\fP, \fI\%pcocc\-9pmount\-tutorial(7)\fP, \fI\%pcocc\-cloudconfig\-tutorial(7)\fP, \fI\%pcocc\-newvm\-tutorial(7)\fP
 .SH FOOTNOTES
 .IP [1] 5
-Local installation guide: /usr/share/doc/pcocc\-0.6.1/install.html
+Local installation guide: /usr/share/doc/pcocc\-0.7.0/install.html
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

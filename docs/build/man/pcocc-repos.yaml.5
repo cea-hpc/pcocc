@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-REPOS.YAML" "5" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-repos.yaml \- Image repositories configuration file
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-REPOS.YAML" "5" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-repos.yaml \- Image repositories configuration file
 .SH DESCRIPTION
 .sp
 \fB/etc/pcocc/repos.yaml\fP is a YAML formatted file describing object repositories used to store VM images. This configuration can be read from several locations. System\-wide definitions are read from \fB/etc/pcocc/repos.yaml\fP while user\-specific repositories are read from \fB$HOME/.pcocc/repos.yaml\fP\&. A user has access to images located in both his personal repositories and in system\-wide repositories.
@@ -41,13 +41,13 @@ The location of user configuration files, by default \fB$HOME/.pcocc\fP can be c
 .UNINDENT
 .UNINDENT
 .sp
-To learn how to interact with image repositories, please refer to the pcocc\-image(1) documentation.
+To learn how to interact with image repositories, please refer to the \fI\%pcocc\-image(1)\fP documentation.
 .SH SYNTAX
 .sp
 \fB/etc/pcocc/repos.yaml\fP contains a key/value mapping. At the top\-level a key named \fIrepos\fP is defined. The associated value is a list of repositories. Each repository is defined by a key/value mapping containing two keys: \fIpath\fP the path to a directory holding the repository and \fIname\fP the name associated with the repository. The \fIpath\fP must point to either an initialized repository or to a non\-existing directory which will be automatically created and initialized to an empty repository on first use.
 The repositories must appear in the list by order of priority: the first repository in the list is the first considered when looking up an image. Repositories defined in the user configuration file are considered before those defined in the system configuration file.
 .sp
-A second \fIoptional\fP key, \fIcache\fP, can be used to specify where pcocc should store its temporary artifacts related to containers. This entry is a key/value mapping defining a path where the cache should be located. If the target directory does not exist it is created. This directory \fIshould\fP be writable for the end\-user.
+A second \fIoptionnal\fP key \fIcache\fP can be used to specify where pcocc should store its temporary artifacts related to containers. This entry is a key/value mapping defining a path where the cache should be located. If the target directory does not exist it is created. This directory \fIshould\fP be writable for the end\-user.
 .SH SAMPLE CONFIGURATION FILE
 .sp
 This is the default configuration file for reference. Please note that indentation is significant in YAML:
@@ -75,7 +75,7 @@ cache:
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-image(1), pcocc\-template(1), pcocc\-templates.yaml(5),  pcocc\-newvm\-tutorial(7)
+\fI\%pcocc\-image(1)\fP, \fI\%pcocc\-template(1)\fP, \fI\%pcocc\-templates.yaml(5)\fP,  \fI\%pcocc\-newvm\-tutorial(7)\fP
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-TEMPLATES.YAML" "5" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-templates.yaml \- VM templates definition file
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-TEMPLATES.YAML" "5" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-templates.yaml \- VM templates definition file
 .SH DESCRIPTION
 .sp
 \fBtemplates.yaml\fP is a YAML formatted file defining VM templates that can be instantiated with pcocc. This configuration can be read from several locations. System\-wide definitions are read from \fB/etc/pcocc/templates.yaml\fP while user\-specific templates are read from \fB$HOME/.pcocc/templates.yaml\fP and from any file matching \fB$HOME/.pcocc/templates.d/*.yaml\fP\&. A user has access to both his personal templates and the system\-wide templates.
@@ -47,10 +47,10 @@ The \fBtemplates.yaml\fP file contains a key/value mapping. Each key represents 
 .INDENT 0.0
 .TP
 \fBimage\fP
-URI of a boot disk image in a pcocc repository. VMs instantiated from this template will boot from an ephemeral private copy of this image. See pcocc\-image(1) and pcocc\-newvm\-tutorial(7) for importing existing images and pcocc\-save(1) for creating new images or revisions from running VMs. In previous pcocc releases, images were stored in standalone directories. While still operational, this image format is considered as deprecated and support for these images will removed in a future version.
+URI of a boot disk image in a pcocc repository. VMs instantiated from this template will boot from an ephemeral private copy of this image. See \fI\%pcocc\-image(1)\fP and \fI\%pcocc\-newvm\-tutorial(7)\fP for importing existing images and \fI\%pcocc\-save(1)\fP for creating new images or revisions from running VMs. In previous pcocc releases, images were stored in standalone directories. While still operational, this image format is considered as deprecated and support for these images will removed in a future version.
 .TP
 \fBresource\-set\fP
-Resources to provide to VMs instantiated from this template. This must reference a resource set defined in resources.yaml\&.
+Resources to provide to VMs instantiated from this template. This must reference a resource set defined in \fI\%resources.yaml\fP\&.
 .TP
 \fBinherits\fP
 Name of a "parent" template from which to inherit parameters. Parameters defined in the template will override parameters inherited from the parent. User\-defined templates can inherit from other user\-defined templates or system\-wide templates. System\-wide templates can only inherit from other system\-wide templates.
@@ -59,13 +59,13 @@ Name of a "parent" template from which to inherit parameters. Parameters defined
 A string describing the VM template. This parameter is not inheritable.
 .TP
 \fBuser\-data\fP
-A cloud\-config file to configure a VM image with cloud\-init (see pcocc\-configvm\-tutorial(7))
+A cloud\-config file to configure a VM image with cloud\-init (see \fI\%pcocc\-cloudconfig\-tutorial(7)\fP)
 .TP
 \fBinstance\-id\fP
 Instance ID to provide to cloud\-init (defaults to a randomly generated uuid).
 .TP
 \fBmount\-points\fP
-A key/value mapping defining directories to export as 9p mount points (see pcocc\-9pmount\-tutorial(7)). Each key defines a 9p mount tag and the associated value defines the directory to export. The following parameters are supported:
+A key/value mapping defining directories to export as 9p mount points (see \fI\%pcocc\-9pmount\-tutorial(7)\fP). Each key defines a 9p mount tag and the associated value defines the directory to export. The following parameters are supported:
 .INDENT 7.0
 .INDENT 3.5
 .INDENT 0.0
@@ -197,7 +197,7 @@ example:
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-template(1), pcocc\-image(1), pcocc\-batch(1), pcocc\-alloc(1), pcocc\-save(1), pcocc\-resources.yaml(5), pcocc\-networks.yaml(5), pcocc\-newvm\-tutorial(7)
+\fI\%pcocc\-template(1)\fP, \fI\%pcocc\-image(1)\fP, \fI\%pcocc\-batch(1)\fP, \fI\%pcocc\-alloc(1)\fP, \fI\%pcocc\-save(1)\fP, \fI\%pcocc\-resources.yaml(5)\fP, \fI\%pcocc\-networks.yaml(5)\fP, \fI\%pcocc\-newvm\-tutorial(7)\fP
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-cloudconfig-tutorial \- How to configure cloud-init enabled VMs
 .
 .nr rst2man-indent-level 0
 .
@@ -30,10 +27,13 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-CLOUDCONFIG-TUTORIAL" "7" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-cloudconfig-tutorial \- How to configure cloud-init enabled VMs
 .sp
 This tutorial shows how to configure a cloud\-init enabled VM image, that is, a VM image where the cloud\-init service has been enabled to run a boot time. Cloud\-init is a multi\-distribution package that handles early initialization of a VM instance. It can perform various tasks such as configuring users and access credentials, installing packages or setting up mount points. These tasks are defined in a cloud\-config file that can be passed to a pcocc VM using the \fBuser\-data\fP template parameter.
 .sp
-Many distributions provide cloud\-init enabled VM images that you can easily import as pcocc templates. More information about downloading and importing these images can be found in pcocc\-newvm\-tutorial(7)\&.
+Many distributions provide cloud\-init enabled VM images that you can easily import as pcocc templates. More information about downloading and importing these images can be found in \fI\%pcocc\-newvm\-tutorial(7)\fP\&.
 .sp
 \fBNOTE:\fP
 .INDENT 0.0
@@ -61,7 +61,7 @@ mycentos:
 .sp
 Where \fB~/conf\fP is the cloud\-config file which will be passed to cloud\-init at VM boot.
 .sp
-Most cloud\-config directives are \fIper\-instance\fP, which means they are applied once per instanciated VM, when it first boots. This mechanism relies on the value of \fBinstance\-id\fP which defaults to a random uuid generated for each instanciated pcocc VM. Alternatively, the \fBinstance\-id\fP can be set to a fixed value in the VM template definition (see pcocc\-templates.yaml(5)). Each time cloud\-init runs, it records the current \fBinstance\-id\fP  in the VM filesysterm and only applies \fIper\-instance\fP directives if it differs from what was previously recorded.
+Most cloud\-config directives are \fIper\-instance\fP, which means they are applied once per instanciated VM, when it first boots. This mechanism relies on the value of \fBinstance\-id\fP which defaults to a random uuid generated for each instanciated pcocc VM. Alternatively, the \fBinstance\-id\fP can be set to a fixed value in the VM template definition (see \fI\%pcocc\-templates.yaml(5)\fP). Each time cloud\-init runs, it records the current \fBinstance\-id\fP  in the VM filesysterm and only applies \fIper\-instance\fP directives if it differs from what was previously recorded.
 .SH SETTING UP USER CREDENTIALS
 .sp
 With cloud\-init enabled VMs the first configuration task is often to define user credentials to login to the VM. This can be done with the following syntax:

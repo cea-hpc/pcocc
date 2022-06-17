@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-9PMOUNT-TUTORIAL" "7" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-9pmount-tutorial \- How to mount host directories in VMs
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-9PMOUNT-TUTORIAL" "7" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-9pmount-tutorial \- How to mount host directories in VMs
 .sp
 In this guide we detail how to mount host directories from VMs thank to 9p over virtio.
 .sp
@@ -41,7 +41,7 @@ CentOS and RHEL guests lack of built\-in support for the 9p filesystem in the ke
 .UNINDENT
 .SH DEFINING HOST DIRECTORIES TO EXPORT
 .sp
-First, you have to define host directories to export as mount\-points inside the VM template in templates.yaml\&.
+First, you have to define host directories to export as mount\-points inside the VM template in \fI\%templates.yaml\fP\&.
 .sp
 A mount\-point named \fIoptmount\fP for \fB/opt\fP can be defined as follows:
 .INDENT 0.0
@@ -94,7 +94,7 @@ mount \-t 9p \-o trans=virtio optmount /opt/ \-oversion=9p2000.L,msize=262144
 .sp
 The \fB/opt\fP directory from the host should now be mounted on \fB/opt\fP inside the guest. Note that Qemu act as the 9p server and performs the actual I/O on the host filesystem with the permissions of the user launching the virtual cluster.
 .sp
-To mount the directory automatically at boot time you may put it in your fstab. This can be done with the following cloud\-config snippet (see pcocc\-cloudconfig\-tutorial(7)):
+To mount the directory automatically at boot time you may put it in your fstab. This can be done with the following cloud\-config snippet (see \fI\%pcocc\-cloudconfig\-tutorial(7)\fP):
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -134,7 +134,7 @@ uid=1023(user1) gid=1023(user1) groups=1023(user1)
 .UNINDENT
 .UNINDENT
 .sp
-Therefore, you would need to create a \(aquser1\(aq in your VM with uid 1023. This may be done with the following cloud\-config snippet (see pcocc\-cloudconfig\-tutorial(7)):
+Therefore, you would need to create a \(aquser1\(aq in your VM with uid 1023. This may be done with the following cloud\-config snippet (see \fI\%pcocc\-cloudconfig\-tutorial(7)\fP):
 .INDENT 0.0
 .INDENT 3.5
 .sp

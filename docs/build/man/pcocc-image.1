@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-IMAGE" "1" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-image \- List and manage VM and Container images
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-IMAGE" "1" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-image \- List and manage VM and Container images
 .SH SYNOPSIS
 .sp
 pcocc image [COMMAND] [ARG]
@@ -37,7 +37,7 @@ pcocc image [COMMAND] [ARG]
 .sp
 List and manage virtual machine and container images.
 .sp
-All the subcommands of \fIpcocc image\fP operate on images stored in pcocc repositories. The list of pcocc repositories is defined in \fIrepos.yaml\fP (see pcocc\-repos.yaml(5)).
+All the subcommands of \fIpcocc image\fP operate on images stored in pcocc repositories. The list of pcocc repositories is defined in \fIrepos.yaml\fP (see \fI\%pcocc\-repos.yaml(5)\fP).
 .sp
 Images in repositories are uniquely identified by a name and revision number. In all pcocc commands and configuration files, images in repositories are specified with the following URI syntax: [REPO:]IMAGE[@REVISION]. If REPO is omitted the command will look in all defined repositories by order of priority until it finds a matching image. If REVISION is omitted, the highest revision of the image is selected.
 .sp
@@ -71,7 +71,7 @@ Export the source image file from a repository to the destination file.
 .UNINDENT
 .SS Supported file formats
 .sp
-The following VM image file formats can be imported or exported: \fIraw\fP, \fIqcow2\fP, \fIqed\fP, \fIvdi\fP, \fIvpc\fP, \fIvmdk\fP\&. By default, pcocc will try to guess the image format the filename extension, or from the image content if possible. It can be specified with the \-t option if needed.
+The following VM image file formats can be imported or exported: \fIraw\fP, \fIqcow2\fP, \fIqed\fP, \fIvdi\fP, \fIvpc\fP, \fIvmdk\fP\&. By default, pcocc will try to guess the image format from its filename extension, or from the image content if possible. It can be specified with the \-t option if needed.
 .INDENT 0.0
 .TP
 .B Container images can be imported / exported from remote Docker registries or local files by specifying them as follows:
@@ -232,7 +232,7 @@ pcocc image delete myrepo:centos7\-cloud
 .UNINDENT
 .SH SEE ALSO
 .sp
-pcocc\-save(1), pcocc\-repos.yaml(5), pcocc\-templates.yaml(5)
+\fI\%pcocc\-save(1)\fP, \fI\%pcocc\-repos.yaml(5)\fP, \fI\%pcocc\-templates.yaml(5)\fP
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

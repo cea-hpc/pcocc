@@ -1,8 +1,5 @@
 .\" Man page generated from reStructuredText.
 .
-.TH "PCOCC-SAVE" "1" "Oct 10, 2019" "0.6.1" "pcocc"
-.SH NAME
-pcocc-save \- Save the disk of a VM
 .
 .nr rst2man-indent-level 0
 .
@@ -30,6 +27,9 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
+.TH "PCOCC-SAVE" "1" "Jun 17, 2022" "0.7.0" "pcocc"
+.SH NAME
+pcocc-save \- Save the disk of a VM
 .SH SYNOPSIS
 .sp
 pcocc save [OPTIONS] [VM]
@@ -54,7 +54,7 @@ In previous releases, pcocc images were saved in standalone directories. While t
 .UNINDENT
 .SH RECOMMENDATIONS
 .sp
-Saving a running VM may lead to corruption if the filesystem is being accessed. To ensure a consistent filesystem image, pcocc tries to contact the Qemu guest agent in the VM to freeze the filesystems before creating a new image from this disk. Therefore, it is recommended to make sure that the qemu guest agent is running in the guest (see : pcocc\-newvm\-tutorial(7)).
+Saving a running VM may lead to corruption if the filesystem is being accessed. To ensure a consistent filesystem image, pcocc tries to contact the Qemu guest agent in the VM to freeze the filesystems before creating a new image from this disk. Therefore, it is recommended to make sure that the qemu guest agent is running in the guest (see : \fI\%pcocc\-newvm\-tutorial(7)\fP).
 .sp
 If pcocc cannot contact the agent, it will emit a warning message but it will try to save the VM anyway. If installing the agent is not possible, you should freeze the filesystems by hand or simply shutdown your VM before calling pcocc save. In a Linux guest, you can use, as root \fIshutdown \-H now\fP to shutdown a VM without powering it off (as you want to keep your resource allocation).
 .SH OPTIONS
@@ -121,7 +121,7 @@ REVISION    SIZE       CREATION DATE
 .UNINDENT
 .UNINDENT
 .sp
-The next VM instantiated with this image will use the new revision. You can undo saves by removing the latest revisions (see pcocc\-image(1)) or specify a specific revision in your template image URI.
+The next VM instantiated with this image will use the new revision. You can undo saves by removing the latest revisions (see \fI\%pcocc\-image(1)\fP) or specify a specific revision in your template image URI.
 .SS Create a new independent images
 .sp
 If you want to create a new image or do not have write permissions on the image repository used by your VM you can use the \fI\-d\fP flag to save to a new VM image:
@@ -156,7 +156,7 @@ mycentos:
 .UNINDENT
 .SH SEE ALSO
 .sp
-o:ref:\fIpcocc\-image(1)<image>\fP, pcocc\-templates.yaml(5), pcocc\-newvm\-tutorial(7), pcocc\-ckpt(1), pcocc\-dump(1)
+o:ref:\fIpcocc\-image(1)<image>\fP, \fI\%pcocc\-templates.yaml(5)\fP, \fI\%pcocc\-newvm\-tutorial(7)\fP, \fI\%pcocc\-ckpt(1)\fP, \fI\%pcocc\-dump(1)\fP
 .SH AUTHOR
 François Diakhaté
 .SH COPYRIGHT

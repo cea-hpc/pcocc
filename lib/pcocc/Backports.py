@@ -344,12 +344,12 @@ def which(cmd, mode=os.F_OK | os.X_OK, path=None):
         files = [cmd]
 
     seen = set()
-    for dir in path:
-        dir = os.path.normcase(dir)
-        if dir not in seen:
-            seen.add(dir)
+    for directory in path:
+        directory = os.path.normcase(directory)
+        if directory not in seen:
+            seen.add(directory)
             for thefile in files:
-                name = os.path.join(dir, thefile)
+                name = os.path.join(directory, thefile)
                 if _access_check(name, mode):
                     return name
     return None

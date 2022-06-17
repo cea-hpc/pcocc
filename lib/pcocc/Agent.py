@@ -281,11 +281,6 @@ class AgentCommand(object, metaclass=AgentCommandClass):
                         logging.warning("%s while reading from stdin, closing", str(e))
                         return
 
-                except select.error as e:
-                    if e.args[0] == errno.EBADF:
-                        data = None
-                    else:
-                        raise
                 if data:
                     yield agent_pb2.IOMessage(kind=agent_pb2.IOMessage.stdin,
                                               exec_id=execid,

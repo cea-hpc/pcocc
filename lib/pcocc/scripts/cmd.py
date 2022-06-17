@@ -181,13 +181,11 @@ def pcocc_help(command):
 @cli.group(hidden=True)
 def internal():
     """ For internal use """
-    pass
 
 
 @cli.group()
 def template():
     """ List and manage templates """
-    pass
 
 
 DEFAULT_SSH_OPTS = ['-o', 'UserKnownHostsFile=/dev/null', '-o',
@@ -1667,7 +1665,7 @@ def pcocc_tpl_show(template):
 
         try:
             tpl = config.tpls[template]
-        except KeyError as err:
+        except KeyError:
             click.secho('Template not found: ' + template, fg='red', err=True)
             sys.exit(-1)
 
@@ -1731,8 +1729,6 @@ def display_vmagent_error(index, err):
 @cli.group(hidden=True)
 def agent():
     """ Manage VMs through the pcocc agent """
-    pass
-
 
 @agent.command(name='run',
                short_help="Execute commands in VMs",
@@ -1949,13 +1945,11 @@ def pcocc_ping(jobid, jobname, indices, timeout, cluster):
 @cli.group()
 def image():
     """ List and manage images """
-    pass
 
 
 @image.group(name="repo")
 def img_repo():
     """ List and manage image repositories """
-    pass
 
 
 def print_repolist(rlist):
@@ -2202,7 +2196,6 @@ def pcocc_image_list(regex, repo):
 @image.group()
 def cache():
     """ Manage container image cache """
-    pass
 
 
 CACHEABLE_ITEMS = ["cached_squashfs",  "cached_bundle"]
@@ -2583,8 +2576,6 @@ def pcocc_run(jobid,
 @cli.group()
 def docker():
     """ Use a Docker daemon running in a VM """
-    pass
-
 
 
 @docker.command(name='import',

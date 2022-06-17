@@ -522,7 +522,7 @@ class TreeNodeRelay(object):
                                                     error=agent_pb2.GenericError(
                     kind=agent_pb2.GenericError.GenericError,
                     description=str(e)))
-        except grpc.FutureCancelledError as e:
+        except grpc.FutureCancelledError:
             # Again should not be necessary as the parent should be
             # cancelled too but just in case
             return agent_pb2.RouteMessageResult(source=command.destination,

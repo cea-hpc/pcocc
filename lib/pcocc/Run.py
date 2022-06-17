@@ -895,10 +895,10 @@ class Native(Runner):
         for k in self.env:
             env_prefix.append("{}={}".format(k, self.env[k]))
 
+        old_cwd = os.getcwd()
         try:
             if self.cwd:
                 # Set workdir
-                old_cwd = os.getcwd()
                 os.chdir(self.cwd)
 
             run_cmd = self.launcher + env_prefix + self.argv

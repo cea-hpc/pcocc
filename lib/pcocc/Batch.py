@@ -226,24 +226,19 @@ class BatchManager(object, metaclass=ABCMeta):
 
     def init_node(self):
         """Called on each node at the init step"""
-        pass
 
     def create_resources(self):
         """Called on each node at the resource creation step"""
-        pass
 
     def delete_resources(self, force=False):
         """Called on each node at the resource deletion step"""
-        pass
 
     def dump_resources(self):
         """Called on each node after resources have been created"""
-        pass
 
     @abstractmethod
     def vm_count(self):
         """Returns the number of VMs in the cluster"""
-        pass
 
     @property
     def task_rank(self):
@@ -1740,8 +1735,9 @@ class SlurmManager(EtcdManager):
             user_filter = []
 
         try:
-            joblist = subprocess_check_output(['squeue'] + user_filter +
-                                              ['-ho','%A %u %M %l %P %D %t %j']).decode().split("\n")
+            joblist = subprocess_check_output(
+                ['squeue'] + user_filter +
+                ['-ho','%A %u %M %l %P %D %t %j']).decode().split("\n")
         except subprocess.CalledProcessError as err:
             raise BatchError('Unable to retrieve SLURM job list: ' + str(err))
 

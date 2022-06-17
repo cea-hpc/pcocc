@@ -1260,7 +1260,7 @@ username={3}@pcocc
         try:
             version_string = subprocess_check_output(['lstopo-no-graphics',
                                                       '--version']).decode()
-        except (OSError, subprocess.CalledProcessError) as err:
+        except (OSError, subprocess.CalledProcessError):
             raise HypervisorError('hwloc (lstopo-no-graphics) is not available')
 
         match = re.search(r'lstopo-no-graphics (\d+)\.(\d+)', version_string)
@@ -1382,7 +1382,7 @@ username={3}@pcocc
                                            '-F', 'qcow2',
                                         '-b', image_path, snapshot_path],
                                           stdout=devnull)
-                except (OSError, subprocess.CalledProcessError) as err:
+                except (OSError, subprocess.CalledProcessError):
                     raise InvalidImageError('failed to create temporary disk')
 
 
@@ -1626,7 +1626,8 @@ username={3}@pcocc
                                         vm.rank)
                         logging.warning(err.output.decode())
                 else:
-                    logging.info('cloud-init CLI is not installed: skipping cloud-config validation')
+                    logging.info(
+                        'cloud-init CLI is not installed: skipping cloud-config validation')
 
 
             with open(os.devnull, 'w') as devnull:
@@ -2073,18 +2074,18 @@ username={3}@pcocc
                              "for copy: %s" % str(err))
 
         try:
-            cmd = """{"execute":"guest-file-open",
-                     "arguments":{"path":"{}",'
-                     "mode":"w+"}}\n\n""".format(dest_file)
+            cmd = """{{"execute":"guest-file-open",
+                     "arguments":{{"path":"{}",'
+                     "mode":"w+"}}}}\n\n""".format(dest_file)
             s_ctl.stdin.write(cmd.encode('utf-8'))
 
             data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
             handle = json.loads(data)["return"]
 
 
-            cmd = """{"execute":"guest-file-write",
-                      "arguments":{"handle":{},
-                      "buf-b64":"{}"}}""".format(handle, encoded_source.decode())
+            cmd = """{{"execute":"guest-file-write",
+                      "arguments":{{"handle":{},
+                      "buf-b64":"{}"}}}}""".format(handle, encoded_source.decode())
             s_ctl.stdin.write(cmd.encode('utf-8'))
 
             data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
@@ -2099,8 +2100,8 @@ username={3}@pcocc
             if eof:
                 raise AgentError("Unexepected EOF writing {0}".format(source_file))
 
-            cmd = """{"execute":"guest-file-close",
-                      "arguments":{"handle": {}}}""".format(handle)
+            cmd = """{{"execute":"guest-file-close",
+                      "arguments":{{"handle": {}}}}}""".format(handle)
             s_ctl.stdin.write(cmd.encode('utf-8'))
 
             data = os.read(s_ctl.stdout.fileno(), QMP_READ_SIZE).decode()
@@ -2230,7 +2231,7 @@ username={3}@pcocc
 
                     return retval
 
-                except (ValueError, KeyError) as err:
+                except (ValueError, KeyError):
                     if not data:
                         # Flush IO to prevent losing data
                         self._flush_outstanding_io(s_io)

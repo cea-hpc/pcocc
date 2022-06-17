@@ -169,7 +169,7 @@ required:
 
                 vm_label = self._vm_res_label(vm)
                 net_res[vm_label] = {'vf_addr': dev.dev_addr}
-            except Exception as e:
+            except Exception:
                 self.dump_resources(net_res)
                 raise
 

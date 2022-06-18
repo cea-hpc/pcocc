@@ -932,8 +932,8 @@ class LocalManager(EtcdManager):
         self.node_rank = 0
 
         # Define working directories
-        self.node_state_dir = '/tmp/.pcocc_%s_node' % (self.batchid)
-        self.vm_state_dir_prefix = '/tmp/.pcocc_%s_vm' % (self.batchid)
+        tmpdir = os.environ.get('PCOCC_TMPDIR', os.environ.get('TMPDIR', '/tmp'))
+        self.vm_state_dir_prefix = os.path.join(tmpdir, '.pcocc_%s_vm' % (self.batchid))
         self.cluster_state_dir = os.path.join(self.pcocc_state_dir,
                                               'job_%s' % (self.batchid))
 
@@ -1643,8 +1643,8 @@ class SlurmManager(EtcdManager):
                 raise InvalidJobError('no valid match for id '+ str(self.batchid))
 
         # Define working directories
-        self.node_state_dir = '/tmp/.pcocc_%s_node' % (self.batchid)
-        self.vm_state_dir_prefix = '/tmp/.pcocc_%s_vm' % (self.batchid)
+        tmpdir = os.environ.get('PCOCC_TMPDIR', os.environ.get('TMPDIR', '/tmp'))
+        self.vm_state_dir_prefix = os.path.join(tmpdir, '.pcocc_%s_vm' % (self.batchid))
         self.cluster_state_dir = os.path.join(self.pcocc_state_dir,
                                               'job_%s' % (self.batchid))
 

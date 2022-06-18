@@ -2640,11 +2640,13 @@ def docker_build(jobid, jobname, cluster, index, path, dest):
               help='Execute a script on the allocation node')
 @click.option('-T', '--docker-timeout', type=int,
               help='Time in seconds to wait for docker to start in the VM')
+@click.option('-t', '--template', type=str,
+              help='Template to use to spawn the docker VM')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
-def docker_alloc(alloc_script, docker_timeout, batch_options):
+def docker_alloc(alloc_script, docker_timeout, batch_options, template):
     try:
         config = load_config(process_type=ProcessType.OTHER)
-        pod = config.containers.config.docker_pod
+        pod = template or config.containers.config.docker_pod
 
         batch_options = list(batch_options)
 
@@ -2665,13 +2667,15 @@ def docker_alloc(alloc_script, docker_timeout, batch_options):
                 short_help="Spawn a Docker VM (batch mode)")
 @click.option('-E', '--host-script', type=click.File('r'),
               help='Launch a batch script on the first host')
+@click.option('-t', '--template', type=str,
+              help='Template to use to spawn the docker VM')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @docstring(batch_alloc_doc + batch_doc)
 def docker_batch(host_script,
-                 batch_options):
+                 batch_options, template):
     try:
         config = load_config(process_type=ProcessType.OTHER)
-        pod = config.containers.config.docker_pod
+        pod = template or config.containers.config.docker_pod
         batch_options = list(batch_options)
         # Hook to enable calling from other functions
         return _pcocc_batch(None,

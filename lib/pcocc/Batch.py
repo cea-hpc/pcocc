@@ -1819,6 +1819,10 @@ class SlurmManager(EtcdManager):
 
     def run(self, cluster, run_opt, cmd):
         """Launch the VM tasks"""
+        cpus_per_task = os.environ.get('SLURM_CPUS_PER_TASK', None)
+        if cpus_per_task:
+            os.environ['SRUN_CPUS_PER_TASK'] = cpus_per_task
+
         return subprocess.Popen(['srun'] + run_opt +
                                 ['--vm', cluster.resource_definition] +
                                 cmd)

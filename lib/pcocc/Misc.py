@@ -213,7 +213,7 @@ def systemd_notify(status, ready=False, watchdog=False):
     if watchdog:
         s = "WATCHDOG=1\n{0}".format(s)
 
-    sock.send(s)
+    sock.send(s.encode('ascii'))
     sock.close()
 
     return True

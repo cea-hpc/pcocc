@@ -1479,7 +1479,7 @@ class LocalManager(EtcdManager):
                 for rng in cores.split(','):
                     pus += [subprocess_check_output(['hwloc-calc',
                                                      '--intersect', 'PU', '--po',
-                                                     'cores:{}'.format(rng)]).decode().strip()]
+                                                     'core:{}'.format(rng)]).decode().strip()]
 
                 pus = ','.join(pus)
                 with open(os.path.join(self._cpuset_cluster(),

@@ -447,7 +447,7 @@ def getgrouplist(user, gid):
                                       POINTER(c_uint * int(ngrouplist.value)),
                                       POINTER(c_int)]
         grouplist = (c_uint * int(ngrouplist.value))()
-        ct = libc_getgrouplist(u.pw_name, u.pw_gid, byref(grouplist), byref(ngrouplist))
+        ct = libc_getgrouplist(bytes(u.pw_name, 'UTF-8'), u.pw_gid, byref(grouplist), byref(ngrouplist))
 
     r = grouplist[:ct]
     if  gid not in r:

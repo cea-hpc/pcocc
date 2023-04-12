@@ -627,8 +627,8 @@ class ContainerBundleView(ContainerView):
                     stdout, stderr = mksh.communicate()
                     ret = mksh.returncode
                     if ret != 0:
-                        sys.stdout.write(stdout)
-                        sys.stderr.write(stderr)
+                        sys.stdout.write(stdout.decode())
+                        sys.stderr.write(stderr.decode())
                         raise subprocess.CalledProcessError(ret, base_cmd)
             except (subprocess.CalledProcessError, OSError):
                 raise PcoccError("Failed to generate squashfs image")

@@ -241,7 +241,7 @@ class VFIODev(TrackableObject):
         uid = pwd.getpwnam(self._user).pw_uid
         # FIXME: This seems to be required to prevent a race
         # between char device creation and chown
-        time.sleep(0.1)
+        time.sleep(1)
         os.chown(os.path.join('/dev/vfio/', self._iommu_group), uid, -1)
 
     def _unbind_vfio(self):

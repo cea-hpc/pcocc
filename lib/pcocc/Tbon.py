@@ -51,11 +51,11 @@ def createKeyPair(key_type, bits):
 def getAltnameExtension(altnames):
     return [crypto.X509Extension(b"subjectAltName", True, ", ".join(altnames).encode())]
 
-def createCertRequest(pkey, digest="md5", altname=None, **name):
+def createCertRequest(pkey, digest="sha256", altname=None, ca=False, **name):
     """
     Create a certificate request.
     Arguments: pkey   - The key to associate with the request
-               digest - Digestion method to use for signing, default is md5
+               digest - Digestion method to use for signing, default is sha256
                altname - fields to add to the subjectAltName cert field
                **name - The name of the subject of the request, possible
                         arguments are:
@@ -78,15 +78,27 @@ def createCertRequest(pkey, digest="md5", altname=None, **name):
         req.add_extensions(
             getAltnameExtension(altname)
         )
+    if ca:
+        req.add_extensions([crypto.X509Extension(b"basicConstraints", False, b"CA:TRUE")])
+        req.add_extensions([crypto.X509Extension(b"keyUsage", False, b"keyCertSign")])
+    else:
+        req.add_extensions([
+            crypto.X509Extension(b"basicConstraints", False, b"CA:FALSE"),
+        ])
+        req.add_extensions([
+            crypto.X509Extension(b"extendedKeyUsage", False, b"serverAuth,clientAuth"),
+        ])
 
     req.set_pubkey(pkey)
+    req.set_version(2)
     req.sign(pkey, digest)
     return req
 
-def createCertificate(req, xxx_todo_changeme,
-                      serial, xxx_todo_changeme1,
-                      digest="sha1",
-                      altname=None):
+def createCertificate(req, issuer,
+                      serial, valid_interval,
+                      digest="sha256",
+                      altname=None,
+                      ca=False):
     """
     Generate a certificate given a certificate request.
     Arguments: req        - Certificate request to use
@@ -97,12 +109,12 @@ def createCertificate(req, xxx_todo_changeme,
                             starts being valid
                notAfter   - Timestamp (relative to now) when the certificate
                             stops being valid
-               digest     - Digest method to use for signing, default is sha1
+               digest     - Digest method to use for signing, default is sha256
                altname    - fields to add to the subjectAltName cert field
     Returns:   The signed certificate in an X509 object
     """
-    (issuerCert, issuerKey) = xxx_todo_changeme
-    (notBefore, notAfter) = xxx_todo_changeme1
+    (issuerCert, issuerKey) = issuer
+    (notBefore, notAfter) = valid_interval
     cert = crypto.X509()
     cert.set_serial_number(serial)
     cert.gmtime_adj_notBefore(notBefore)
@@ -114,7 +126,19 @@ def createCertificate(req, xxx_todo_changeme,
     # get_extensions call on the x509cert object
     if altname:
         cert.add_extensions(getAltnameExtension(altname))
+    if ca:
+        cert.add_extensions([crypto.X509Extension(b"basicConstraints", False, b"CA:TRUE")])
+        cert.add_extensions([crypto.X509Extension(b"keyUsage", False, b"keyCertSign, cRLSign")])
+    else:
+        cert.add_extensions([
+             crypto.X509Extension(b"basicConstraints", False, b"CA:FALSE"),
+        ])
+        cert.add_extensions([
+            crypto.X509Extension(b"extendedKeyUsage", False, b"serverAuth,clientAuth"),
+        ])
+
     cert.set_pubkey(req.get_pubkey())
+    cert.set_version(2)
     cert.sign(issuerKey, digest)
     return cert
 
@@ -176,8 +200,8 @@ class UserCA(Cert):
     def new(cls, key_size=2048, days=9999):
         logging.debug("Generating CA cert...")
         cakey = createKeyPair(crypto.TYPE_RSA, key_size)
-        careq = createCertRequest(cakey, CN='PcoccUserCA')
-        cacert = createCertificate(careq, (careq, cakey), 0, (0, 60*60*24*days))
+        careq = createCertRequest(cakey, CN='PcoccUserCA', ca=True)
+        cacert = createCertificate(careq, (careq, cakey), 0, (0, 60*60*24*days), ca=True)
 
         ca_key_data = crypto.dump_privatekey(crypto.FILETYPE_PEM, cakey)
         ca_cert_data = crypto.dump_certificate(crypto.FILETYPE_PEM, cacert)

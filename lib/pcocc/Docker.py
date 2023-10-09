@@ -213,7 +213,7 @@ def _gen_client_certs():
 
 def init_server_certs(vm):
     host = vm.get_host()
-    altname = ["IP:" + _resolve(host)]
+    altname = ["DNS:" + host, "IP:" + _resolve(host)]
     server_cert = _gen_server_certs(host, altname)
     dest = certs_dir("vm{}".format(vm.rank))
     _write_certs(dest, server_cert)

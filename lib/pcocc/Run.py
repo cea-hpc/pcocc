@@ -550,6 +550,7 @@ class VirtualMachine(Runner):
     def mount_rootfs(self, rangeset):
         # Check if the mount point is defined in all VM templates
         for i in rangeset:
+            i = int(i)
             if "host_rootfs_" not in self.cluster.vms[i].mount_points:
                 raise PcoccError("'host_rootfs_' is not defined as mountpoint"
                                  " in the VM template.")

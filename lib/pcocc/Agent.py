@@ -391,7 +391,11 @@ class AgentCommand(object, metaclass=AgentCommandClass):
 
     @staticmethod
     def filter_vms(indices, result):
-        return indices.difference(RangeSet(list(result.errors.keys())))
+        keys = result.errors.keys()
+        if keys:
+            return indices.difference(RangeSet(list(keys)))
+        else:
+            return indices
 
     @staticmethod
     def collect_output_bg(result_iterator,

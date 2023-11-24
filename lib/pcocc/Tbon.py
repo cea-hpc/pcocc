@@ -687,15 +687,15 @@ class TreeClient(object):
 
         return ex
     def command(self, dest, cmd, data, timeout):
-        logging.info("sending %s to %d", cmd, dest)
+        logging.info("sending %s to %d", cmd, int(dest))
         try:
-            grpc_message = agent_pb2.RouteMessage(destination=dest, name=cmd)
+            grpc_message = agent_pb2.RouteMessage(destination=int(dest), name=cmd)
             grpc_message.args.Pack(data)
 
         except Exception as e:
             return self._handle_route_result(cmd,
                                 agent_pb2.RouteMessageResult(
-                                    source=dest,
+                                    source=int(dest),
                                     error=agent_pb2.GenericError(
                                         kind=agent_pb2.GenericError.PayloadError,
                                         description="Unable to create message "

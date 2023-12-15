@@ -980,8 +980,11 @@ def pci_enable_driver(dev_addr, driver_name):
     with open(os.path.join(device_path, 'device'), 'r') as f:
         device_id=f.read()
 
-    with open(driver_path, 'w') as f:
-        f.write('{0} {1}'.format(vendor_id, device_id))
+    try:
+        with open(driver_path, 'w') as f:
+            f.write('{0} {1}'.format(vendor_id, device_id))
+    except FileExistsError:
+        pass
 
 def ibdev_enable_vf_driver(ibdev_name, driver_name):
     device_path = "/sys/class/infiniband/%s/device/virtfn0" % (ibdev_name)

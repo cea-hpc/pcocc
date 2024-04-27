@@ -1422,7 +1422,9 @@ def pcocc_launcher(restart_ckpt,
         s_exec = subprocess.Popen(shlex.split(alloc_script))
     else:
         shell_env = os.environ
-        shell_env['PROMPT_COMMAND'] = 'echo -n "(pcocc/%d) "' % (batch.batchid)
+        shell_env['PROMPT_COMMAND'] = ('if [[ "$_PCOCC_PROMPT_SET" != "yes" ]];'
+                                       'then PS1="(pcocc/%d) $PS1";'
+                                       '_PCOCC_PROMPT_SET=yes; fi' % (batch.batchid))
         shell_env['PCOCC_ALLOCATION'] = "1"
         shell = os.getenv('SHELL', default='bash')
         s_exec = subprocess.Popen(shell, env=shell_env)

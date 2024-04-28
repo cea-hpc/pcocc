@@ -1939,9 +1939,9 @@ username={3}@pcocc
                 cmdline += [ '-device',
                              'vhost-user-fs-pci,queue-size=1024,chardev=char_fs_{},tag={}'.format(
                                  i, mount)]
-                sp = subprocess.Popen(['sh', '-c', 'ulimit -n 80000 ; virtiofsd  --socket-path '
-                                       '{} --sandbox none --shared-dir {} --log-level warn'.format(
-                                           socket_path, host_path)], close_fds=True)
+                sp = subprocess.Popen(['virtiofsd', '--rlimit-nofile', '0', '--socket-path',
+                                        socket_path, '--sandbox', 'none', '--shared-dir', host_path],
+                                      close_fds=True)
                 atexit.register(try_kill, sp)
 
 

@@ -326,7 +326,7 @@ def pcocc_ssh(jobid, jobname, user, ssh_opts, port):
               help='Jobid of the selected cluster')
 @click.option('-J', '--jobname',
               help='Job name of the selected cluster')
-@click.option('-P','--port',
+@click.option('-P', '--port', type=int, default=22,
               help='Port to connect to on the remote host')
 @click.option('--user',
               help='Select cluster among jobs of the specified user')

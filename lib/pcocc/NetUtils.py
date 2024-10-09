@@ -823,6 +823,7 @@ class OVSBridge(NetDev):
                   'group_id={0},type=all'.format(group_id) + bucket])
 
     def add_port(self, dev_name):
+        self.run_in_ns(["ovs-vsctl", "--if-exists", "del-port", dev_name])
         self.run_in_ns(["ovs-vsctl", "--may-exist", "add-port",
                         self._name, dev_name])
         return self.get_port_id(dev_name)
@@ -905,6 +906,11 @@ class TAP(NetDev):
                 cmd.append("pvid")
                 cmd.append("untagged")
             subprocess.check_call(cmd)
+
+    def delete(self):
+        self.run_in_ns(["ovs-vsctl", "--if-exists", "del-port", self._name])
+        self.run_in_ns(['ip', 'link', 'del', self._name])
+
 
 class IBVFType(object):
     MLX4 = 1

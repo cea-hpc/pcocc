@@ -487,8 +487,11 @@ def vm_name_to_index(name):
               help='Save a full image in a standalone layer',
               default=False,
               is_flag=True)
+@click.option('-i', '--drive-index', type=int,
+              help='Specify drive index to save',
+              default=0)
 @click.argument('vm', nargs=1, default='vm0')
-def pcocc_save(jobid, jobname, dest, vm, safe, full):
+def pcocc_save(jobid, jobname, dest, vm, safe, full, drive_index):
     """Save the main drive of a VM
 
     By default the output file only contains the differences between
@@ -509,8 +512,10 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
         drives = vm.block_drives
         if not drives:
             raise PcoccError('VM has no drive to save')
+        if drive_index < 0 or drive_index >= len(drives):
+            raise PcoccError('Provided drive index (' + str(drive_index) + ') is invalid')
 
-        drive = drives[0]
+        drive = drives[drive_index]
 
         # For now we only support full backups for persistent drives
         if drive['persistent']:
@@ -538,8 +543,8 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
             dest = drive['image']
 
         if not dest:
-            raise PcoccError('No default target image to save VM main drive. '
-                             'Please use specify one with --dest')
+            raise PcoccError('No default target image to save VM drive. '
+                             'Please specify one with --dest')
 
         if drive['type'] == DRIVE_IMAGE_TYPE.REPO:
             save_path = config.images.prepare_vm_import(dest)
@@ -562,7 +567,7 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full):
 
         ret = save_drive(cluster,
                          [vm.rank],
-                         ['drive0'],
+                         ['drive'+str(drive_index)],
                          [save_path],
                          mode,
                          freeze_opt,

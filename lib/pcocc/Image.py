@@ -133,11 +133,6 @@ class VMImage(object):
             str -- the type of the VM image
 
         """
-        if not os.path.isfile(path):
-            raise PcoccError("{} is not an image file".format(path))
-        if not os.access(path, os.R_OK):
-            raise PcoccError("{} is not readable".format(path))
-
         try:
             jsdata = subprocess.check_output(["qemu-img",
                                               "info",
@@ -145,14 +140,13 @@ class VMImage(object):
                                               "--output=json",
                                               path])
         except subprocess.CalledProcessError:
-            return None
+            raise PcoccError("Failed to open {} with qemu-img".format(path))
 
         try:
             data = json.loads(jsdata)
+            return data["format"]
         except Exception:
-            return None
-
-        return data.get("format", None)
+            return PcoccError("Failed to parse qemu-img info output for {}".format(path))
 
     @staticmethod
     def backing_file(path, full=False):

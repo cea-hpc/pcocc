@@ -47,7 +47,7 @@ from . import Docker
 
 from abc import ABCMeta
 from ClusterShell.NodeSet  import RangeSet
-from .Backports import subprocess_check_output, enum, which
+from .Backports import subprocess_check_output, enum
 from .Error import PcoccError
 from .Config import Config
 from .Misc import fake_signalfd, wait_or_term_child
@@ -1616,19 +1616,7 @@ username={3}@pcocc
                 shutil.copyfile('/dev/null', user_data_file)
 
             if user_data:
-                if which("cloud-init"):
-                    try:
-                        subprocess.check_output(['cloud-init', 'devel', 'schema',
-                                                 '--config-file', user_data_file],
-                                                stderr=subprocess.STDOUT)
-                    except subprocess.CalledProcessError as err:
-                        logging.warning('Failed to validate cloud-config file for vm %d',
-                                        vm.rank)
-                        logging.warning(err.output.decode())
-                else:
-                    logging.info(
-                        'cloud-init CLI is not installed: skipping cloud-config validation')
-
+                validate_user_data(vm, user_data_file)
 
             with open(os.devnull, 'w') as devnull:
                 subprocess.check_call(['genisoimage',
@@ -1940,7 +1928,7 @@ username={3}@pcocc
                              'vhost-user-fs-pci,queue-size=1024,chardev=char_fs_{},tag={}'.format(
                                  i, mount)]
                 sp = subprocess.Popen(['virtiofsd', '--rlimit-nofile', '0', '--socket-path',
-                                        socket_path, '--sandbox', 'none', '--shared-dir', host_path],
+                                       socket_path, '--sandbox', 'none', '--shared-dir', host_path],
                                       close_fds=True)
                 atexit.register(try_kill, sp)
 
@@ -2470,3 +2458,26 @@ def checkpoint_mem_file(vm, ckpt_dir):
 
 def checkpoint_img_file(vm, ckpt_dir):
     return os.path.join(ckpt_dir,'disk-vm{}'.format(vm.rank))
+
+def validate_user_data(vm, user_data_file):
+    try:
+        subprocess.check_call(['cloud-init', 'schema', '-h'],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        logging.info(
+         'cloud-init CLI is not available: skipping cloud-config validation')
+        return
+    except subprocess.CalledProcessError:
+        logging.info(
+            'cloud-init CLI does not support the schema subcommand: '
+            'skipping cloud-config validation')
+        return
+
+    try:
+        subprocess.check_output(['cloud-init', 'schema',
+                                 '--config-file', user_data_file],
+                                stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as err:
+        logging.warning('Failed to validate cloud-config file for vm %d',
+                        vm.rank)
+        logging.warning(err.output.decode())

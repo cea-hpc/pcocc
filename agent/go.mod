@@ -9,5 +9,5 @@ require (
 	github.com/golang/protobuf v1.3.2
 	github.com/kr/pty v1.1.8
 	github.com/onrik/logrus v0.4.1
-	github.com/sirupsen/logrus v1.4.2
+	github.com/sirupsen/logrus v1.8.3
 )

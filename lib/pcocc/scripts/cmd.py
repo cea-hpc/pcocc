@@ -1395,7 +1395,9 @@ def pcocc_launcher(restart_ckpt,
     batch.write_key("cluster/user", "resource_definition", cluster.resource_definition)
     batch.write_key("cluster/user", "definition", cluster_definition)
 
-    batch.write_key("cluster/user", "ca_cert", UserCA.new().dump_yaml())
+    batch.write_key("global/user",
+                    "clusters/{0}/ca_cert".format(batch.batchid),
+                    UserCA.new().dump_yaml())
 
     if docker:
         Docker.init_client_certs()

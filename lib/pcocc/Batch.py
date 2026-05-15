@@ -822,6 +822,10 @@ class EtcdManager(BatchManager):
                                      None, dir=True, prevExist=True, ttl=600)
             self.keyval_client.write(self.get_key_path('cluster/user', ''),
                                      None, dir=True, prevExist=True, ttl=600)
+            self.keyval_client.write(self.get_key_path(
+                                         'global/user',
+                                         'clusters/{0}'.format(self.batchid)),
+                                     None, dir=True, prevExist=True, ttl=600)
         except:
             logging.warning('Failed to cleanup cluster etcd keystore')
 
@@ -835,8 +839,10 @@ class EtcdManager(BatchManager):
 
         """
         if not self._ca_cert:
-            self._ca_cert = UserCA.load_yaml(Config().batch.read_key('cluster/user', 'ca_cert',
-                                                                     blocking=True))
+            self._ca_cert = UserCA.load_yaml(Config().batch.read_key(
+                'global/user',
+                'clusters/{0}/ca_cert'.format(self.batchid),
+                blocking=True))
         return self._ca_cert
 
     @property

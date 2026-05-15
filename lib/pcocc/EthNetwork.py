@@ -342,12 +342,41 @@ additionalProperties: false
                 # For remote VMs, create a tunnel to the remote host if needed
                 host = vm.get_host()
                 if host not in host_tunnels:
+                    remote_addr = "{0}{1}".format(host, self._host_if_suffix)
+                    expected_tun_src = resolve_host(remote_addr)
                     tunnel_port_id = int_br.add_tunnel(
                         '{0}_{1}'.format(int_br.name, len(host_tunnels)),
                         "vxlan",
-                        "{0}{1}".format(host, self._host_if_suffix),
+                        remote_addr,
                         key_id)
                     host_tunnels[host] = tunnel_port_id
+
+                    # Tunnel ingress validation: only accept VXLAN packets
+                    # whose outer source IP matches the configured peer.
+                    # Mirrors the classifier's ARP/L3/L2 branches at high
+                    # priority so valid traffic is classified normally, and
+                    # drops anything else on this in_port.
+                    int_br.add_flow(table=self._classifier_table, priority=2000,
+                                    match='in_port={0},tun_src={1},'
+                                          'dl_type=0x0806,arp_op=0x1'.format(
+                                        tunnel_port_id, expected_tun_src),
+                                    action='goto_table={0}'.format(
+                                        self._arp_table))
+                    int_br.add_flow(table=self._classifier_table, priority=2000,
+                                    match='in_port={0},tun_src={1},'
+                                          'dl_dst={2}'.format(
+                                        tunnel_port_id, expected_tun_src,
+                                        self._int_br_hwaddr),
+                                    action='goto_table={0}'.format(
+                                        self._l3_forward_table))
+                    int_br.add_flow(table=self._classifier_table, priority=1999,
+                                    match='in_port={0},tun_src={1}'.format(
+                                        tunnel_port_id, expected_tun_src),
+                                    action='goto_table={0}'.format(
+                                        self._l2_forward_table))
+                    int_br.add_flow(table=self._classifier_table, priority=1998,
+                                    match='in_port={0}'.format(tunnel_port_id),
+                                    action='drop')
 
                     remote_ports.append(tunnel_port_id)
                     # Deliver remote broadcasts from this tunnel to local VMs

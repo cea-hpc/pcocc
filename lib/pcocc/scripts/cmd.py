@@ -1105,6 +1105,69 @@ def gen_user_data_opt(user_data):
         return []
 
 
+_MOUNT_TAG_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+
+
+def parse_mount_spec(spec):
+    """Parse a --mount spec of the form 'tag=path[,opt=val,...]'.
+
+    Returns (tag, {'path': ..., 'type': ..., 'readonly': ...}).
+    """
+    parts = spec.split(',')
+    head = parts[0]
+    if '=' not in head:
+        raise PcoccError(
+            "invalid --mount spec '%s': expected 'tag=path[,opt=val,...]'"
+            % spec)
+    tag, path = head.split('=', 1)
+    if not _MOUNT_TAG_RE.match(tag):
+        raise PcoccError(
+            "invalid --mount tag '%s': must match [A-Za-z0-9_-]+" % tag)
+    if not path:
+        raise PcoccError("invalid --mount spec '%s': empty path" % spec)
+
+    mount = {'path': path}
+    for opt in parts[1:]:
+        if '=' not in opt:
+            raise PcoccError(
+                "invalid --mount option '%s': expected key=value" % opt)
+        k, v = opt.split('=', 1)
+        if k == 'type':
+            if v not in ('virtio-9p', 'virtio-fs'):
+                raise PcoccError(
+                    "invalid --mount type '%s': must be virtio-9p or virtio-fs"
+                    % v)
+            mount['type'] = v
+        elif k == 'readonly':
+            if v.lower() in ('true', '1', 'yes'):
+                mount['readonly'] = True
+            elif v.lower() in ('false', '0', 'no'):
+                mount['readonly'] = False
+            else:
+                raise PcoccError(
+                    "invalid --mount readonly '%s': must be true or false" % v)
+        else:
+            raise PcoccError("unknown --mount option '%s'" % k)
+
+    return tag, mount
+
+
+def gen_mount_opts(mounts):
+    """Build raw argv pairs for forwarding --mount specs to another pcocc command."""
+    opts = []
+    for m in mounts:
+        opts += ['--mount', m]
+    return opts
+
+
+def gen_mount_shell_opts(mounts):
+    """Build shell-safe --mount opts for interpolation into a bash wrapper script."""
+    opts = []
+    for m in mounts:
+        opts += ['--mount', shlex.quote(m)]
+    return opts
+
+
 def gen_ckpt_opt(restart_ckpt):
     if restart_ckpt:
         return ['-r', restart_ckpt]
@@ -1132,6 +1195,10 @@ def get_license_opts(cluster):
               help='Launch a batch script on the first host')
 @click.option('--user-data', type=click.Path(exists=True),
               help='Override the user-data property of the templates')
+@click.option('--mount', 'mounts', multiple=True,
+              metavar='TAG=PATH[,type=virtio-9p|virtio-fs][,readonly=true|false]',
+              help='Add a virtio-9p or virtio-fs mount to every VM '
+                   '(may be repeated). Overrides template mounts with the same tag.')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
 @docstring(batch_alloc_doc + batch_doc)
@@ -1139,6 +1206,7 @@ def pcocc_batch(restart_ckpt,
                 batch_script,
                 host_script,
                 user_data,
+                mounts,
                 batch_options,
                 cluster_definition):
     # Hook to enable calling from other functions
@@ -1146,6 +1214,7 @@ def pcocc_batch(restart_ckpt,
                         batch_script,
                         host_script,
                         user_data,
+                        mounts,
                         batch_options,
                         cluster_definition)
 
@@ -1154,6 +1223,7 @@ def _pcocc_batch(restart_ckpt,
                  batch_script,
                  host_script,
                  user_data,
+                 mounts,
                  batch_options,
                  cluster_definition,
                  docker=False,
@@ -1170,6 +1240,9 @@ def _pcocc_batch(restart_ckpt,
         docker_opt = ["--docker"] if docker else []
         mirror_opt = ["-m"] if mirror_user else []
         user_data_opt = gen_user_data_opt(user_data)
+        for spec in mounts:
+            parse_mount_spec(spec)
+        mount_opts = gen_mount_shell_opts(mounts)
 
         (wrpfile, wrpname) = tempfile.mkstemp()
         wrpfile = os.fdopen(wrpfile, 'w')
@@ -1209,7 +1282,7 @@ chmod u+x "$TEMP_HOST_SCRIPT"
 
         wrpfile.write(
 """
-PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s %s %s &
+PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s %s %s %s &
 trap "kill -15 $!; echo Signal received, waiting for pcocc to exit; SIGNAL=1" SIGTERM SIGINT
 while true; do
   SIGNAL=0
@@ -1232,6 +1305,7 @@ exit $RET
             ' '.join(docker_opt),
             ' '.join(mirror_opt),
             ' '.join(user_data_opt),
+            ' '.join(mount_opts),
             cluster_definition))
 
         wrpfile.close()
@@ -1255,18 +1329,24 @@ exit $RET
               help='Execute a script on the allocation node')
 @click.option('--user-data', type=click.Path(exists=True),
               help='Override the user-data property of the templates')
+@click.option('--mount', 'mounts', multiple=True,
+              metavar='TAG=PATH[,type=virtio-9p|virtio-fs][,readonly=true|false]',
+              help='Add a virtio-9p or virtio-fs mount to every VM '
+                   '(may be repeated). Overrides template mounts with the same tag.')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
 @docstring(batch_alloc_doc + alloc_doc)
 def pcocc_alloc(restart_ckpt,
                 alloc_script,
                 user_data,
+                mounts,
                 batch_options,
                 cluster_definition):
     # Hook to enable calling from other functions
     return _pcocc_alloc(restart_ckpt,
                         alloc_script,
                         user_data,
+                        mounts,
                         batch_options,
                         cluster_definition)
 
@@ -1274,6 +1354,7 @@ def pcocc_alloc(restart_ckpt,
 def _pcocc_alloc(restart_ckpt,
                  alloc_script,
                  user_data,
+                 mounts,
                  batch_options,
                  cluster_definition,
                  docker=False,
@@ -1294,13 +1375,16 @@ def _pcocc_alloc(restart_ckpt,
         mirror_opt = ["-m"] if mirror_user else []
         alloc_opt = gen_alloc_script_opt(alloc_script)
         user_data_opt = gen_user_data_opt(user_data)
+        for spec in mounts:
+            parse_mount_spec(spec)
+        mount_opts = gen_mount_opts(mounts)
         ret = config.batch.alloc(cluster,
                                  batch_options + get_license_opts(cluster) +
                                  ['-n', '%d' % (len(cluster.vms))],
                                  ['pcocc'] + Config().verbose_opt +
                                  ['internal', 'launcher'] + docker_opt +
                                  mirror_opt + alloc_opt + user_data_opt +
-                                 ckpt_opt + [cluster_definition])
+                                 mount_opts + ckpt_opt + [cluster_definition])
 
     except PcoccError as err:
         handle_error(err)
@@ -1321,6 +1405,9 @@ def _pcocc_alloc(restart_ckpt,
               help='Run a script on the allocation node and exit')
 @click.option('--user-data', type=click.Path(exists=True),
               help='Override the user-data property of the templates')
+@click.option('--mount', 'mounts', multiple=True,
+              help='Add a virtio-9p or virtio-fs mount to every VM '
+                   '(may be repeated).')
 @click.option('--docker', is_flag=True,
               help='Instruct to setup the Docker daemon environment')
 @click.option('-m', '--mirror-user', is_flag=True,
@@ -1331,6 +1418,7 @@ def pcocc_launcher(restart_ckpt,
                    script,
                    alloc_script,
                    user_data,
+                   mounts,
                    docker,
                    mirror_user,
                    cluster_definition):
@@ -1380,7 +1468,7 @@ def pcocc_launcher(restart_ckpt,
                        ['pcocc'] +
                        Config().verbose_opt +
                        ['internal', 'run'] + docker_opt + gen_user_data_opt(user_data) +
-                       ckpt_opt)
+                       gen_mount_opts(mounts) + ckpt_opt)
     try:
         cluster.wait_host_config()
     except PcoccError as err:
@@ -1522,7 +1610,10 @@ def clean_exit(sig, frame):
               help='Instruct to setup the Docker daemon environment')
 @click.option('--user-data', type=click.Path(exists=True),
               help='Override the user-data property of the templates')
-def pcocc_internal_run(restart_ckpt, docker, user_data):
+@click.option('--mount', 'mounts', multiple=True,
+              help='Add a virtio-9p or virtio-fs mount to every VM '
+                   '(may be repeated).')
+def pcocc_internal_run(restart_ckpt, docker, user_data, mounts):
     signal.signal(signal.SIGINT, clean_exit)
     signal.signal(signal.SIGTERM, clean_exit)
 
@@ -1531,6 +1622,11 @@ def pcocc_internal_run(restart_ckpt, docker, user_data):
         cluster = load_batch_cluster()
 
         cluster.load_node_resources()
+
+        if mounts:
+            extra_mounts = dict(parse_mount_spec(s) for s in mounts)
+            for vm in cluster.vms:
+                vm.mount_points.update(extra_mounts)
 
         if restart_ckpt:
             return cluster.run(ckpt_dir=restart_ckpt, docker=docker)
@@ -2664,6 +2760,7 @@ def docker_alloc(alloc_script, docker_timeout, batch_options, template):
         return _pcocc_alloc(None,
                             alloc_script,
                             None,
+                            (),
                             batch_options,
                             pod + ":1",
                             docker=True,
@@ -2693,6 +2790,7 @@ def docker_batch(host_script,
                             None,
                             host_script,
                             None,
+                            (),
                             batch_options,
                             pod,
                             docker=True,

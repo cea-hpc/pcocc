@@ -28,6 +28,9 @@ Options
   -E, \-\-alloc-script [SCRIPT]
             Execute a script on the allocation node
 
+  \-\-mount TAG=PATH[,type=virtio-9p|virtio-fs][,readonly=true|false]
+            Export a host directory as a 9p or virtio-fs mount point on every VM of the cluster (see :ref:`pcocc-9pmount-tutorial(7)<9pmount>`). May be specified multiple times. Type defaults to *virtio-9p* and readonly defaults to *false*. A mount with the same tag in the template is overridden.
+
   -h, \-\-help
             Show this message and exit.
 

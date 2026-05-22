@@ -228,6 +228,10 @@ class VM(object):
         return self._template.machine_type
 
     @property
+    def cpu_model(self):
+        return self._template.cpu_model
+
+    @property
     def disk_model(self):
         return self._template.disk_model
 

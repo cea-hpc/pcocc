@@ -64,6 +64,8 @@ Template parameters
   Model of Qemu virtual Ethernet network card to provide to VMs (defaults to "virtio-net").
 **machine-type**
   Type of Qemu machine to emulate (defaults to "pc").
+**cpu-model**
+  Qemu CPU model to expose to VMs (defaults to "host", which mirrors the host CPU and requires KVM). Set to a portable model such as "qemu64" when running without KVM or when host-CPU passthrough is undesirable.
 **disk-model**
   Model of Qemu virtual drive to provide to VMs. Valid parameters are *virtio* (default), *virtio-scsi* or *ide*.
 **emulator-cores**
@@ -130,6 +132,9 @@ This is a sample template definition. Please note that indentation is significan
 
           #  Model of Ethernet cards (default: virtio-net)
           nic-model: 'e1000'
+
+          # Qemu CPU model to expose to VMs (default: host)
+          cpu-model: 'qemu64'
 
           # Reserved cores for Qemu emulation (default: 0)
           emulator-cores: 2

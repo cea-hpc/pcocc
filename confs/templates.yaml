@@ -22,6 +22,9 @@
 #   #  Model of Ethernet cards (default: virtio-net)
 #   #  nic-model: e1000
 
+#   #  Qemu CPU model to expose to VMs (default: host)
+#   #  cpu-model: qemu64
+
 # # Second template
 # example2:
 #   # Disk image directory

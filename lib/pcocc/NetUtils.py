@@ -705,11 +705,17 @@ class NetDev(TrackableObject):
         self.run_in_ns(cmd + ["dev", self._name])
 
     def add_ip_idemp(self, ip, bits):
-        try:
-            self.add_ip(ip, bits)
-        except subprocess.CalledProcessError as err:
-            if err.output.decode() != "RTNETLINK answers: File exists\n":
-                raise
+        """Add an IP address idempotently using "ip addr replace".
+
+        iproute2's "replace" subcommand is the kernel-supported idempotent
+        variant of "add": it succeeds whether the address already exists
+        or not.  This removes the need to match brittle, localized error
+        strings such as "RTNETLINK answers: File exists" across iproute2
+        versions.
+        """
+        self.run_output_in_ns(['ip', 'addr', 'replace',
+                               '{0}/{1}'.format(ip, bits),
+                               'dev', self._name], mixed=True)
 
     def set_hwaddr(self, hwaddr):
         self.run_in_ns(["ip", "link", "set", self._name, "address", hwaddr])

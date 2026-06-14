@@ -506,6 +506,17 @@ def pcocc_save(jobid, jobname, dest, vm, safe, full, drive_index):
     try:
         config = load_config(jobid, jobname, default_batchname='pcocc')
         cluster = load_batch_cluster()
+
+        # A CLI --image override is not reflected in the stored cluster
+        # definition, so the backing image resolved here would not match the
+        # one the VM actually booted from. Saving (especially an incremental
+        # layer) against the wrong backing image silently corrupts the result.
+        if config.batch.read_key('cluster/user', 'image_override'):
+            raise PcoccError(
+                'this cluster was launched with a CLI --image override; '
+                'saving its drives is disabled because the overridden '
+                'backing image cannot be tracked reliably')
+
         index = vm_name_to_index(vm)
         vm = cluster.vms[index]
 
@@ -1105,7 +1116,7 @@ def gen_user_data_opt(user_data):
         return []
 
 
-_MOUNT_TAG_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 
 
 def parse_mount_spec(spec):
@@ -1120,7 +1131,7 @@ def parse_mount_spec(spec):
             "invalid --mount spec '%s': expected 'tag=path[,opt=val,...]'"
             % spec)
     tag, path = head.split('=', 1)
-    if not _MOUNT_TAG_RE.match(tag):
+    if not _NAME_RE.match(tag):
         raise PcoccError(
             "invalid --mount tag '%s': must match [A-Za-z0-9_-]+" % tag)
     if not path:
@@ -1168,6 +1179,65 @@ def gen_mount_shell_opts(mounts):
     return opts
 
 
+def parse_image_spec(spec):
+    """Parse an --image spec of the form '[TPL=]IMAGE'.
+
+    Without a 'TPL=' qualifier the override applies to every template of the
+    cluster (only unambiguous for a single-template definition). Returns
+    (tpl_name_or_None, image_ref).
+    """
+    if '=' in spec:
+        tpl, image = spec.split('=', 1)
+        if not _NAME_RE.match(tpl):
+            raise PcoccError(
+                "invalid --image template '%s': must match [A-Za-z0-9_-]+"
+                % tpl)
+    else:
+        tpl, image = None, spec
+    if not image:
+        raise PcoccError("invalid --image spec '%s': empty image" % spec)
+    return tpl, image
+
+
+def gen_image_opts(images):
+    """Build raw argv pairs for forwarding --image specs to another pcocc command."""
+    opts = []
+    for i in images:
+        opts += ['--image', i]
+    return opts
+
+
+def gen_image_shell_opts(images):
+    """Build shell-safe --image opts for interpolation into a bash wrapper script."""
+    opts = []
+    for i in images:
+        opts += ['--image', shlex.quote(i)]
+    return opts
+
+
+def validate_image_specs(images, cluster):
+    """Frontend validation for --image overrides against a parsed cluster.
+
+    Catches bad syntax, unknown template qualifiers and ambiguous bare specs
+    before a job is submitted. The override itself is applied later, on the
+    compute node, in `pcocc internal run`.
+    """
+    if not images:
+        return
+    tpl_names = set(vm.template_name for vm in cluster.vms)
+    for spec in images:
+        tpl, _ = parse_image_spec(spec)
+        if tpl is None:
+            if len(tpl_names) > 1:
+                raise PcoccError(
+                    "--image '%s' is ambiguous for a multi-template cluster; "
+                    "qualify it as --image TPL=IMAGE" % spec)
+        elif tpl not in tpl_names:
+            raise PcoccError(
+                "--image template '%s' is not part of the cluster definition"
+                % tpl)
+
+
 def gen_ckpt_opt(restart_ckpt):
     if restart_ckpt:
         return ['-r', restart_ckpt]
@@ -1199,6 +1269,11 @@ def get_license_opts(cluster):
               metavar='TAG=PATH[,type=virtio-9p|virtio-fs][,readonly=true|false]',
               help='Add a virtio-9p or virtio-fs mount to every VM '
                    '(may be repeated). Overrides template mounts with the same tag.')
+@click.option('--image', 'images', multiple=True,
+              metavar='[TPL=]IMAGE',
+              help='Override the boot image of a template (may be repeated). '
+                   'The TPL= qualifier is required for multi-template '
+                   'clusters. An overridden cluster cannot be saved.')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
 @docstring(batch_alloc_doc + batch_doc)
@@ -1207,6 +1282,7 @@ def pcocc_batch(restart_ckpt,
                 host_script,
                 user_data,
                 mounts,
+                images,
                 batch_options,
                 cluster_definition):
     # Hook to enable calling from other functions
@@ -1215,6 +1291,7 @@ def pcocc_batch(restart_ckpt,
                         host_script,
                         user_data,
                         mounts,
+                        images,
                         batch_options,
                         cluster_definition)
 
@@ -1224,6 +1301,7 @@ def _pcocc_batch(restart_ckpt,
                  host_script,
                  user_data,
                  mounts,
+                 images,
                  batch_options,
                  cluster_definition,
                  docker=False,
@@ -1243,6 +1321,8 @@ def _pcocc_batch(restart_ckpt,
         for spec in mounts:
             parse_mount_spec(spec)
         mount_opts = gen_mount_shell_opts(mounts)
+        validate_image_specs(images, cluster)
+        image_opts = gen_image_shell_opts(images)
 
         (wrpfile, wrpname) = tempfile.mkstemp()
         wrpfile = os.fdopen(wrpfile, 'w')
@@ -1282,7 +1362,7 @@ chmod u+x "$TEMP_HOST_SCRIPT"
 
         wrpfile.write(
 """
-PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s %s %s %s &
+PYTHONUNBUFFERED=true pcocc %s internal launcher %s %s %s %s %s %s %s %s &
 trap "kill -15 $!; echo Signal received, waiting for pcocc to exit; SIGNAL=1" SIGTERM SIGINT
 while true; do
   SIGNAL=0
@@ -1306,6 +1386,7 @@ exit $RET
             ' '.join(mirror_opt),
             ' '.join(user_data_opt),
             ' '.join(mount_opts),
+            ' '.join(image_opts),
             cluster_definition))
 
         wrpfile.close()
@@ -1333,6 +1414,11 @@ exit $RET
               metavar='TAG=PATH[,type=virtio-9p|virtio-fs][,readonly=true|false]',
               help='Add a virtio-9p or virtio-fs mount to every VM '
                    '(may be repeated). Overrides template mounts with the same tag.')
+@click.option('--image', 'images', multiple=True,
+              metavar='[TPL=]IMAGE',
+              help='Override the boot image of a template (may be repeated). '
+                   'The TPL= qualifier is required for multi-template '
+                   'clusters. An overridden cluster cannot be saved.')
 @click.argument('batch-options', nargs=-1, type=click.UNPROCESSED)
 @click.argument('cluster-definition', nargs=1)
 @docstring(batch_alloc_doc + alloc_doc)
@@ -1340,6 +1426,7 @@ def pcocc_alloc(restart_ckpt,
                 alloc_script,
                 user_data,
                 mounts,
+                images,
                 batch_options,
                 cluster_definition):
     # Hook to enable calling from other functions
@@ -1347,6 +1434,7 @@ def pcocc_alloc(restart_ckpt,
                         alloc_script,
                         user_data,
                         mounts,
+                        images,
                         batch_options,
                         cluster_definition)
 
@@ -1355,6 +1443,7 @@ def _pcocc_alloc(restart_ckpt,
                  alloc_script,
                  user_data,
                  mounts,
+                 images,
                  batch_options,
                  cluster_definition,
                  docker=False,
@@ -1378,13 +1467,16 @@ def _pcocc_alloc(restart_ckpt,
         for spec in mounts:
             parse_mount_spec(spec)
         mount_opts = gen_mount_opts(mounts)
+        validate_image_specs(images, cluster)
+        image_opts = gen_image_opts(images)
         ret = config.batch.alloc(cluster,
                                  batch_options + get_license_opts(cluster) +
                                  ['-n', '%d' % (len(cluster.vms))],
                                  ['pcocc'] + Config().verbose_opt +
                                  ['internal', 'launcher'] + docker_opt +
                                  mirror_opt + alloc_opt + user_data_opt +
-                                 mount_opts + ckpt_opt + [cluster_definition])
+                                 mount_opts + image_opts + ckpt_opt +
+                                 [cluster_definition])
 
     except PcoccError as err:
         handle_error(err)
@@ -1408,6 +1500,8 @@ def _pcocc_alloc(restart_ckpt,
 @click.option('--mount', 'mounts', multiple=True,
               help='Add a virtio-9p or virtio-fs mount to every VM '
                    '(may be repeated).')
+@click.option('--image', 'images', multiple=True,
+              help='Override the boot image of a template (may be repeated).')
 @click.option('--docker', is_flag=True,
               help='Instruct to setup the Docker daemon environment')
 @click.option('-m', '--mirror-user', is_flag=True,
@@ -1419,6 +1513,7 @@ def pcocc_launcher(restart_ckpt,
                    alloc_script,
                    user_data,
                    mounts,
+                   images,
                    docker,
                    mirror_user,
                    cluster_definition):
@@ -1468,7 +1563,7 @@ def pcocc_launcher(restart_ckpt,
                        ['pcocc'] +
                        Config().verbose_opt +
                        ['internal', 'run'] + docker_opt + gen_user_data_opt(user_data) +
-                       gen_mount_opts(mounts) + ckpt_opt)
+                       gen_mount_opts(mounts) + gen_image_opts(images) + ckpt_opt)
     try:
         cluster.wait_host_config()
     except PcoccError as err:
@@ -1479,6 +1574,16 @@ def pcocc_launcher(restart_ckpt,
         handle_error(PcoccError('Cluster launch was interrupted'))
 
     logging.debug("Hypervisors are running")
+
+    # Record CLI image overrides BEFORE the cluster definition so any
+    # command that observes the definition (notably `pcocc save`, which uses
+    # `read_key('cluster/user', 'definition', blocking=True)`) cannot see a
+    # definition without seeing the override marker as well. The override is
+    # applied in-memory by `internal run` and is not reflected in the stored
+    # definition, so without the marker `save` would re-resolve the template
+    # to the wrong backing image.
+    if images:
+        batch.write_key("cluster/user", "image_override", "\n".join(images))
 
     batch.write_key("cluster/user", "resource_definition", cluster.resource_definition)
     batch.write_key("cluster/user", "definition", cluster_definition)
@@ -1613,7 +1718,9 @@ def clean_exit(sig, frame):
 @click.option('--mount', 'mounts', multiple=True,
               help='Add a virtio-9p or virtio-fs mount to every VM '
                    '(may be repeated).')
-def pcocc_internal_run(restart_ckpt, docker, user_data, mounts):
+@click.option('--image', 'images', multiple=True,
+              help='Override the boot image of a template (may be repeated).')
+def pcocc_internal_run(restart_ckpt, docker, user_data, mounts, images):
     signal.signal(signal.SIGINT, clean_exit)
     signal.signal(signal.SIGTERM, clean_exit)
 
@@ -1627,6 +1734,15 @@ def pcocc_internal_run(restart_ckpt, docker, user_data, mounts):
             extra_mounts = dict(parse_mount_spec(s) for s in mounts)
             for vm in cluster.vms:
                 vm.mount_points.update(extra_mounts)
+
+        if images:
+            # This process is dedicated to this cluster and short-lived, so
+            # mutating the (shared) template object in place is harmless.
+            specs = [parse_image_spec(s) for s in images]
+            for vm in cluster.vms:
+                for tpl, image in specs:
+                    if tpl is None or tpl == vm.template_name:
+                        vm.override_image(image)
 
         if restart_ckpt:
             return cluster.run(ckpt_dir=restart_ckpt, docker=docker)
@@ -2761,6 +2877,7 @@ def docker_alloc(alloc_script, docker_timeout, batch_options, template):
                             alloc_script,
                             None,
                             (),
+                            (),
                             batch_options,
                             pod + ":1",
                             docker=True,
@@ -2790,6 +2907,7 @@ def docker_batch(host_script,
                             None,
                             host_script,
                             None,
+                            (),
                             (),
                             batch_options,
                             pod,

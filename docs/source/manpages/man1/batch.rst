@@ -33,6 +33,9 @@ Options
     \-\-mount TAG=PATH[,type=virtio-9p|virtio-fs][,readonly=true|false]
               Export a host directory as a 9p or virtio-fs mount point on every VM of the cluster (see :ref:`pcocc-9pmount-tutorial(7)<9pmount>`). May be specified multiple times. Type defaults to *virtio-9p* and readonly defaults to *false*. A mount with the same tag in the template is overridden.
 
+    \-\-image [TPL=]IMAGE
+              Override the boot image of a template for this job only. The *TPL=* qualifier selects which template to override and is required when the cluster definition uses more than one template. May be specified multiple times. The override is not recorded in the cluster definition, so a cluster started this way cannot be saved with :ref:`pcocc-save(1)<save>`.
+
     -h, \-\-help
               Show this message and exit.
 

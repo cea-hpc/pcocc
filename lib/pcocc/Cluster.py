@@ -149,6 +149,19 @@ class VM(object):
         return self._template.image_type(self)
 
     @property
+    def template_name(self):
+        return self._template.name
+
+    def override_image(self, image):
+        """Replace the boot image of this VM's template.
+
+        Used by `pcocc internal run` to apply a CLI --image override. The
+        image kind (repository vs directory) is re-derived from the new
+        value, so this transparently switches between the two.
+        """
+        self._template.settings['image'] = image
+
+    @property
     def image(self):
         return self._template.image
 

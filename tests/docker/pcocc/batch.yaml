@@ -1,0 +1,7 @@
+type: slurm
+settings:
+  etcd-servers:
+    - etcd
+  etcd-client-port: 2379
+  etcd-protocol: http
+  etcd-auth-type: none

@@ -1,0 +1,8 @@
+# Minimal test template. The image is a tiny placeholder qcow2 baked into the
+# image at /var/pcocc/images/test/image; pcocc templating works without ever
+# booting the VM (used by `pcocc template list`, `pcocc template show`, etc.).
+test-tpl:
+  image: /var/pcocc/images/test
+  resource-set: default
+  cpu-model: qemu64
+  description: Minimal placeholder template for integration tests

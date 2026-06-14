@@ -1,0 +1,86 @@
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.4.34
+    hostname: etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd
+      - --data-dir=/var/lib/etcd
+      - --enable-v2=true
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "endpoint", "health", "--endpoints=http://127.0.0.1:2379"]
+      start_period: "30s"
+      start_interval: "1s"
+
+  slurmctld:
+    image: pcocc-dev/slurmctld
+    build:
+      context: .
+      dockerfile: tests/docker/Dockerfile
+      target: slurmctld
+    stop_signal: SIGKILL
+    hostname: slurmctld
+    privileged: true
+    cgroup: private
+    devices:
+      - /dev/fuse
+    volumes:
+      - ./:/pcocc:ro
+      - ./tests/docker/pcocc:/etc/pcocc:ro
+    healthcheck: &scontrol_ping
+      test: ["CMD", "scontrol", "ping"]
+      start_period: "60s"
+      start_interval: "1s"
+    depends_on:
+      - node1000
+      - node1001
+      - etcd
+
+  login:
+    image: pcocc-dev/slurm-login
+    build:
+      context: .
+      dockerfile: tests/docker/Dockerfile
+      target: slurm-login
+    stop_signal: SIGKILL
+    hostname: login
+    privileged: true
+    cgroup: private
+    devices:
+      - /dev/fuse
+    volumes:
+      - shared-home:/home/user
+      - ./:/pcocc:ro
+      - ./tests/docker/pcocc:/etc/pcocc:ro
+    healthcheck: *scontrol_ping
+    depends_on:
+      - etcd
+
+  node1000: &compute_node
+    image: pcocc-dev/slurm-compute
+    build:
+      context: .
+      dockerfile: tests/docker/Dockerfile
+      target: slurm-compute
+    stop_signal: SIGKILL
+    hostname: node1000
+    privileged: true
+    cgroup: private
+    devices:
+      - /dev/fuse
+      - /dev/kvm
+      - /dev/net/tun
+    volumes:
+      - shared-home:/home/user
+      - ./:/pcocc:ro
+      - ./tests/docker/pcocc:/etc/pcocc:ro
+    depends_on:
+      - etcd
+  node1001:
+    <<: *compute_node
+    hostname: node1001
+
+volumes:
+  shared-home:

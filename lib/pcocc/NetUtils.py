@@ -477,7 +477,10 @@ class NetNameSpace(TrackableObject):
     def create(self):
         self.run(["ip", "netns", "add", self._name])
         self._log_create()
-        self.run(["ip", "netns", "exec", self._name,
+        # nsenter (rather than `ip netns exec`) so that we don't remount
+        # /sys, which the kernel refuses in a child user namespace and
+        # would break us under rootless container runtimes.
+        self.run(["nsenter", "--net=/run/netns/" + self._name, "--",
                   'ip', 'link', 'set', 'dev', 'lo', 'up'])
         return self
 
@@ -671,7 +674,7 @@ class NetDev(TrackableObject):
     def run_in_ns(self, cmd, quiet=False, err_quiet=False):
         prefix = []
         if self._netns:
-            prefix = ['ip', 'netns', 'exec', self._netns]
+            prefix = ['nsenter', '--net=/run/netns/' + self._netns, '--']
 
         return self.run(prefix + cmd, quiet, err_quiet)
 
@@ -679,7 +682,7 @@ class NetDev(TrackableObject):
     def run_output_in_ns(self, cmd, mixed=False):
         prefix = []
         if self._netns:
-            prefix = ['ip', 'netns', 'exec', self._netns]
+            prefix = ['nsenter', '--net=/run/netns/' + self._netns, '--']
 
         return self.run_output(prefix + cmd, mixed)
 

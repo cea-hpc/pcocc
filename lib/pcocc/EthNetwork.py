@@ -716,7 +716,7 @@ additionalProperties: false
         Config().tracker.create_with_ref(Config().batch.batchid,
                                          PidDaemon(pid_file))
         subprocess.check_call(
-            shlex.split("ip netns exec {netns} /usr/sbin/dnsmasq "
+            shlex.split("nsenter --net=/run/netns/{netns} -- /usr/sbin/dnsmasq "
                         "--dhcp-authoritative "
                         "--pid-file={pid_file} "
                         "--conf-file= "

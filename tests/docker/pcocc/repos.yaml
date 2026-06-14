@@ -1,0 +1,5 @@
+repos:
+  - name: user
+    path: "%{homedir}/.pcocc/images"
+cache:
+  path: "%{homedir}/.pcocc/cache"

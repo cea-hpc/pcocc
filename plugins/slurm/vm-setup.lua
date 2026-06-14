@@ -77,9 +77,12 @@ function replicate_var(spank, slurm_name, env_name)
 end
 
 
-function replicate_env(spank, slurm_name, env_name)
+function replicate_env(spank, slurm_name, env_name, optional)
    local val, msg = spank:getenv (slurm_name)
    if val == nil then
+      if optional then
+         return 0
+      end
       SPANK.log_error("Faile to get env %s: %s", slurm_name, msg)
       return 1
    end
@@ -96,7 +99,9 @@ function replicate_slurm_vars (spank)
      r = r + replicate_var(spank, "S_JOB_ID", "SLURM_JOB_ID")
      r = r + replicate_var(spank, "S_JOB_UID", "SLURM_JOB_UID")
      r = r + replicate_env(spank, "SLURM_STEP_TASKS_PER_NODE", "SLURM_TASKS_PER_NODE")
-     r = r + replicate_env(spank, "PCOCC_REQUEST_CRED", "SPANK_PCOCC_REQUEST_CRED")
+     -- PCOCC_REQUEST_CRED is only set by the launcher when etcd-auth-type
+     -- is "password"; absence is fine for "none"/"munge" deployments.
+     r = r + replicate_env(spank, "PCOCC_REQUEST_CRED", "SPANK_PCOCC_REQUEST_CRED", true)
 
      r = r + setenv("SPANK_PCOCC_SETUP", vm_option)
 

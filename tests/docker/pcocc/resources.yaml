@@ -1,0 +1,4 @@
+default:
+  networks:
+    - nat-rssh
+  default: True
